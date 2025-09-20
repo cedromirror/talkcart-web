@@ -1,0 +1,77 @@
+import React from 'react';
+import { Volume2, VolumeX } from 'lucide-react';
+
+/**
+ * Get volume icon based on muted state
+ */
+export const getVolumeIcon = (
+  muted: boolean, 
+  volume?: number, 
+  size: number = 20
+): React.ReactElement => {
+  if (muted || volume === 0) {
+    return React.createElement(VolumeX, { size });
+  }
+  
+  return React.createElement(Volume2, { size });
+};
+
+/**
+ * Get volume tooltip text
+ */
+export const getVolumeTooltip = (muted: boolean, volume?: number): string => {
+  if (muted || volume === 0) {
+    return 'Unmute';
+  }
+  
+  return 'Mute';
+};
+
+/**
+ * Format video duration
+ */
+export const formatDuration = (seconds: number): string => {
+  if (!seconds || seconds < 0) return '0:00';
+  
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainingSeconds = Math.floor(seconds % 60);
+  
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+  }
+  
+  return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+};
+
+/**
+ * Get video quality label
+ */
+export const getQualityLabel = (width?: number, height?: number): string => {
+  if (!width || !height) return 'Unknown';
+  
+  if (height >= 2160) return '4K';
+  if (height >= 1440) return '2K';
+  if (height >= 1080) return 'HD';
+  if (height >= 720) return 'HD';
+  if (height >= 480) return 'SD';
+  
+  return 'Low';
+};
+
+/**
+ * Calculate video aspect ratio
+ */
+export const getAspectRatio = (width?: number, height?: number): number => {
+  if (!width || !height) return 16 / 9; // Default aspect ratio
+  
+  return width / height;
+};
+
+/**
+ * Check if video format is supported
+ */
+export const isVideoFormatSupported = (format: string): boolean => {
+  const supportedFormats = ['mp4', 'webm', 'ogg', 'mov', 'avi'];
+  return supportedFormats.includes(format.toLowerCase());
+};

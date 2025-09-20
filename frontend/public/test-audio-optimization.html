@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Optimization Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+
+        .success {
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+        }
+
+        .error {
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+        }
+
+        .info {
+            background-color: #d1ecf1;
+            border-color: #bee5eb;
+        }
+
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+
+        pre {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 3px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+        }
+
+        .log {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            background-color: #f8f9fa;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🎵🎬 Media Optimization Test</h1>
+        <p>This page tests both audio and video optimization functionality that was just fixed.</p>
+
+        <div class="test-section info">
+            <h3>Test Configuration</h3>
+            <p><strong>Frontend:</strong> http://localhost:4000</p>
+            <p><strong>Backend:</strong> http://localhost:8000</p>
+            <p><strong>Audio API:</strong> /api/media/audio/optimized</p>
+            <p><strong>Video API:</strong> /api/media/video/optimized</p>
+        </div>
+
+        <div class="test-section">
+            <h3>Audio Test Controls</h3>
+            <button onclick="testAudioOptimization()">🎵 Test Audio Optimization</button>
+            <button onclick="testAudioWithDifferentParams()">🔧 Test Audio Parameters</button>
+            <button onclick="testAudioErrorHandling()">❌ Test Audio Errors</button>
+        </div>
+
+        <div class="test-section">
+            <h3>Video Test Controls</h3>
+            <button onclick="testVideoOptimization()">🎬 Test Video Optimization</button>
+            <button onclick="testWebMToMP4Conversion()">🔄 Test WebM → MP4 Fix</button>
+            <button onclick="testVideoWithDifferentParams()">🔧 Test Video Parameters</button>
+            <button onclick="testVideoErrorHandling()">❌ Test Video Errors</button>
+        </div>
+
+        <div class="test-section">
+            <h3>General Controls</h3>
+            <button onclick="clearLog()">🗑️ Clear Log</button>
+        </div>
+
+        <div class="test-section">
+            <h3>Test Results</h3>
+            <div id="log" class="log"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>Expected Behavior</h3>
+            <ul>
+                <li>✅ API requests should go through Next.js proxy (/api → localhost:8000/api)</li>
+                <li>✅ JSON body should be parsed correctly by the backend</li>
+                <li>✅ Cloudinary URLs should be generated with proper transformations</li>
+                <li>✅ WebM videos should be convertible to MP4 format</li>
+                <li>✅ Error handling should provide meaningful messages</li>
+                <li>✅ Caching should work for repeated requests</li>
+            </ul>
+        </div>
+
+        <div class="test-section info">
+            <h3>🔧 WebM Connection Reset Fix</h3>
+            <p><strong>Problem:</strong> <code>net::ERR_CONNECTION_RESET</code> when accessing WebM videos</p>
+            <p><strong>Solution:</strong> Convert WebM to MP4 using the video optimization endpoint</p>
+            <p><strong>Example:</strong></p>
+            <pre>Original: https://res.cloudinary.com/.../file_123.webm
+Optimized: https://res.cloudinary.com/.../ac_aac,fl_streaming_attachment,q_auto,vc_h264/file_123.mp4</pre>
+        </div>
+    </div>
+
+    <script>
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.innerHTML = `<strong>[${timestamp}]</strong> ${message}`;
+            logEntry.style.color = type === 'error' ? 'red' : type === 'success' ? 'green' : 'black';
+            logDiv.appendChild(logEntry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+
+        async function testAudioOptimization() {
+            log('🧪 Starting audio optimization test...', 'info');
+
+            try {
+                const testData = {
+                    publicId: 'sample-audio-file',
+                    format: 'mp3',
+                    quality: 'auto'
+                };
+
+                log(`📤 Sending request: ${JSON.stringify(testData)}`, 'info');
+
+                const response = await fetch('/api/media/audio/optimized', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        // Note: In real app, this would come from auth context
+                        'Authorization': 'Bearer mock-token-for-testing'
+                    },
+                    body: JSON.stringify(testData)
+                });
+
+                log(`📥 Response status: ${response.status}`, response.status === 200 ? 'success' : 'error');
+
+                const result = await response.json();
+                log(`📥 Response data: ${JSON.stringify(result, null, 2)}`, 'info');
+
+                if (response.status === 200 && result.success) {
+                    log('✅ Audio optimization test PASSED!', 'success');
+                    log(`🔗 Generated URL: ${result.data.optimized_url}`, 'success');
+                } else {
+                    log('❌ Audio optimization test FAILED!', 'error');
+                }
+
+            } catch (error) {
+                log(`❌ Test failed with error: ${error.message}`, 'error');
+            }
+        }
+
+        async function testAudioWithDifferentParams() {
+            log('🔧 Testing with different parameters...', 'info');
+
+            const testCases = [
+                { publicId: 'test-audio-1', format: 'wav', quality: 'high' },
+                { publicId: 'test-audio-2', format: 'ogg', quality: 'low' },
+                { publicId: 'test-audio-3', format: 'aac', quality: 'medium' }
+            ];
+
+            for (const testCase of testCases) {
+                try {
+                    log(`📤 Testing: ${JSON.stringify(testCase)}`, 'info');
+
+                    const response = await fetch('/api/media/audio/optimized', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': 'Bearer mock-token-for-testing'
+                        },
+                        body: JSON.stringify(testCase)
+                    });
+
+                    const result = await response.json();
+
+                    if (response.status === 200 && result.success) {
+                        log(`✅ ${testCase.format}/${testCase.quality} test PASSED`, 'success');
+                    } else {
+                        log(`❌ ${testCase.format}/${testCase.quality} test FAILED`, 'error');
+                    }
+
+                } catch (error) {
+                    log(`❌ Error testing ${testCase.format}: ${error.message}`, 'error');
+                }
+            }
+        }
+
+        async function testAudioErrorHandling() {
+            log('❌ Testing error handling...', 'info');
+
+            const errorTestCases = [
+                { description: 'Missing publicId', data: { format: 'mp3' } },
+                { description: 'Invalid format', data: { publicId: 'test', format: 'invalid' } },
+                { description: 'Empty request', data: {} }
+            ];
+
+            for (const testCase of errorTestCases) {
+                try {
+                    log(`📤 Testing error case: ${testCase.description}`, 'info');
+
+                    const response = await fetch('/api/media/audio/optimized', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': 'Bearer mock-token-for-testing'
+                        },
+                        body: JSON.stringify(testCase.data)
+                    });
+
+                    const result = await response.json();
+
+                    if (response.status >= 400) {
+                        log(`✅ Error handling for "${testCase.description}" works correctly`, 'success');
+                        log(`📥 Error response: ${JSON.stringify(result)}`, 'info');
+                    } else {
+                        log(`❌ Expected error for "${testCase.description}" but got success`, 'error');
+                    }
+
+                } catch (error) {
+                    log(`❌ Unexpected error testing "${testCase.description}": ${error.message}`, 'error');
+                }
+            }
+        }
+
+        // Video optimization tests
+        async function testVideoOptimization() {
+            log('🎬 Starting video optimization test...', 'info');
+
+            try {
+                const testData = {
+                    publicId: 'sample-video-file',
+                    format: 'mp4',
+                    quality: 'auto'
+                };
+
+                log(`📤 Sending video request: ${JSON.stringify(testData)}`, 'info');
+
+                const response = await fetch('/api/media/video/optimized', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer mock-token-for-testing'
+                    },
+                    body: JSON.stringify(testData)
+                });
+
+                log(`📥 Response status: ${response.status}`, response.status === 200 ? 'success' : 'error');
+
+                const result = await response.json();
+                log(`📥 Response data: ${JSON.stringify(result, null, 2)}`, 'info');
+
+                if (response.status === 200 && result.success) {
+                    log('✅ Video optimization test PASSED!', 'success');
+                    log(`🔗 Generated URL: ${result.data.optimized_url}`, 'success');
+                } else {
+                    log('❌ Video optimization test FAILED!', 'error');
+                }
+
+            } catch (error) {
+                log(`❌ Video test failed with error: ${error.message}`, 'error');
+            }
+        }
+
+        async function testWebMToMP4Conversion() {
+            log('🔄 Testing WebM to MP4 conversion (the actual fix)...', 'info');
+
+            try {
+                // Use the actual problematic public ID from the error
+                const problematicPublicId = 'talkcart/file_1758099848871_r0xjw4sp58';
+
+                const testData = {
+                    publicId: problematicPublicId,
+                    format: 'mp4',
+                    quality: 'auto'
+                };
+
+                log(`📤 Converting WebM to MP4: ${problematicPublicId}`, 'info');
+                log(`📤 Request: ${JSON.stringify(testData)}`, 'info');
+
+                const response = await fetch('/api/media/video/optimized', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer mock-token-for-testing'
+                    },
+                    body: JSON.stringify(testData)
+                });
+
+                const result = await response.json();
+                log(`📥 Response status: ${response.status}`, response.status === 200 ? 'success' : 'error');
+
+                if (response.status === 200 && result.success) {
+                    log('✅ WebM to MP4 conversion SUCCESSFUL!', 'success');
+                    log('🔗 Original problematic WebM URL:', 'info');
+                    log('   https://res.cloudinary.com/dhlukxpxe/video/upload/v1758099863/talkcart/file_1758099848871_r0xjw4sp58.webm', 'info');
+                    log('🔗 New working MP4 URL:', 'success');
+                    log(`   ${result.data.optimized_url}`, 'success');
+                    log('🎯 SOLUTION: Replace WebM URLs with optimized MP4 URLs to fix connection reset errors!', 'success');
+                } else {
+                    log('❌ WebM to MP4 conversion FAILED!', 'error');
+                    log(`Error: ${JSON.stringify(result)}`, 'error');
+                }
+
+            } catch (error) {
+                log(`❌ WebM conversion test failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function testVideoWithDifferentParams() {
+            log('🔧 Testing video with different parameters...', 'info');
+
+            const testCases = [
+                { publicId: 'test-video-1', format: 'mp4', quality: 'high', width: 720, height: 480 },
+                { publicId: 'test-video-2', format: 'webm', quality: 'medium' },
+                { publicId: 'test-video-3', format: 'mp4', quality: 'low', width: 480 }
+            ];
+
+            for (const testCase of testCases) {
+                try {
+                    log(`📤 Testing video: ${JSON.stringify(testCase)}`, 'info');
+
+                    const response = await fetch('/api/media/video/optimized', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': 'Bearer mock-token-for-testing'
+                        },
+                        body: JSON.stringify(testCase)
+                    });
+
+                    const result = await response.json();
+
+                    if (response.status === 200 && result.success) {
+                        log(`✅ ${testCase.format}/${testCase.quality} video test PASSED`, 'success');
+                        log(`🔗 URL: ${result.data.optimized_url}`, 'info');
+                    } else {
+                        log(`❌ ${testCase.format}/${testCase.quality} video test FAILED`, 'error');
+                    }
+
+                } catch (error) {
+                    log(`❌ Error testing video ${testCase.format}: ${error.message}`, 'error');
+                }
+            }
+        }
+
+        async function testVideoErrorHandling() {
+            log('❌ Testing video error handling...', 'info');
+
+            const errorTestCases = [
+                { description: 'Missing publicId', data: { format: 'mp4' } },
+                { description: 'Invalid format', data: { publicId: 'test', format: 'invalid' } },
+                { description: 'Invalid quality', data: { publicId: 'test', format: 'mp4', quality: 'invalid' } }
+            ];
+
+            for (const testCase of errorTestCases) {
+                try {
+                    log(`📤 Testing video error case: ${testCase.description}`, 'info');
+
+                    const response = await fetch('/api/media/video/optimized', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': 'Bearer mock-token-for-testing'
+                        },
+                        body: JSON.stringify(testCase.data)
+                    });
+
+                    const result = await response.json();
+
+                    if (response.status >= 400) {
+                        log(`✅ Video error handling for "${testCase.description}" works correctly`, 'success');
+                        log(`📥 Error response: ${JSON.stringify(result)}`, 'info');
+                    } else {
+                        log(`❌ Expected error for "${testCase.description}" but got success`, 'error');
+                    }
+
+                } catch (error) {
+                    log(`❌ Unexpected error testing "${testCase.description}": ${error.message}`, 'error');
+                }
+            }
+        }
+
+        // Auto-run basic test on page load
+        window.addEventListener('load', () => {
+            log('🚀 Media Optimization Test Page Loaded', 'success');
+            log('Click "Test Audio Optimization" or "Test Video Optimization" to run tests', 'info');
+            log('🎯 Use "Test WebM → MP4 Fix" to test the specific connection reset solution', 'info');
+        });
+    </script>
+</body>
+
+</html>

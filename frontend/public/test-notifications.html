@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Call Notification Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: #fafafa;
+        }
+        .test-section h3 {
+            margin-top: 0;
+            color: #555;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        .permission-status {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 10px 0;
+            padding: 10px;
+            background: white;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+        .permission-granted {
+            color: #28a745;
+            font-weight: bold;
+        }
+        .permission-denied {
+            color: #dc3545;
+            font-weight: bold;
+        }
+        .permission-default {
+            color: #ffc107;
+            font-weight: bold;
+        }
+        .emergency-stop {
+            background: #dc3545 !important;
+            font-size: 18px;
+            font-weight: bold;
+            padding: 15px 30px;
+        }
+        .emergency-stop:hover {
+            background: #c82333 !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔔 Call Notification System Test</h1>
+        
+        <div class="test-section">
+            <h3>📋 Permission Status</h3>
+            <div id="permission-status"></div>
+            <button onclick="requestPermissions()">Request All Permissions</button>
+        </div>
+
+        <div class="test-section">
+            <h3>🔊 Individual Component Tests</h3>
+            <button onclick="testRingtone()">Test Ringtone (5s)</button>
+            <button onclick="testVibration()">Test Vibration</button>
+            <button onclick="testNotification()">Test Notification</button>
+            <div id="individual-test-status"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>📞 Full Call Simulation</h3>
+            <button onclick="simulateIncomingCall()" id="simulate-btn">Simulate Incoming Call</button>
+            <button onclick="stopAllAlerts()" class="emergency-stop">🛑 STOP ALL ALERTS</button>
+            <div id="call-test-status"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>📱 Instructions</h3>
+            <ol>
+                <li><strong>Grant Permissions:</strong> Click "Request All Permissions" and allow notifications and audio</li>
+                <li><strong>Test Components:</strong> Test each component individually to ensure they work</li>
+                <li><strong>Full Test:</strong> Use "Simulate Incoming Call" to test the complete experience</li>
+                <li><strong>Mobile Test:</strong> Open this page on a mobile device to test vibration</li>
+                <li><strong>Background Test:</strong> Switch to another tab/app and test notifications</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        // Simple notification service for testing
+        class TestNotificationService {
+            constructor() {
+                this.ringtoneAudio = null;
+                this.vibrationInterval = null;
+                this.isRingtoneLoaded = false;
+                this.initializeRingtone();
+            }
+
+            async initializeRingtone() {
+                try {
+                    this.ringtoneAudio = new Audio();
+                    this.ringtoneAudio.src = this.createRingtoneDataURL();
+                    this.ringtoneAudio.loop = true;
+                    this.ringtoneAudio.volume = 0.9;
+                    this.ringtoneAudio.preload = 'auto';
+
+                    this.ringtoneAudio.addEventListener('canplaythrough', () => {
+                        this.isRingtoneLoaded = true;
+                        console.log('✅ Ringtone loaded successfully');
+                    });
+
+                    this.ringtoneAudio.addEventListener('error', (e) => {
+                        console.error('❌ Ringtone loading failed:', e);
+                        this.isRingtoneLoaded = false;
+                    });
+                } catch (error) {
+                    console.error('❌ Failed to initialize ringtone:', error);
+                }
+            }
+
+            createRingtoneDataURL() {
+                try {
+                    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    const sampleRate = audioContext.sampleRate;
+                    const duration = 3;
+                    const length = sampleRate * duration;
+                    const buffer = audioContext.createBuffer(1, length, sampleRate);
+                    const data = buffer.getChannelData(0);
+
+                    for (let i = 0; i < length; i++) {
+                        const time = i / sampleRate;
+                        const patternTime = time % 0.6;
+                        let amplitude = 0;
+                        
+                        if (patternTime < 0.2) {
+                            const frequency = 800;
+                            const envelope = Math.sin(patternTime * Math.PI * 5) * 0.3;
+                            amplitude = Math.sin(2 * Math.PI * frequency * time) * envelope;
+                        } else if (patternTime < 0.4) {
+                            const frequency = 1000;
+                            const envelope = Math.sin((patternTime - 0.2) * Math.PI * 5) * 0.3;
+                            amplitude = Math.sin(2 * Math.PI * frequency * time) * envelope;
+                        }
+                        
+                        data[i] = amplitude;
+                    }
+
+                    return this.bufferToWavDataURL(buffer);
+                } catch (error) {
+                    console.error('Failed to create ringtone:', error);
+                    return 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTuR2O/Eeyw';
+                }
+            }
+
+            bufferToWavDataURL(buffer) {
+                const length = buffer.length;
+                const arrayBuffer = new ArrayBuffer(44 + length * 2);
+                const view = new DataView(arrayBuffer);
+                const data = buffer.getChannelData(0);
+
+                const writeString = (offset, string) => {
+                    for (let i = 0; i < string.length; i++) {
+                        view.setUint8(offset + i, string.charCodeAt(i));
+                    }
+                };
+
+                writeString(0, 'RIFF');
+                view.setUint32(4, 36 + length * 2, true);
+                writeString(8, 'WAVE');
+                writeString(12, 'fmt ');
+                view.setUint32(16, 16, true);
+                view.setUint16(20, 1, true);
+                view.setUint16(22, 1, true);
+                view.setUint32(24, buffer.sampleRate, true);
+                view.setUint32(28, buffer.sampleRate * 2, true);
+                view.setUint16(32, 2, true);
+                view.setUint16(34, 16, true);
+                writeString(36, 'data');
+                view.setUint32(40, length * 2, true);
+
+                let offset = 44;
+                for (let i = 0; i < length; i++) {
+                    const sample = Math.max(-1, Math.min(1, data[i]));
+                    view.setInt16(offset, sample * 0x7FFF, true);
+                    offset += 2;
+                }
+
+                const bytes = new Uint8Array(arrayBuffer);
+                let binary = '';
+                for (let i = 0; i < bytes.byteLength; i++) {
+                    binary += String.fromCharCode(bytes[i]);
+                }
+                const base64 = btoa(binary);
+                
+                return `data:audio/wav;base64,${base64}`;
+            }
+
+            async startRingtone(duration = 0) {
+                if (!this.ringtoneAudio || !this.isRingtoneLoaded) {
+                    throw new Error('Ringtone not available');
+                }
+
+                try {
+                    this.ringtoneAudio.currentTime = 0;
+                    await this.ringtoneAudio.play();
+                    
+                    if (duration > 0) {
+                        setTimeout(() => this.stopRingtone(), duration);
+                    }
+                } catch (error) {
+                    throw new Error('Failed to play ringtone: ' + error.message);
+                }
+            }
+
+            stopRingtone() {
+                if (this.ringtoneAudio) {
+                    this.ringtoneAudio.pause();
+                    this.ringtoneAudio.currentTime = 0;
+                }
+            }
+
+            startVibration(continuous = false) {
+                if (!('vibrate' in navigator)) {
+                    throw new Error('Vibration not supported');
+                }
+
+                const pattern = [400, 200, 400, 200, 400, 200, 400, 200, 400];
+                navigator.vibrate(pattern);
+
+                if (continuous) {
+                    this.stopVibration();
+                    const totalTime = pattern.reduce((sum, time) => sum + time, 0);
+                    this.vibrationInterval = setInterval(() => {
+                        navigator.vibrate(pattern);
+                    }, totalTime + 500);
+                }
+            }
+
+            stopVibration() {
+                if ('vibrate' in navigator) {
+                    navigator.vibrate(0);
+                }
+                if (this.vibrationInterval) {
+                    clearInterval(this.vibrationInterval);
+                    this.vibrationInterval = null;
+                }
+            }
+
+            async showNotification() {
+                if (!('Notification' in window)) {
+                    throw new Error('Notifications not supported');
+                }
+
+                if (Notification.permission !== 'granted') {
+                    throw new Error('Notification permission not granted');
+                }
+
+                const notification = new Notification('🔔 INCOMING AUDIO CALL', {
+                    body: '📞 John Doe is calling you - Click to answer!',
+                    icon: '/default-avatar.png',
+                    requireInteraction: true,
+                    tag: 'test-call'
+                });
+
+                notification.onclick = () => {
+                    window.focus();
+                    notification.close();
+                    alert('Call accepted from notification!');
+                };
+
+                return notification;
+            }
+
+            async startFullAlert() {
+                console.log('🔔 Starting full call alert');
+                await Promise.all([
+                    this.showNotification(),
+                    this.startRingtone(),
+                    Promise.resolve(this.startVibration(true))
+                ]);
+                console.log('✅ Full alert started');
+            }
+
+            stopFullAlert() {
+                console.log('🔇 Stopping full alert');
+                this.stopRingtone();
+                this.stopVibration();
+                console.log('✅ Full alert stopped');
+            }
+
+            getPermissionStatus() {
+                return {
+                    notification: Notification.permission,
+                    audio: this.isRingtoneLoaded,
+                    vibration: 'vibrate' in navigator
+                };
+            }
+
+            async requestPermissions() {
+                const results = {
+                    notification: 'default',
+                    audio: false
+                };
+
+                if ('Notification' in window) {
+                    results.notification = await Notification.requestPermission();
+                }
+
+                try {
+                    const testAudio = new Audio();
+                    testAudio.volume = 0;
+                    testAudio.src = 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTuR2O/Eeyw';
+                    await testAudio.play();
+                    results.audio = true;
+                } catch (error) {
+                    results.audio = false;
+                }
+
+                return results;
+            }
+        }
+
+        // Initialize service
+        const notificationService = new TestNotificationService();
+
+        // Update permission status display
+        function updatePermissionStatus() {
+            const status = notificationService.getPermissionStatus();
+            const container = document.getElementById('permission-status');
+            
+            container.innerHTML = `
+                <div class="permission-status">
+                    <span>🔔 Notifications:</span>
+                    <span class="permission-${status.notification}">${status.notification.toUpperCase()}</span>
+                </div>
+                <div class="permission-status">
+                    <span>🔊 Audio:</span>
+                    <span class="permission-${status.audio ? 'granted' : 'denied'}">${status.audio ? 'LOADED' : 'NOT LOADED'}</span>
+                </div>
+                <div class="permission-status">
+                    <span>📳 Vibration:</span>
+                    <span class="permission-${status.vibration ? 'granted' : 'denied'}">${status.vibration ? 'SUPPORTED' : 'NOT SUPPORTED'}</span>
+                </div>
+            `;
+        }
+
+        // Test functions
+        async function requestPermissions() {
+            try {
+                const results = await notificationService.requestPermissions();
+                updatePermissionStatus();
+                showStatus('individual-test-status', 'Permissions requested successfully!', 'success');
+            } catch (error) {
+                showStatus('individual-test-status', 'Failed to request permissions: ' + error.message, 'error');
+            }
+        }
+
+        async function testRingtone() {
+            try {
+                await notificationService.startRingtone(5000);
+                showStatus('individual-test-status', '🔊 Ringtone playing for 5 seconds...', 'success');
+            } catch (error) {
+                showStatus('individual-test-status', '❌ Ringtone test failed: ' + error.message, 'error');
+            }
+        }
+
+        function testVibration() {
+            try {
+                notificationService.startVibration(false);
+                showStatus('individual-test-status', '📳 Vibration test completed!', 'success');
+            } catch (error) {
+                showStatus('individual-test-status', '❌ Vibration test failed: ' + error.message, 'error');
+            }
+        }
+
+        async function testNotification() {
+            try {
+                await notificationService.showNotification();
+                showStatus('individual-test-status', '🔔 Notification sent! Check your browser notifications.', 'success');
+            } catch (error) {
+                showStatus('individual-test-status', '❌ Notification test failed: ' + error.message, 'error');
+            }
+        }
+
+        async function simulateIncomingCall() {
+            const btn = document.getElementById('simulate-btn');
+            btn.disabled = true;
+            btn.textContent = 'Call in Progress...';
+            
+            try {
+                await notificationService.startFullAlert();
+                showStatus('call-test-status', '📞 INCOMING CALL SIMULATION ACTIVE! You should hear ringtone, see notification, and feel vibration. Use STOP button to end.', 'warning');
+                
+                // Auto-stop after 30 seconds
+                setTimeout(() => {
+                    stopAllAlerts();
+                }, 30000);
+                
+            } catch (error) {
+                showStatus('call-test-status', '❌ Call simulation failed: ' + error.message, 'error');
+                btn.disabled = false;
+                btn.textContent = 'Simulate Incoming Call';
+            }
+        }
+
+        function stopAllAlerts() {
+            notificationService.stopFullAlert();
+            const btn = document.getElementById('simulate-btn');
+            btn.disabled = false;
+            btn.textContent = 'Simulate Incoming Call';
+            showStatus('call-test-status', '✅ All alerts stopped.', 'success');
+        }
+
+        function showStatus(containerId, message, type) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = `<div class="status ${type}">${message}</div>`;
+            
+            // Auto-clear success messages after 5 seconds
+            if (type === 'success') {
+                setTimeout(() => {
+                    container.innerHTML = '';
+                }, 5000);
+            }
+        }
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            updatePermissionStatus();
+            
+            // Update status every 2 seconds
+            setInterval(updatePermissionStatus, 2000);
+        });
+    </script>
+</body>
+</html>
