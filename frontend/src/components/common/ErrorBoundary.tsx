@@ -1,6 +1,7 @@
 import React, { Component, ReactNode, ErrorInfo } from 'react';
 import { Box, Typography, Button, Card, CardContent, Stack } from '@mui/material';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { isAuthError } from '@/lib/authErrors';
 
 interface Props {
   children: ReactNode;
@@ -33,6 +34,9 @@ export class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
+      // Check if this is an authentication-related error
+      const authLike = isAuthError(this.state.error);
+
       return (
         <Box
           sx={{
@@ -47,13 +51,16 @@ export class ErrorBoundary extends Component<Props, State> {
             <CardContent>
               <Stack spacing={3} alignItems="center" textAlign="center">
                 <AlertTriangle size={48} color="#ef4444" />
-                
+
                 <Box>
                   <Typography variant="h6" gutterBottom>
-                    Something went wrong
+                    {authLike ? 'Authentication Failed' : 'Something went wrong'}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    We encountered an unexpected error. Please try refreshing the page.
+                    {authLike
+                      ? 'Your authentication session has expired or failed. Please try logging in again.'
+                      : 'We encountered an unexpected error. Please try refreshing the page.'
+                    }
                   </Typography>
                 </Box>
 
@@ -74,19 +81,38 @@ export class ErrorBoundary extends Component<Props, State> {
                 )}
 
                 <Stack direction="row" spacing={2}>
-                  <Button
-                    variant="contained"
-                    onClick={this.handleRetry}
-                    startIcon={<RefreshCw size={16} />}
-                  >
-                    Try Again
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    onClick={() => window.location.reload()}
-                  >
-                    Refresh Page
-                  </Button>
+                  {authLike ? (
+                    <>
+                      <Button
+                        variant="contained"
+                        onClick={() => window.location.href = '/auth/login'}
+                      >
+                        Go to Login
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        onClick={() => window.location.reload()}
+                      >
+                        Refresh Page
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        variant="contained"
+                        onClick={this.handleRetry}
+                        startIcon={<RefreshCw size={16} />}
+                      >
+                        Try Again
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        onClick={() => window.location.reload()}
+                      >
+                        Refresh Page
+                      </Button>
+                    </>
+                  )}
                 </Stack>
               </Stack>
             </CardContent>

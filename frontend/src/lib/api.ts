@@ -1639,7 +1639,7 @@ class ApiService {
     },
 
     // Buy product (supports payment details for real payments)
-    buyProduct: async (productId: string, body?: { paymentMethod?: 'stripe' | 'crypto'; paymentDetails?: any }) => {
+    buyProduct: async (productId: string, body?: { paymentMethod?: 'stripe' | 'flutterwave' | 'crypto'; paymentDetails?: any }) => {
       return this.request(`${API_URL}/marketplace/products/${productId}/buy`, {
         method: 'POST',
         headers: this.getAuthHeaders(),

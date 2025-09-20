@@ -37,7 +37,7 @@ export const checkBiometricSupport = async (): Promise<{
   isConditionalMediationAvailable: boolean;
 }> => {
   const isSupported = isBiometricAvailable();
-  
+
   if (!isSupported) {
     return {
       isSupported: false,
@@ -49,8 +49,8 @@ export const checkBiometricSupport = async (): Promise<{
   try {
     const [isPlatformAuthenticatorAvailable, isConditionalMediationAvailable] = await Promise.all([
       PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(),
-      PublicKeyCredential.isConditionalMediationAvailable ? 
-        PublicKeyCredential.isConditionalMediationAvailable() : 
+      PublicKeyCredential.isConditionalMediationAvailable ?
+        PublicKeyCredential.isConditionalMediationAvailable() :
         Promise.resolve(false)
     ]);
 
@@ -152,14 +152,14 @@ export const registerBiometric = async (): Promise<BiometricRegistrationResult> 
 
       // Handle both formats: options nested in 'options' property or directly in response
       const rawOptions = optionsResult.options || optionsResult;
-      
+
       // Optimize options for platform
       const optimizedOptions = biometricPlatformService.getOptimizedRegistrationOptions(rawOptions);
 
       // Start the WebAuthn registration process with timeout handling
       const registrationResponse = await Promise.race([
         startRegistration(optimizedOptions),
-        new Promise((_, reject) => 
+        new Promise((_, reject) =>
           setTimeout(() => reject(new Error('Registration timed out')), optimizedOptions.timeout || 300000)
         )
       ]) as any;
@@ -190,7 +190,7 @@ export const registerBiometric = async (): Promise<BiometricRegistrationResult> 
     } catch (error: any) {
       lastError = error;
       console.error(`Biometric registration attempt ${attempt + 1} failed:`, error);
-      
+
       // Handle specific WebAuthn errors that shouldn't be retried
       if (error.name === 'InvalidStateError') {
         return {
@@ -206,10 +206,10 @@ export const registerBiometric = async (): Promise<BiometricRegistrationResult> 
       }
 
       // Wait before retrying
-      const delay = retryStrategy.exponentialBackoff 
+      const delay = retryStrategy.exponentialBackoff
         ? retryStrategy.baseDelay * Math.pow(2, attempt)
         : retryStrategy.baseDelay;
-      
+
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
@@ -310,14 +310,14 @@ export const authenticateBiometric = async (userEmail?: string): Promise<Biometr
 
       // Handle both formats: options nested in 'options' property or directly in response
       const rawOptions = optionsResult.options || optionsResult;
-      
+
       // Optimize options for platform
       const optimizedOptions = biometricPlatformService.getOptimizedAuthenticationOptions(rawOptions);
 
       // Start the WebAuthn authentication process with timeout handling
       const authenticationResponse = await Promise.race([
         startAuthentication(optimizedOptions),
-        new Promise((_, reject) => 
+        new Promise((_, reject) =>
           setTimeout(() => reject(new Error('Authentication timed out')), optimizedOptions.timeout || 300000)
         )
       ]) as any;
@@ -339,7 +339,7 @@ export const authenticateBiometric = async (userEmail?: string): Promise<Biometr
       if (!response.ok) {
         return {
           success: false,
-          error: data.message || 'Authentication failed',
+          error: data.message || 'Authentication failed. Please try again later.',
         };
       }
 
@@ -352,7 +352,7 @@ export const authenticateBiometric = async (userEmail?: string): Promise<Biometr
     } catch (error: any) {
       lastError = error;
       console.error(`Biometric authentication attempt ${attempt + 1} failed:`, error);
-      
+
       // Handle specific WebAuthn errors that shouldn't be retried
       if (error.name === 'AbortError') {
         return {
@@ -368,12 +368,12 @@ export const authenticateBiometric = async (userEmail?: string): Promise<Biometr
 
       // Wait before retrying (shorter delay for authentication)
       const delay = Math.min(
-        retryStrategy.exponentialBackoff 
+        retryStrategy.exponentialBackoff
           ? retryStrategy.baseDelay * Math.pow(2, attempt)
           : retryStrategy.baseDelay,
         5000 // Max 5 seconds for authentication retries
       );
-      
+
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
@@ -467,7 +467,7 @@ export const getBiometricStatus = async (): Promise<{
     }
 
     const data = await response.json();
-    
+
     if (!data.success) {
       return {
         success: false,
@@ -500,7 +500,7 @@ export const getBiometricStatus = async (): Promise<{
 export const checkCapabilities = async () => {
   const support = await checkBiometricSupport();
   const deviceInfo = biometricPlatformService.getDeviceInfo();
-  
+
   return {
     isSupported: support.isSupported,
     isPlatformAuthenticatorAvailable: support.isPlatformAuthenticatorAvailable,

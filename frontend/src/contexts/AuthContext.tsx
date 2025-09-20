@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { api } from '@/lib/api';
 import { User } from '@/types';
+import { normalizeAuthError } from '@/lib/authErrors';
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -176,10 +177,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         rawMessage.includes('sign up');
 
       // Log the normalized error for debugging but don't throw
-      console.error('Login failed:', isInvalidCreds ? 'Invalid email or password' : (response?.message || response?.error || 'Invalid email or password'));
+      const errorMsg = normalizeAuthError(response?.message || response?.error || 'Invalid email or password');
+      console.error('Login failed:', isInvalidCreds ? 'Invalid email or password' : errorMsg);
       return false;
     } catch (error: any) {
-      console.error('Login error:', error);
+      console.error('Login error:', normalizeAuthError(error));
       return false;
     } finally {
       setLoading(false);
@@ -279,7 +281,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return true;
       }
 
-      const message = response?.message || response?.error || 'Registration failed';
+      const message = normalizeAuthError(response?.message || response?.error || 'Registration failed');
       throw new Error(message);
     } catch (error: any) {
       console.error('Registration error:', error);
@@ -288,7 +290,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       let errorMessage = 'Registration failed';
 
       if (error?.message) {
-        errorMessage = error.message;
+        errorMessage = normalizeAuthError(error.message);
 
         // Handle network errors
         if (error.message.toLowerCase().includes('network') ||

@@ -20,13 +20,15 @@ import { ProfileCacheProvider } from '@/contexts/ProfileCacheContext';
 import { CartProvider } from '@/contexts/CartContext';
 import { StripeProvider } from '@/contexts/StripeContext';
 import { SessionExpiredError } from '@/lib/api';
+import { isAuthError } from '@/lib/authErrors';
+import ErrorBoundary from '@/components/common/ErrorBoundary';
 
 function MyApp({ Component, pageProps }: AppProps) {
   const [mounted, setMounted] = useState(false);
   // Create a client
   const [queryClient] = useState(() => new QueryClient());
 
-  // Global error handler for unhandled SessionExpiredError
+  // Global error handlers for auth-related issues and session expiration
   useEffect(() => {
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
       if (event.reason instanceof SessionExpiredError) {
@@ -36,13 +38,29 @@ function MyApp({ Component, pageProps }: AppProps) {
           const currentPath = window.location.pathname + window.location.search;
           window.location.assign(`/auth/login?next=${encodeURIComponent(currentPath)}`);
         }, 100);
+        return;
+      }
+      if (isAuthError(event.reason)) {
+        event.preventDefault();
+        toast.error('Authentication failed. Please try again later.');
+        return;
+      }
+    };
+
+    const handleWindowError = (event: ErrorEvent) => {
+      const candidate = (event as any)?.error || event?.message || '';
+      if (isAuthError(candidate)) {
+        event.preventDefault?.();
+        toast.error('Authentication failed. Please try again later.');
       }
     };
 
     window.addEventListener('unhandledrejection', handleUnhandledRejection);
+    window.addEventListener('error', handleWindowError);
 
     return () => {
       window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+      window.removeEventListener('error', handleWindowError);
     };
   }, []);
 
@@ -56,7 +74,7 @@ function MyApp({ Component, pageProps }: AppProps) {
   }
 
   return (
-    <>
+    <ErrorBoundary>
       <Head>
         <title>TalkCart - Web3 Super Application</title>
       </Head>
@@ -97,7 +115,7 @@ function MyApp({ Component, pageProps }: AppProps) {
           </LanguageProvider>
         </ThemeProvider>
       </QueryClientProvider>
-    </>
+    </ErrorBoundary>
   );
 }
 

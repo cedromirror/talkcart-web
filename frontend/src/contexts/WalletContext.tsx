@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
 import { useAuth } from './AuthContext';
 import toast from 'react-hot-toast';
+import { normalizeAuthError } from '@/lib/authErrors';
 
 export interface WalletBalance {
   eth: number;
@@ -116,10 +117,10 @@ function walletReducer(state: WalletState, action: WalletAction): WalletState {
     case 'SET_ERROR':
       return { ...state, error: action.payload, loading: false, refreshing: false };
     case 'SET_PORTFOLIO':
-      return { 
-        ...state, 
-        portfolio: action.payload, 
-        loading: false, 
+      return {
+        ...state,
+        portfolio: action.payload,
+        loading: false,
         error: null,
         lastRefresh: new Date()
       };
@@ -130,8 +131,8 @@ function walletReducer(state: WalletState, action: WalletAction): WalletState {
     case 'SET_DEFI_POSITIONS':
       return { ...state, defiPositions: action.payload };
     case 'ADD_TRANSACTION':
-      return { 
-        ...state, 
+      return {
+        ...state,
         transactions: [action.payload, ...state.transactions]
       };
     case 'UPDATE_TRANSACTION':
@@ -174,7 +175,7 @@ interface WalletContextType extends WalletState {
     totalCost: number;
     totalCostUsd: number;
   } | null>;
-  
+
   // Computed values
   hasWallet: boolean;
   isConnected: boolean;
@@ -208,7 +209,7 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.message || `HTTP ${response.status}`);
+      throw new Error(normalizeAuthError(errorData.message || `HTTP ${response.status}`));
     }
 
     return response.json();
@@ -223,7 +224,7 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
       dispatch({ type: 'SET_ERROR', payload: null });
 
       const data = await apiCall('/balance');
-      
+
       if (data.success) {
         dispatch({ type: 'SET_PORTFOLIO', payload: data.data });
       } else {
@@ -248,7 +249,7 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
       });
 
       const data = await apiCall(`/transactions?${params}`);
-      
+
       if (data.success) {
         const transactions = data.data.transactions.map((tx: any) => ({
           ...tx,
@@ -275,7 +276,7 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
       });
 
       const data = await apiCall(`/nfts?${params}`);
-      
+
       if (data.success) {
         dispatch({ type: 'SET_NFTS', payload: data.data.nfts || [] });
       } else {
@@ -293,7 +294,7 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
 
     try {
       const data = await apiCall('/defi-positions');
-      
+
       if (data.success) {
         dispatch({ type: 'SET_DEFI_POSITIONS', payload: data.data.positions || [] });
       } else {
@@ -321,7 +322,7 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
       });
 
       const data = await apiCall(`/gas-estimate?${params}`);
-      
+
       if (data.success) {
         return data.data;
       } else {
@@ -369,7 +370,7 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
 
         dispatch({ type: 'ADD_TRANSACTION', payload: pendingTx });
         toast.success('Transaction sent successfully!');
-        
+
         // Refresh portfolio after a delay
         setTimeout(() => {
           fetchPortfolio();

@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState, useRef, useCallb
 import { io, Socket } from 'socket.io-client';
 import { API_URL, SOCKET_URL } from '@/config';
 import toast from 'react-hot-toast';
+import { normalizeAuthError } from '@/lib/authErrors';
 
 interface WebSocketContextType {
   socket: Socket | null;
@@ -197,6 +198,16 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
       toast.success('Connected to live updates', { duration: 2000 });
     });
 
+    // Server-side auth acknowledgement
+    newSocket.on('authenticated', (payload: any) => {
+      if (!payload?.success) {
+        console.warn('🔐 Socket authentication failed:', payload);
+        toast.error(normalizeAuthError(payload.error || 'Authentication failed'));
+        // Keep connection state consistent; optional: force reconnect or logout
+        setIsConnected(false);
+      }
+    });
+
     newSocket.on('disconnect', (reason) => {
       console.log('WebSocket disconnected:', reason);
       setIsConnected(false);
@@ -209,14 +220,22 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
 
     newSocket.on('connect_error', (error) => {
       console.error('❌ WebSocket connection error:', error);
-      console.error('Error details:', error.message);
+      const msg = String(error?.message || '');
+      if (msg.toLowerCase().includes('auth')) {
+        toast.error(normalizeAuthError(error));
+      }
       setIsConnected(false);
       handleReconnect();
     });
 
-    newSocket.on('error', (error) => {
+    newSocket.on('error', (error: any) => {
       console.error('WebSocket error:', error);
-      toast.error('Connection error occurred');
+      const msg = String(error?.message || '').toLowerCase();
+      if (msg.includes('auth')) {
+        toast.error(normalizeAuthError(error));
+      } else {
+        toast.error('Connection error occurred');
+      }
     });
 
     setSocket(newSocket);
