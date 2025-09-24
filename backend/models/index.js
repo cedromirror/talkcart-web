@@ -16,6 +16,7 @@ const Subscription = require('./Subscription');
 const RefundEvent = require('./RefundEvent');
 const Refund = require('./Refund');
 const EmailLog = require('./EmailLog');
+const WebhookEvent = require('./WebhookEvent');
 
 module.exports = {
   User,
@@ -35,4 +36,5 @@ module.exports = {
   RefundEvent,
   Refund,
   EmailLog,
+  WebhookEvent,
 };

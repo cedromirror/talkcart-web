@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
 import { io, Socket } from 'socket.io-client';
 import { API_URL, SOCKET_URL } from '@/config';
 import toast from 'react-hot-toast';
@@ -7,7 +8,18 @@ import { normalizeAuthError } from '@/lib/authErrors';
 interface WebSocketContextType {
   socket: Socket | null;
   isConnected: boolean;
-  // Stream functionality removed
+  // Stream functionality
+  joinStream: (streamId: string) => void;
+  leaveStream: (streamId: string) => void;
+  sendChatMessage: (streamId: string, message: string) => void;
+  sendModeratorAction: (streamId: string, action: ModeratorAction) => void;
+  onChatMessage: (callback: (data: ChatMessageData) => void) => () => void;
+  onViewerUpdate: (callback: (data: ViewerUpdateData) => void) => () => void;
+  onStreamUpdate: (callback: (data: StreamUpdateData) => void) => () => void;
+  onModerationAction: (callback: (data: ModerationActionData) => void) => () => void;
+  offChatMessage: (callback: (data: ChatMessageData) => void) => void;
+  offViewerUpdate: (callback: (data: ViewerUpdateData) => void) => void;
+  offStreamUpdate: (callback: (data: StreamUpdateData) => void) => void;
   offModerationAction: (callback: (data: ModerationActionData) => void) => void;
   // Post functionality
   joinPost: (postId: string) => void;
@@ -20,15 +32,18 @@ interface WebSocketContextType {
   leaveMarketplace: () => void;
   joinProduct: (productId: string) => void;
   leaveProduct: (productId: string) => void;
-  onProductUpdate: (callback: (data: any) => void) => () => void;
-  onProductSale: (callback: (data: any) => void) => () => void;
-  onProductViewUpdate: (callback: (data: any) => void) => () => void;
-  onNewProduct: (callback: (data: any) => void) => () => void;
+  onProductUpdate: (callback: (data: ProductUpdateData) => void) => () => void;
+  onProductSale: (callback: (data: ProductSaleData) => void) => () => void;
+  onProductViewUpdate: (callback: (data: ProductViewData) => void) => () => void;
+  onNewProduct: (callback: (data: ProductData) => void) => () => void;
+  // Admin functionality
+  joinAdmin: () => void;
+  onRefundSubmitted: (callback: (data: RefundData) => void) => () => void;
+  onRefundFailed: (callback: (data: RefundErrorData) => void) => () => void;
 }
 
 interface ChatMessageData {
   id: string;
-  streamId: string;
   userId: string;
   username: string;
   displayName: string;
@@ -47,7 +62,6 @@ interface ChatMessageData {
 }
 
 interface ViewerUpdateData {
-  streamId: string;
   viewerCount: number;
   peakViewerCount: number;
   viewers: Array<{
@@ -60,7 +74,6 @@ interface ViewerUpdateData {
 }
 
 interface StreamUpdateData {
-  streamId: string;
   isLive: boolean;
   title?: string;
   category?: string;
@@ -84,7 +97,6 @@ interface ModeratorAction {
 }
 
 interface ModerationActionData {
-  streamId: string;
   action: ModeratorAction;
   moderatorId: string;
   moderatorUsername: string;
@@ -96,45 +108,71 @@ interface PostLikeUpdateData {
   likeCount: number;
   isLiked: boolean;
   userId: string;
-}
-
-interface PostShareUpdateData {
-  postId: string;
-  shareCount: number;
-  userId: string;
-}
-
-interface PostUpdateData {
-  postId: string;
-  type: 'like' | 'share' | 'comment' | 'view';
-  data: any;
-}
-
-interface PostLikeUpdateData {
-  postId: string;
   type: 'like_update';
   action: 'like' | 'unlike';
-  likeCount: number;
-  isLiked: boolean;
-  userId: string;
   timestamp: string;
 }
 
 interface PostShareUpdateData {
   postId: string;
-  type: 'share_update';
-  action: 'share';
   shareCount: number;
   userId: string;
+  type: 'share_update';
+  action: 'share';
   platform: string;
   timestamp: string;
 }
 
 interface PostUpdateData {
   postId: string;
-  type: string;
+  type: 'like' | 'share' | 'comment' | 'view' | string;
+  data?: Record<string, unknown>;
   likeCount?: number;
   shareCount?: number;
+  timestamp: string;
+}
+
+interface ProductData {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  stock: number;
+  images: string[];
+  category: string;
+  sellerId: string;
+  createdAt: string;
+}
+
+interface ProductUpdateData extends ProductData {
+  updatedFields: string[];
+}
+
+interface ProductSaleData {
+  productId: string;
+  quantity: number;
+  buyerId: string;
+  totalPrice: number;
+  timestamp: string;
+}
+
+interface ProductViewData {
+  productId: string;
+  viewCount: number;
+  timestamp: string;
+}
+
+interface RefundData {
+  orderId: string;
+  amount: number;
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected';
+  timestamp: string;
+}
+
+interface RefundErrorData {
+  orderId: string;
+  error: string;
   timestamp: string;
 }
 
@@ -153,6 +191,7 @@ interface WebSocketProviderProps {
 }
 
 export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }) => {
+  const { token, isAuthenticated } = useAuth();
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
@@ -161,17 +200,22 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
   const joinedPostsRef = useRef<Set<string>>(new Set());
 
   const initializeSocket = useCallback(() => {
-    const token = localStorage.getItem('token');
-    console.log('🔍 WebSocket initialization - Token check:', token ? 'Token found' : 'No token found');
-    if (!token) {
-      console.log('❌ WebSocket initialization aborted - No token in localStorage');
+    if (!isAuthenticated || !token) {
+      console.log('WebSocket initialization skipped: User not authenticated or no token.');
+      return;
+    }
+
+    // Ensure consistent token format by removing Bearer prefix if present
+    const authToken = token.startsWith('Bearer ') ? token.substring(7).trim() : token.trim();
+    if (!authToken) {
+      console.warn('Invalid auth token format');
       return;
     }
 
     const newSocket = io(SOCKET_URL, {
       path: '/socket.io',
       auth: {
-        token,
+        token: authToken,
       },
       transports: ['websocket', 'polling'],
       timeout: 20000,
@@ -183,17 +227,13 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
       setIsConnected(true);
       reconnectAttemptsRef.current = 0;
 
-      // Authenticate socket connection
-      const userId = JSON.parse(localStorage.getItem('user') || '{}')?.id ||
-        JSON.parse(localStorage.getItem('user') || '{}')?._id;
-      if (userId) {
-        newSocket.emit('authenticate', { userId });
+      // Re-join rooms on successful connection
+      if (joinedPostsRef.current.size > 0) {
+        console.log('Rejoining rooms:', Array.from(joinedPostsRef.current));
+        joinedPostsRef.current.forEach(postId => {
+          newSocket.emit('join-post', { postId });
+        });
       }
-
-      // Rejoin all previously joined post rooms
-      joinedPostsRef.current.forEach(postId => {
-        newSocket.emit('join-post', { postId });
-      });
 
       toast.success('Connected to live updates', { duration: 2000 });
     });
@@ -259,17 +299,27 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
   }, [initializeSocket]);
 
   useEffect(() => {
-    initializeSocket();
+    let newSocket: Socket | null = null;
+
+    if (isAuthenticated && token) {
+      newSocket = initializeSocket();
+      if (newSocket) {
+        setSocket(newSocket);
+      }
+    }
 
     return () => {
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
       if (socket) {
+        console.log('Disconnecting WebSocket on cleanup.');
         socket.disconnect();
+        setSocket(null);
+        setIsConnected(false);
       }
     };
-  }, [initializeSocket]);
+  }, [isAuthenticated, token, initializeSocket]);
 
   const joinStream = useCallback((streamId: string) => {
     if (socket && isConnected) {
@@ -300,7 +350,7 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
   }, [socket, isConnected]);
 
   const onChatMessage = useCallback((callback: (data: ChatMessageData) => void) => {
-    if (!socket) return;
+    if (!socket) return () => {};
     // Support multiple server event names
     const handlerLegacy = (data: any) => callback(data as ChatMessageData);
     const handlerNew = (data: any) => callback(data as ChatMessageData);
@@ -308,51 +358,85 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
     socket.on('chat_message', handlerLegacy);
     socket.on('chat:new-message', handlerNew);
     socket.on('stream-chat', handlerStream);
+    
+    return () => {
+      socket.off('chat_message', handlerLegacy);
+      socket.off('chat:new-message', handlerNew);
+      socket.off('stream-chat', handlerStream);
+    };
   }, [socket]);
 
   const onViewerUpdate = useCallback((callback: (data: ViewerUpdateData) => void) => {
-    if (!socket) return;
+    if (!socket) return () => {};
     // Primary event
     socket.on('viewer_update', callback);
+    
     // Compatibility with legacy event name emitted by server
-    socket.on('stream-viewers-update', (data: any) => {
+    const legacyHandler = (data: any) => {
       callback({
         streamId: data.streamId,
         viewerCount: data.viewerCount,
         peakViewerCount: data.peakViewerCount,
         viewers: [],
       } as ViewerUpdateData);
-    });
+    };
+    socket.on('stream-viewers-update', legacyHandler);
+    
+    return () => {
+      socket.off('viewer_update', callback);
+      socket.off('stream-viewers-update', legacyHandler);
+    };
   }, [socket]);
 
   const onStreamUpdate = useCallback((callback: (data: StreamUpdateData) => void) => {
-    if (!socket) return;
+    if (!socket) return () => {};
     // Primary generic update channel
     socket.on('stream_update', callback);
+    
     // Map specific server events into the unified stream update callback
-    socket.on('stream-stopped', (data: any) => {
+    const stoppedHandler = (data: any) => {
       callback({ streamId: data.streamId, isLive: false } as StreamUpdateData);
-    });
-    socket.on('stream-started', (data: any) => {
+    };
+    const startedHandler = (data: any) => {
       callback({ streamId: data.streamId, isLive: true } as StreamUpdateData);
-    });
-    socket.on('stream-health', (data: any) => {
+    };
+    const healthHandler = (data: any) => {
       callback({ streamId: data.streamId, isLive: true, health: data.health } as any);
-    });
-    socket.on('stream-data', (data: any) => {
+    };
+    const dataHandler = (data: any) => {
       callback({ streamId: data.streamId, isLive: !!data.isLive, health: data.health } as any);
-    });
+    };
+    
+    socket.on('stream-stopped', stoppedHandler);
+    socket.on('stream-started', startedHandler);
+    socket.on('stream-health', healthHandler);
+    socket.on('stream-data', dataHandler);
+    
+    return () => {
+      socket.off('stream_update', callback);
+      socket.off('stream-stopped', stoppedHandler);
+      socket.off('stream-started', startedHandler);
+      socket.off('stream-health', healthHandler);
+      socket.off('stream-data', dataHandler);
+    };
   }, [socket]);
 
   // Stream moderation events emitted by backend routes via broadcastToFeed
-  const onModerationAction = useCallback((callback: (data: any) => void) => {
-    if (!socket) return;
-    const handlerBan = (data: any) => callback({ streamId: data.streamId, action: { type: 'ban' }, moderatorName: 'system', timestamp: new Date().toISOString(), ...data });
-    const handlerUnban = (data: any) => callback({ streamId: data.streamId, action: { type: 'unban' as any }, moderatorName: 'system', timestamp: new Date().toISOString(), ...data });
-    const handlerTimeout = (data: any) => callback({ streamId: data.streamId, action: { type: 'timeout' }, moderatorName: 'system', timestamp: new Date().toISOString(), ...data });
+  const onModerationAction = useCallback((callback: (data: ModerationActionData) => void) => {
+    if (!socket) return () => {};
+    const handlerBan = (data: any) => callback({ streamId: data.streamId, action: { type: 'ban' }, moderatorId: data.moderatorId || 'system', moderatorUsername: data.moderatorName || 'system', timestamp: new Date().toISOString(), ...data });
+    const handlerUnban = (data: any) => callback({ streamId: data.streamId, action: { type: 'unban' as any }, moderatorId: data.moderatorId || 'system', moderatorUsername: data.moderatorName || 'system', timestamp: new Date().toISOString(), ...data });
+    const handlerTimeout = (data: any) => callback({ streamId: data.streamId, action: { type: 'timeout' }, moderatorId: data.moderatorId || 'system', moderatorUsername: data.moderatorName || 'system', timestamp: new Date().toISOString(), ...data });
+    
     socket.on('moderation:ban', handlerBan);
     socket.on('moderation:unban', handlerUnban);
     socket.on('moderation:timeout', handlerTimeout);
+    
+    return () => {
+      socket.off('moderation:ban', handlerBan);
+      socket.off('moderation:unban', handlerUnban);
+      socket.off('moderation:timeout', handlerTimeout);
+    };
   }, [socket]);
 
   const offModerationAction = useCallback((callback: (data: any) => void) => {
@@ -482,25 +566,25 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
     }
   }, [socket, isConnected]);
 
-  const onProductUpdate = useCallback((callback: (data: any) => void) => {
+  const onProductUpdate = useCallback((callback: (data: ProductUpdateData) => void) => {
     if (!socket) return () => { };
     socket.on('product:updated', callback);
     return () => socket.off('product:updated', callback);
   }, [socket]);
 
-  const onProductSale = useCallback((callback: (data: any) => void) => {
+  const onProductSale = useCallback((callback: (data: ProductSaleData) => void) => {
     if (!socket) return () => { };
     socket.on('product:sold', callback);
     return () => socket.off('product:sold', callback);
   }, [socket]);
 
-  const onProductViewUpdate = useCallback((callback: (data: any) => void) => {
+  const onProductViewUpdate = useCallback((callback: (data: ProductViewData) => void) => {
     if (!socket) return () => { };
     socket.on('product:view-update', callback);
     return () => socket.off('product:view-update', callback);
   }, [socket]);
 
-  const onNewProduct = useCallback((callback: (data: any) => void) => {
+  const onNewProduct = useCallback((callback: (data: ProductData) => void) => {
     if (!socket) return () => { };
     socket.on('product:new', callback);
     return () => socket.off('product:new', callback);
@@ -513,13 +597,13 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
     }
   }, [socket, isConnected]);
 
-  const onRefundSubmitted = useCallback((callback: (data: any) => void) => {
+  const onRefundSubmitted = useCallback((callback: (data: RefundData) => void) => {
     if (!socket) return () => { };
     socket.on('refund:submitted', callback);
     return () => socket.off('refund:submitted', callback);
   }, [socket]);
 
-  const onRefundFailed = useCallback((callback: (data: any) => void) => {
+  const onRefundFailed = useCallback((callback: (data: RefundErrorData) => void) => {
     if (!socket) return () => { };
     socket.on('refund:failed', callback);
     return () => socket.off('refund:failed', callback);
@@ -537,10 +621,10 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
     onViewerUpdate,
     onStreamUpdate,
     onModerationAction,
-    offModerationAction,
     offChatMessage,
     offViewerUpdate,
     offStreamUpdate,
+    offModerationAction,
     // Post functionality
     joinPost,
     leavePost,
@@ -556,8 +640,10 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
     onProductSale,
     onProductViewUpdate,
     onNewProduct,
-    // Expose admin/refund events (cast to any to avoid type expansion here)
-    ...({ joinAdmin, onRefundSubmitted, onRefundFailed } as any),
+    // Admin functionality
+    joinAdmin,
+    onRefundSubmitted,
+    onRefundFailed
   };
 
   return (

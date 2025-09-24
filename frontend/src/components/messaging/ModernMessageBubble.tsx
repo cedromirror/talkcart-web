@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import {
     Box,
     Stack,
@@ -49,7 +49,7 @@ import {
     Eye
 } from 'lucide-react';
 import { Message } from '@/types/message';
-import { formatDistanceToNow, format } from 'date-fns';
+import { format } from 'date-fns';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface ModernMessageBubbleProps {
@@ -94,6 +94,16 @@ const typingDots = keyframes`
     transform: translateY(-10px);
   }
 `;
+
+// Common reaction emojis with labels
+const commonReactions = [
+    { emoji: '👍', label: 'Like' },
+    { emoji: '❤️', label: 'Love' },
+    { emoji: '😂', label: 'Laugh' },
+    { emoji: '😮', label: 'Wow' },
+    { emoji: '😢', label: 'Sad' },
+    { emoji: '🔥', label: 'Fire' }
+];
 
 const ModernMessageBubble: React.FC<ModernMessageBubbleProps> = ({
     message,
@@ -303,437 +313,301 @@ const ModernMessageBubble: React.FC<ModernMessageBubbleProps> = ({
                                     <Paper
                                         elevation={0}
                                         sx={{
-                                            p: 2,
-                                            mb: 1,
-                                            borderRadius: 3,
-                                            background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.1)} 0%, ${alpha(theme.palette.secondary.main, 0.1)} 100%)`,
-                                            border: `1px solid ${alpha(theme.palette.primary.main, 0.2)}`,
-                                            cursor: 'pointer',
-                                            transition: 'all 0.3s ease',
+                                            p: message.content ? 2 : 1,
+                                            borderRadius: message.isOwn ? '22px 22px 4px 22px' : '22px 22px 22px 4px',
+                                            background: message.isOwn
+                                                ? `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.95)} 10%, ${alpha(theme.palette.primary.dark, 0.95)} 90%)`
+                                                : theme.palette.mode === 'dark'
+                                                    ? `linear-gradient(135deg, ${alpha(theme.palette.grey[800], 0.85)} 0%, ${alpha(theme.palette.grey[700], 0.9)} 100%)`
+                                                    : `linear-gradient(135deg, ${alpha(theme.palette.background.paper, 0.9)} 0%, ${alpha(theme.palette.primary.main, 0.1)} 100%)`,
+                                            color: message.isOwn
+                                                ? theme.palette.primary.contrastText
+                                                : theme.palette.text.primary,
+                                            border: message.isOwn
+                                                ? `1px solid ${alpha(theme.palette.primary.light, 0.2)}`
+                                                : `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                                            position: 'relative',
+                                            minWidth: message.content ? 'auto' : 0,
+                                            maxWidth: '70%',
+                                            boxShadow: message.isOwn
+                                                ? `0 6px 18px ${alpha(theme.palette.primary.main, 0.3)}`
+                                                : `0 4px 14px ${alpha(theme.palette.grey[500], 0.12)}`,
+                                            transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                                            transform: isHovered ? 'translateY(-3px) scale(1.01)' : 'translateY(0) scale(1)',
+                                            backdropFilter: 'blur(10px)',
+                                            animation: `${messageSlideIn} 0.4s ease-out`,
                                             '&:hover': {
-                                                transform: 'translateY(-2px)',
-                                                boxShadow: `0 8px 25px ${alpha(theme.palette.primary.main, 0.15)}`,
-                                                borderColor: theme.palette.primary.main
+                                                boxShadow: message.isOwn
+                                                    ? `0 8px 24px ${alpha(theme.palette.primary.main, 0.4)}`
+                                                    : `0 6px 18px ${alpha(theme.palette.grey[500], 0.2)}`
+                                            },
+                                            '&::before': message.isOwn ? {
+                                                content: '""',
+                                                position: 'absolute',
+                                                right: -10,
+                                                bottom: 10,
+                                                width: 0,
+                                                height: 0,
+                                                borderLeft: `10px solid ${theme.palette.primary.dark}`,
+                                                borderTop: '10px solid transparent',
+                                                borderBottom: '10px solid transparent',
+                                                filter: 'drop-shadow(3px 3px 3px rgba(0,0,0,0.15))'
+                                            } : {
+                                                content: '""',
+                                                position: 'absolute',
+                                                left: -10,
+                                                bottom: 10,
+                                                width: 0,
+                                                height: 0,
+                                                borderRight: `10px solid ${theme.palette.mode === 'dark' ? alpha(theme.palette.grey[800], 0.9) : alpha(theme.palette.background.paper, 0.95)}`,
+                                                borderTop: '10px solid transparent',
+                                                borderBottom: '10px solid transparent',
+                                                filter: 'drop-shadow(-3px 3px 3px rgba(0,0,0,0.08))'
                                             }
                                         }}
-                                        onClick={() => window.open(media.url, '_blank')}
                                     >
-                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                                            <Box
+                                        {/* Forwarded Message Indicator */}
+                                        {message.isForwarded && (
+                                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1 }}>
+                                                <Forward size={12} />
+                                                <Typography
+                                                    variant="caption"
+                                                    sx={{
+                                                        fontStyle: 'italic',
+                                                        opacity: 0.8,
+                                                        fontSize: '0.7rem'
+                                                    }}
+                                                >
+                                                    Forwarded
+                                                </Typography>
+                                            </Box>
+                                        )}
+
+                                        {/* Message Content */}
+                                        {message.isDeleted ? (
+                                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, opacity: 0.6 }}>
+                                                <Trash2 size={14} />
+                                                <Typography
+                                                    variant="body2"
+                                                    sx={{ fontStyle: 'italic' }}
+                                                >
+                                                    This message was deleted
+                                                </Typography>
+                                            </Box>
+                                        ) : isEditing ? (
+                                            <input
+                                                type="text"
+                                                value={editContent}
+                                                onChange={(e) => setEditContent(e.target.value)}
+                                                onKeyPress={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                        handleEdit();
+                                                    } else if (e.key === 'Escape') {
+                                                        setIsEditing(false);
+                                                        setEditContent(message.content);
+                                                    }
+                                                }}
+                                                onBlur={handleEdit}
+                                                autoFocus
+                                                style={{
+                                                    background: 'transparent',
+                                                    border: 'none',
+                                                    outline: 'none',
+                                                    color: 'inherit',
+                                                    font: 'inherit',
+                                                    width: '100%',
+                                                    fontSize: '14px'
+                                                }}
+                                            />
+                                        ) : message.content ? (
+                                            <Typography
+                                                variant="body2"
                                                 sx={{
-                                                    p: 1,
-                                                    borderRadius: 2,
-                                                    bgcolor: alpha(theme.palette.primary.main, 0.1),
-                                                    color: theme.palette.primary.main
+                                                    wordBreak: 'break-word',
+                                                    lineHeight: 1.4,
+                                                    fontSize: '14px'
                                                 }}
                                             >
-                                                {getMediaIcon(media.type)}
-                                            </Box>
-                                            <Box sx={{ flex: 1 }}>
-                                                <Typography variant="body2" fontWeight="medium">
-                                                    {media.filename}
+                                                {message.content}
+                                            </Typography>
+                                        ) : null}
+
+                                        {/* Media Content */}
+                                        {renderMediaContent()}
+
+                                        {/* Message Info */}
+                                        <Stack
+                                            direction="row"
+                                            alignItems="center"
+                                            spacing={0.5}
+                                            sx={{
+                                                mt: message.content || message.media?.length ? 0.5 : 0,
+                                                justifyContent: 'flex-end',
+                                                opacity: 0.8
+                                            }}
+                                        >
+                                            {message.isEdited && (
+                                                <Chip
+                                                    label="edited"
+                                                    size="small"
+                                                    sx={{
+                                                        height: 16,
+                                                        fontSize: '0.6rem',
+                                                        bgcolor: alpha(theme.palette.background.paper, 0.2),
+                                                        color: 'inherit'
+                                                    }}
+                                                />
+                                            )}
+                                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                                <Clock size={10} />
+                                                <Typography
+                                                    variant="caption"
+                                                    sx={{ fontSize: '0.7rem' }}
+                                                >
+                                                    {getMessageTime()}
                                                 </Typography>
-                                                {media.fileSize && (
-                                                    <Typography variant="caption" color="text.secondary">
-                                                        {(media.fileSize / 1024 / 1024).toFixed(1)} MB
-                                                    </Typography>
-                                                )}
                                             </Box>
-                                            <IconButton size="small" color="primary">
-                                                <Download size={16} />
-                                            </IconButton>
-                                        </Box>
+                                            {getReadStatus()}
+                                        </Stack>
                                     </Paper>
-                                </Slide>
-                            );
-                    }
-                })}
-            </Box>
-        );
-    };
 
-    const commonReactions = [
-        { emoji: '👍', label: 'Like' },
-        { emoji: '❤️', label: 'Love' },
-        { emoji: '😂', label: 'Laugh' },
-        { emoji: '😮', label: 'Wow' },
-        { emoji: '😢', label: 'Sad' },
-        { emoji: '😡', label: 'Angry' }
-    ];
-
-    return (
-        <>
-            <Fade in timeout={300}>
-                <Box
-                    sx={{
-                        display: 'flex',
-                        flexDirection: message.isOwn ? 'row-reverse' : 'row',
-                        alignItems: 'flex-end',
-                        gap: 1.5,
-                        mb: 1,
-                        animation: `${messageSlideIn} 0.4s ease-out`,
-                        '&:hover .message-actions': {
-                            opacity: 1,
-                            transform: 'translateX(0)'
-                        }
-                    }}
-                    onMouseEnter={() => setIsHovered(true)}
-                    onMouseLeave={() => setIsHovered(false)}
-                >
-                    {/* Avatar */}
-                    {showAvatar && !message.isOwn && (
-                        <Zoom in timeout={200}>
-                            <Avatar
-                                src={message.sender.avatar}
-                                sx={{
-                                    width: 36,
-                                    height: 36,
-                                    border: `2px solid ${alpha(theme.palette.primary.main, 0.1)}`,
-                                    transition: 'all 0.3s ease',
-                                    '&:hover': {
-                                        transform: 'scale(1.1)',
-                                        borderColor: theme.palette.primary.main
-                                    }
-                                }}
-                            >
-                                {message.sender.displayName.charAt(0).toUpperCase()}
-                            </Avatar>
-                        </Zoom>
-                    )}
-                    {!showAvatar && !message.isOwn && (
-                        <Box sx={{ width: 36 }} />
-                    )}
-
-                    {/* Message Content */}
-                    <Box
-                        sx={{
-                            maxWidth: '75%',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: message.isOwn ? 'flex-end' : 'flex-start'
-                        }}
-                    >
-                        {/* Sender Name (for group chats) */}
-                        {showAvatar && !message.isOwn && (
-                            <Typography
-                                variant="caption"
-                                color="text.secondary"
-                                sx={{
-                                    mb: 0.5,
-                                    ml: 1,
-                                    fontWeight: 500,
-                                    opacity: 0.8
-                                }}
-                            >
-                                {message.sender.displayName}
-                            </Typography>
-                        )}
-
-                        {/* Reply Preview */}
-                        {message.replyTo && (
-                            <Slide direction={message.isOwn ? 'left' : 'right'} in timeout={300}>
-                                <Paper
-                                    elevation={0}
-                                    sx={{
-                                        p: 1.5,
-                                        mb: 1,
-                                        maxWidth: '100%',
-                                        borderLeft: `4px solid ${theme.palette.primary.main}`,
-                                        background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.05)} 0%, ${alpha(theme.palette.primary.main, 0.1)} 100%)`,
-                                        borderRadius: 2,
-                                        backdropFilter: 'blur(10px)'
-                                    }}
-                                >
-                                    <Typography variant="caption" color="primary" fontWeight="bold">
-                                        {message.replyTo.sender?.displayName || 'Unknown'}
-                                    </Typography>
-                                    <Typography
-                                        variant="body2"
-                                        sx={{
-                                            overflow: 'hidden',
-                                            textOverflow: 'ellipsis',
-                                            whiteSpace: 'nowrap',
-                                            opacity: 0.8
-                                        }}
-                                    >
-                                        {message.replyTo.content}
-                                    </Typography>
-                                </Paper>
-                            </Slide>
-                        )}
-
-                        {/* Message Bubble */}
-                        <Box sx={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <Paper
-                                elevation={0}
-                                sx={{
-                                    p: message.content ? 2 : 1,
-                                    borderRadius: 4,
-                                    background: message.isOwn
-                                        ? `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`
-                                        : theme.palette.mode === 'dark'
-                                            ? `linear-gradient(135deg, ${theme.palette.grey[800]} 0%, ${theme.palette.grey[700]} 100%)`
-                                            : `linear-gradient(135deg, ${theme.palette.background.paper} 0%, ${alpha(theme.palette.primary.main, 0.05)} 100%)`,
-                                    color: message.isOwn
-                                        ? theme.palette.primary.contrastText
-                                        : theme.palette.text.primary,
-                                    border: message.isOwn
-                                        ? 'none'
-                                        : `1px solid ${alpha(theme.palette.divider, 0.1)}`,
-                                    position: 'relative',
-                                    minWidth: message.content ? 'auto' : 0,
-                                    boxShadow: message.isOwn
-                                        ? `0 4px 20px ${alpha(theme.palette.primary.main, 0.3)}`
-                                        : `0 2px 10px ${alpha(theme.palette.grey[500], 0.1)}`,
-                                    transition: 'all 0.3s ease',
-                                    transform: isHovered ? 'translateY(-1px)' : 'translateY(0)',
-                                    '&::before': message.isOwn ? {
-                                        content: '""',
-                                        position: 'absolute',
-                                        right: -8,
-                                        bottom: 8,
-                                        width: 0,
-                                        height: 0,
-                                        borderLeft: `8px solid ${theme.palette.primary.main}`,
-                                        borderTop: '8px solid transparent',
-                                        borderBottom: '8px solid transparent'
-                                    } : {
-                                        content: '""',
-                                        position: 'absolute',
-                                        left: -8,
-                                        bottom: 8,
-                                        width: 0,
-                                        height: 0,
-                                        borderRight: `8px solid ${theme.palette.mode === 'dark' ? theme.palette.grey[800] : theme.palette.background.paper}`,
-                                        borderTop: '8px solid transparent',
-                                        borderBottom: '8px solid transparent'
-                                    }
-                                }}
-                            >
-                                {/* Forwarded Message Indicator */}
-                                {message.isForwarded && (
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1 }}>
-                                        <Forward size={12} />
-                                        <Typography
-                                            variant="caption"
+                                    {/* Quick Actions */}
+                                    <Fade in={isHovered} timeout={250}>
+                                        <Box
+                                            className="message-actions"
                                             sx={{
-                                                fontStyle: 'italic',
-                                                opacity: 0.8,
-                                                fontSize: '0.7rem'
+                                                display: 'flex',
+                                                flexDirection: 'column',
+                                                gap: 0.7,
+                                                opacity: 0,
+                                                transform: message.isOwn ? 'translateX(10px)' : 'translateX(-10px)',
+                                                transition: 'all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)'
                                             }}
                                         >
-                                            Forwarded
-                                        </Typography>
-                                    </Box>
-                                )}
-
-                                {/* Message Content */}
-                                {message.isDeleted ? (
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, opacity: 0.6 }}>
-                                        <Trash2 size={14} />
-                                        <Typography
-                                            variant="body2"
-                                            sx={{ fontStyle: 'italic' }}
-                                        >
-                                            This message was deleted
-                                        </Typography>
-                                    </Box>
-                                ) : isEditing ? (
-                                    <input
-                                        type="text"
-                                        value={editContent}
-                                        onChange={(e) => setEditContent(e.target.value)}
-                                        onKeyPress={(e) => {
-                                            if (e.key === 'Enter') {
-                                                handleEdit();
-                                            } else if (e.key === 'Escape') {
-                                                setIsEditing(false);
-                                                setEditContent(message.content);
-                                            }
-                                        }}
-                                        onBlur={handleEdit}
-                                        autoFocus
-                                        style={{
-                                            background: 'transparent',
-                                            border: 'none',
-                                            outline: 'none',
-                                            color: 'inherit',
-                                            font: 'inherit',
-                                            width: '100%',
-                                            fontSize: '14px'
-                                        }}
-                                    />
-                                ) : message.content ? (
-                                    <Typography
-                                        variant="body2"
-                                        sx={{
-                                            wordBreak: 'break-word',
-                                            lineHeight: 1.4,
-                                            fontSize: '14px'
-                                        }}
-                                    >
-                                        {message.content}
-                                    </Typography>
-                                ) : null}
-
-                                {/* Media Content */}
-                                {renderMediaContent()}
-
-                                {/* Message Info */}
-                                <Stack
-                                    direction="row"
-                                    alignItems="center"
-                                    spacing={0.5}
-                                    sx={{
-                                        mt: message.content || message.media?.length ? 0.5 : 0,
-                                        justifyContent: 'flex-end',
-                                        opacity: 0.8
-                                    }}
-                                >
-                                    {message.isEdited && (
-                                        <Chip
-                                            label="edited"
-                                            size="small"
-                                            sx={{
-                                                height: 16,
-                                                fontSize: '0.6rem',
-                                                bgcolor: alpha(theme.palette.background.paper, 0.2),
-                                                color: 'inherit'
-                                            }}
-                                        />
-                                    )}
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                        <Clock size={10} />
-                                        <Typography
-                                            variant="caption"
-                                            sx={{ fontSize: '0.7rem' }}
-                                        >
-                                            {getMessageTime()}
-                                        </Typography>
-                                    </Box>
-                                    {getReadStatus()}
-                                </Stack>
-                            </Paper>
-
-                            {/* Quick Actions */}
-                            <Fade in={isHovered} timeout={200}>
-                                <Box
-                                    className="message-actions"
-                                    sx={{
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        gap: 0.5,
-                                        opacity: 0,
-                                        transform: message.isOwn ? 'translateX(10px)' : 'translateX(-10px)',
-                                        transition: 'all 0.3s ease'
-                                    }}
-                                >
-                                    <Tooltip title="Add Reaction" placement={message.isOwn ? 'left' : 'right'}>
-                                        <IconButton
-                                            size="small"
-                                            onClick={() => setShowReactions(!showReactions)}
-                                            sx={{
-                                                bgcolor: alpha(theme.palette.background.paper, 0.9),
-                                                backdropFilter: 'blur(10px)',
-                                                '&:hover': {
-                                                    bgcolor: theme.palette.background.paper,
-                                                    transform: 'scale(1.1)'
-                                                }
-                                            }}
-                                        >
-                                            <Smile size={14} />
-                                        </IconButton>
-                                    </Tooltip>
-                                    <Tooltip title="More Options" placement={message.isOwn ? 'left' : 'right'}>
-                                        <IconButton
-                                            size="small"
-                                            onClick={handleMenuOpen}
-                                            sx={{
-                                                bgcolor: alpha(theme.palette.background.paper, 0.9),
-                                                backdropFilter: 'blur(10px)',
-                                                '&:hover': {
-                                                    bgcolor: theme.palette.background.paper,
-                                                    transform: 'scale(1.1)'
-                                                }
-                                            }}
-                                        >
-                                            <MoreVertical size={14} />
-                                        </IconButton>
-                                    </Tooltip>
-                                </Box>
-                            </Fade>
-                        </Box>
-
-                        {/* Reactions */}
-                        {message.reactions && Object.keys(message.reactions).length > 0 && (
-                            <Stack
-                                direction="row"
-                                spacing={0.5}
-                                sx={{
-                                    mt: 0.5,
-                                    ml: message.isOwn ? 0 : 1,
-                                    mr: message.isOwn ? 1 : 0
-                                }}
-                            >
-                                {Object.entries(message.reactions).map(([emoji, users]) => (
-                                    <Chip
-                                        key={emoji}
-                                        label={`${emoji} ${users.length}`}
-                                        size="small"
-                                        clickable
-                                        onClick={() => handleReaction(emoji)}
-                                        sx={{
-                                            height: 24,
-                                            fontSize: '0.7rem',
-                                            bgcolor: alpha(theme.palette.primary.main, 0.1),
-                                            border: `1px solid ${alpha(theme.palette.primary.main, 0.2)}`,
-                                            animation: `${reactionPop} 0.3s ease-out`,
-                                            '&:hover': {
-                                                bgcolor: alpha(theme.palette.primary.main, 0.2),
-                                                transform: 'scale(1.05)'
-                                            }
-                                        }}
-                                    />
-                                ))}
-                            </Stack>
-                        )}
-
-                        {/* Quick Reactions */}
-                        {showReactions && (
-                            <Fade in timeout={200}>
-                                <Paper
-                                    elevation={8}
-                                    sx={{
-                                        p: 1,
-                                        mt: 1,
-                                        borderRadius: 3,
-                                        bgcolor: alpha(theme.palette.background.paper, 0.95),
-                                        backdropFilter: 'blur(20px)',
-                                        border: `1px solid ${alpha(theme.palette.divider, 0.1)}`
-                                    }}
-                                >
-                                    <Stack direction="row" spacing={0.5}>
-                                        {commonReactions.map(({ emoji, label }) => (
-                                            <Tooltip key={emoji} title={label}>
+                                            <Tooltip title="Add Reaction" placement={message.isOwn ? 'left' : 'right'}>
                                                 <IconButton
                                                     size="small"
-                                                    onClick={() => handleReaction(emoji)}
+                                                    onClick={() => setShowReactions(!showReactions)}
                                                     sx={{
-                                                        fontSize: '1.2rem',
+                                                        bgcolor: alpha(theme.palette.background.paper, 0.9),
+                                                        backdropFilter: 'blur(12px)',
+                                                        boxShadow: `0 2px 8px ${alpha(theme.palette.common.black, 0.1)}`,
+                                                        border: `1px solid ${alpha(theme.palette.divider, 0.08)}`,
+                                                        transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
                                                         '&:hover': {
-                                                            transform: 'scale(1.3)',
-                                                            bgcolor: alpha(theme.palette.primary.main, 0.1)
+                                                            bgcolor: theme.palette.background.paper,
+                                                            transform: 'scale(1.15)',
+                                                            boxShadow: `0 4px 12px ${alpha(theme.palette.common.black, 0.15)}`
                                                         }
                                                     }}
                                                 >
-                                                    {emoji}
+                                                    <Smile size={14} color={theme.palette.primary.main} />
                                                 </IconButton>
                                             </Tooltip>
+                                            <Tooltip title="More Options" placement={message.isOwn ? 'left' : 'right'}>
+                                                <IconButton
+                                                    size="small"
+                                                    onClick={handleMenuOpen}
+                                                    sx={{
+                                                        bgcolor: alpha(theme.palette.background.paper, 0.9),
+                                                        backdropFilter: 'blur(12px)',
+                                                        boxShadow: `0 2px 8px ${alpha(theme.palette.common.black, 0.1)}`,
+                                                        border: `1px solid ${alpha(theme.palette.divider, 0.08)}`,
+                                                        transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                                                        '&:hover': {
+                                                            bgcolor: theme.palette.background.paper,
+                                                            transform: 'scale(1.15)',
+                                                            boxShadow: `0 4px 12px ${alpha(theme.palette.common.black, 0.15)}`
+                                                        }
+                                                    }}
+                                                >
+                                                    <MoreVertical size={14} color={theme.palette.primary.main} />
+                                                </IconButton>
+                                            </Tooltip>
+                                        </Box>
+                                    </Fade>
+                                </Box>
+
+                                {/* Reactions */}
+                                {message.reactions && Object.keys(message.reactions).length > 0 && (
+                                    <Stack
+                                        direction="row"
+                                        spacing={0.7}
+                                        sx={{
+                                            mt: 0.7,
+                                            ml: message.isOwn ? 0 : 1.5,
+                                            mr: message.isOwn ? 1.5 : 0
+                                        }}
+                                    >
+                                        {Object.entries(message.reactions).map(([emoji, users]) => (
+                                            <Chip
+                                                key={emoji}
+                                                label={`${emoji} ${users.length}`}
+                                                size="small"
+                                                clickable
+                                                onClick={() => handleReaction(emoji)}
+                                                sx={{
+                                                    height: 26,
+                                                    fontSize: '0.75rem',
+                                                    fontWeight: 500,
+                                                    bgcolor: alpha(theme.palette.primary.main, 0.12),
+                                                    border: `1px solid ${alpha(theme.palette.primary.main, 0.25)}`,
+                                                    boxShadow: `0 2px 6px ${alpha(theme.palette.primary.main, 0.15)}`,
+                                                    animation: `${reactionPop} 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)`,
+                                                    transition: 'all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                                                    '&:hover': {
+                                                        bgcolor: alpha(theme.palette.primary.main, 0.2),
+                                                        transform: 'scale(1.08)',
+                                                        boxShadow: `0 3px 8px ${alpha(theme.palette.primary.main, 0.25)}`
+                                                    }
+                                                }}
+                                            />
                                         ))}
                                     </Stack>
-                                </Paper>
-                            </Fade>
-                        )}
+                                )}
+
+                                {/* Quick Reactions */}
+                                {showReactions && (
+                                    <Fade in timeout={250}>
+                                        <Paper
+                                            elevation={0}
+                                            sx={{
+                                                p: 1.2,
+                                                mt: 1.2,
+                                                borderRadius: 4,
+                                                bgcolor: alpha(theme.palette.background.paper, 0.95),
+                                                backdropFilter: 'blur(20px)',
+                                                border: `1px solid ${alpha(theme.palette.divider, 0.12)}`,
+                                                boxShadow: `0 8px 24px ${alpha(theme.palette.common.black, 0.15)}`,
+                                                animation: `${messageSlideIn} 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)`
+                                            }}
+                                        >
+                                            <Stack direction="row" spacing={0.8}>
+                                                {commonReactions.map(({ emoji, label }) => (
+                                                    <Tooltip key={emoji} title={label}>
+                                                        <IconButton
+                                                            size="small"
+                                                            onClick={() => handleReaction(emoji)}
+                                                            sx={{
+                                                                fontSize: '1.25rem',
+                                                                transition: 'all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                                                                '&:hover': {
+                                                                    transform: 'scale(1.35)',
+                                                                    bgcolor: alpha(theme.palette.primary.main, 0.12),
+                                                                    boxShadow: `0 2px 8px ${alpha(theme.palette.primary.main, 0.2)}`
+                                                                }
+                                                            }}
+                                                        >
+                                                            {emoji}
+                                                        </IconButton>
+                                                    </Tooltip>
+                                                ))}
+                                            </Stack>
+                                        </Paper>
+                                    </Fade>
+                                )}
+                            </Box>
+                        </Slide>
                     </Box>
                 </Box>
             </Fade>
@@ -743,13 +617,22 @@ const ModernMessageBubble: React.FC<ModernMessageBubbleProps> = ({
                 anchorEl={menuAnchor}
                 open={Boolean(menuAnchor)}
                 onClose={handleMenuClose}
+                TransitionComponent={Fade}
+                transitionDuration={250}
                 PaperProps={{
                     sx: {
-                        borderRadius: 2,
-                        minWidth: 180,
+                        borderRadius: 3,
+                        minWidth: 200,
                         bgcolor: alpha(theme.palette.background.paper, 0.95),
                         backdropFilter: 'blur(20px)',
-                        border: `1px solid ${alpha(theme.palette.divider, 0.1)}`
+                        border: `1px solid ${alpha(theme.palette.divider, 0.12)}`,
+                        boxShadow: `0 8px 24px ${alpha(theme.palette.common.black, 0.15)}`,
+                        overflow: 'hidden',
+                        '& .MuiMenuItem-root': {
+                            transition: 'background-color 0.2s ease',
+                            px: 2,
+                            py: 1.2
+                        }
                     }
                 }}
             >

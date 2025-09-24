@@ -20,6 +20,13 @@ export interface UseMessagesReturn {
   typingUsers: Record<string, string[]>;
   searchResults: MessageData[];
   searching: boolean;
+  totalUnread: number;
+
+  // Sound controls
+  soundsEnabled: boolean;
+  toggleSounds: () => void;
+  soundVolume: number;
+  setSoundVolume: (v: number) => void;
 
   // Conversation actions
   fetchConversations: () => Promise<void>;
@@ -58,6 +65,97 @@ export const useMessages = (): UseMessagesReturn => {
   const [searching, setSearching] = useState(false);
 
   const typingTimeoutsRef = useRef<Record<string, NodeJS.Timeout>>({});
+  const messageSoundRef = useRef<HTMLAudioElement | null>(null);
+  const soundInitRef = useRef(false);
+
+  // Sound notification controls
+  const [soundsEnabled, setSoundsEnabled] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    const saved = localStorage.getItem('messages:soundsEnabled');
+    return saved === null ? true : saved === 'true';
+  });
+  const [soundVolume, setSoundVolume] = useState<number>(() => {
+    if (typeof window === 'undefined') return 0.6;
+    const saved = localStorage.getItem('messages:soundVolume');
+    const v = saved ? Number(saved) : 0.6;
+    return isNaN(v) ? 0.6 : Math.min(1, Math.max(0, v));
+  });
+
+  const initMessageSound = useCallback(() => {
+    if (typeof window === 'undefined' || soundInitRef.current) return;
+    try {
+      const audio = new Audio('/sounds/ringtone.wav');
+      audio.preload = 'auto';
+      audio.volume = soundVolume;
+      audio.muted = true; // start muted to satisfy autoplay policies
+      messageSoundRef.current = audio;
+
+      // Unlock audio on first user gesture
+      const unlock = async () => {
+        if (!messageSoundRef.current) return;
+        try {
+          await messageSoundRef.current.play();
+        } catch {}
+        messageSoundRef.current.pause();
+        messageSoundRef.current.currentTime = 0;
+        messageSoundRef.current.muted = false;
+        soundInitRef.current = true;
+        window.removeEventListener('click', unlock);
+        window.removeEventListener('keydown', unlock);
+        window.removeEventListener('touchstart', unlock);
+      };
+
+      window.addEventListener('click', unlock, { once: true });
+      window.addEventListener('keydown', unlock, { once: true });
+      window.addEventListener('touchstart', unlock, { once: true });
+    } catch (e) {
+      console.debug('Init message sound failed:', e);
+    }
+  }, [soundVolume]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (messageSoundRef.current) messageSoundRef.current.volume = soundVolume;
+    localStorage.setItem('messages:soundVolume', String(soundVolume));
+  }, [soundVolume]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem('messages:soundsEnabled', String(soundsEnabled));
+    if (soundsEnabled) initMessageSound();
+  }, [soundsEnabled, initMessageSound]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    initMessageSound();
+    return () => {
+      // listeners are once:true, this is just a safety cleanup
+      // no-op cleanup handlers
+    };
+  }, [initMessageSound]);
+
+  const playMessageSound = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    if (!soundsEnabled) return;
+    const audio = messageSoundRef.current;
+    if (!audio) {
+      try {
+        const a = new Audio('/sounds/ringtone.wav');
+        a.volume = soundVolume;
+        a.play().catch(() => {});
+      } catch {}
+      return;
+    }
+    try {
+      audio.currentTime = 0;
+      audio.play().catch(() => {});
+    } catch {}
+  }, [soundsEnabled, soundVolume]);
+
+  const toggleSounds = useCallback(() => setSoundsEnabled(v => !v), []);
+
+  // Calculate total unread messages
+  const totalUnread = conversations.reduce((sum, conv) => sum + (conv.unreadCount || 0), 0);
 
   // Fetch conversations
   const fetchConversations = useCallback(async () => {
@@ -732,6 +830,11 @@ export const useMessages = (): UseMessagesReturn => {
 
             return updatedConversations;
           });
+
+          // Play notification sound for incoming messages
+          if (typeof window !== 'undefined' && message.senderId !== user?.id) {
+            playMessageSound();
+          }
         });
 
         // Listen for message updates
@@ -885,6 +988,13 @@ export const useMessages = (): UseMessagesReturn => {
     typingUsers,
     searchResults,
     searching,
+    totalUnread,
+
+    // Sound controls
+    soundsEnabled,
+    toggleSounds,
+    soundVolume,
+    setSoundVolume,
 
     fetchConversations,
     fetchConversation,

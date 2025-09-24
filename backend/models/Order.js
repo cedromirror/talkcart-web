@@ -61,6 +61,7 @@ const orderSchema = new mongoose.Schema({
     type: Object,
     required: true
   },
+  tx_ref: { type: String, index: true },
   status: {
     type: String,
     required: true,
@@ -100,5 +101,7 @@ orderSchema.index({ userId: 1, createdAt: -1 });
 // orderNumber index is automatically created by unique: true constraint
 orderSchema.index({ status: 1 });
 orderSchema.index({ paymentMethod: 1 });
+orderSchema.index({ 'paymentDetails.paymentIntentId': 1 });
+orderSchema.index({ tx_ref: 1 });
 
 module.exports = mongoose.model('Order', orderSchema);

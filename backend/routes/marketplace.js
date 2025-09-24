@@ -360,6 +360,7 @@ router.post('/products', authenticateTokenStrict, async (req, res) => {
         then: Joi.number().integer().valid(1).default(1),
         otherwise: Joi.number().integer().min(0).max(1_000_000).default(1),
       }),
+      featured: Joi.boolean().default(false),
       isNFT: Joi.boolean().default(false),
       contractAddress: Joi.alternatives().conditional('isNFT', {
         is: true,
@@ -399,6 +400,7 @@ router.post('/products', authenticateTokenStrict, async (req, res) => {
       category: value.category,
       tags: (value.tags || []).map(t => t.trim()),
       stock: value.stock,
+      featured: value.featured,
       isNFT: value.isNFT,
       contractAddress: value.isNFT ? value.contractAddress : undefined,
       tokenId: value.isNFT ? value.tokenId : undefined,

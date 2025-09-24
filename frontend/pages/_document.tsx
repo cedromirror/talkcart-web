@@ -4,8 +4,7 @@ export default function Document() {
   return (
     <Html lang="en">
       <Head>
-        {/* Viewport meta tag for responsive design */}
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+
 
         {/* Meta tags for SEO and social sharing */}
         <meta name="description" content="The future of Web3 social commerce platform" />

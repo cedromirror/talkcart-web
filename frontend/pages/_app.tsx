@@ -77,6 +77,7 @@ function MyApp({ Component, pageProps }: AppProps) {
     <ErrorBoundary>
       <Head>
         <title>TalkCart - Web3 Super Application</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
 
       <QueryClientProvider client={queryClient}>

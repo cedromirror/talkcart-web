@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { useRouter } from 'next/router';
 import { useAuth } from '@/contexts/AuthContext';
+import useMessages from '@/hooks/useMessages';
 import NavigationItem from './NavigationItem';
 import UserAvatar from '../common/UserAvatar';
 
@@ -73,6 +74,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const router = useRouter();
   const { user, logout, isAuthenticated } = useAuth();
+  const { totalUnread } = useMessages();
   const theme = useTheme();
 
   // State for collapsible sections
@@ -107,14 +109,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           path: '/messages',
           icon: <MessageCircle size={20} />,
           tooltip: 'Private messages & conversations',
-          badge: '3',
-        },
-        {
-          label: 'Streams',
-          path: '/streams',
-          icon: <Video size={20} />,
-          tooltip: 'Watch & create live streams',
-          badge: 'Live',
+          badge: totalUnread > 0 ? totalUnread.toString() : undefined,
         },
       ],
     },

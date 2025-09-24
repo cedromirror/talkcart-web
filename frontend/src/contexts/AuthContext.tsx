@@ -4,20 +4,7 @@ import { api } from '@/lib/api';
 import { User } from '@/types';
 import { normalizeAuthError } from '@/lib/authErrors';
 
-interface AuthContextType {
-  isAuthenticated: boolean;
-  user: User | null;
-  login: (credentials: any) => Promise<boolean>;
-  logout: () => Promise<void>;
-  register: (userData: any) => Promise<boolean>;
-  loading: boolean;
-  updateProfile: (userData: Partial<User>) => Promise<boolean>;
-  updateUser: (userData: Partial<User>) => void;
-  isLoading: boolean;
-  setAuthTokens: (accessToken: string, refreshToken?: string) => void;
-}
-
-export const AuthContext = createContext<AuthContextType | undefined>(undefined);
+import { AuthContext, AuthContextType } from './AuthContextDefinition';
 
 export const useAuth = () => {
   const context = useContext(AuthContext);

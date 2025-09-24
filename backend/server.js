@@ -141,8 +141,12 @@ app.use(bodyParser.json({
     const ct = req.headers['content-type'] || '';
     const url = req.originalUrl || req.url || '';
 
-    // Skip JSON parsing for upload endpoints
-    if (url.startsWith('/api/media/upload') || ct.startsWith('multipart/form-data')) {
+    // Skip JSON parsing for upload and webhook endpoints (webhooks need raw body)
+    if (
+      url.startsWith('/api/media/upload') ||
+      url.startsWith('/api/webhooks') ||
+      ct.startsWith('multipart/form-data')
+    ) {
       return false;
     }
     return ct.includes('application/json');
@@ -291,8 +295,7 @@ app.use('/api/cart', require('./routes/cart'));
 app.use('/api/orders', require('./routes/orders'));
 app.use('/api/messages', require('./routes/messages'));
 app.use('/api/calls', require('./routes/calls'));
-// Streams feature removed
-// app.use('/api/streams', require('./routes/streams'));
+// Streams feature completely removed
 app.use('/api/dao', require('./routes/dao'));
 app.use('/api/analytics', require('./routes/analytics'));
 app.use('/api/media', require('./routes/media'));
@@ -300,8 +303,11 @@ app.use('/api/nfts', require('./routes/nfts'));
 app.use('/api/wallet', require('./routes/wallet'));
 app.use('/api/defi', require('./routes/defi'));
 app.use('/api/payments', require('./routes/payments'));
-app.use('/api/admin', require('./routes/admin'));
-app.use('/api/admin', require('./routes/adminSignup'));
+// Admin routes
+const adminRouter = require('./routes/admin');
+const adminSignupRouter = require('./routes/adminSignup');
+app.use('/api/admin/signup', adminSignupRouter);
+app.use('/api/admin', adminRouter);
 app.use('/api/webhooks', require('./routes/webhooks'));
 
 // Periodic cleanup: run every 10 minutes
@@ -312,6 +318,111 @@ cron.schedule('*/10 * * * *', async () => {
     console.error('[Cron] Moderation cleanup failed:', err);
   }
 });
+
+// Function to update and emit trending hashtags
+const updateAndEmitTrendingHashtags = async () => {
+  try {
+    const Post = require('./models/Post');
+    
+    // Aggregate trending hashtags using the same logic as the API endpoint
+    const trendingHashtags = await Post.aggregate([
+      {
+        $match: {
+          isActive: true,
+          hashtags: { $exists: true, $ne: [] }
+        }
+      },
+      { $unwind: '$hashtags' },
+      // Compute per-post engagement metrics
+      {
+        $addFields: {
+          likesCount: { $size: { $ifNull: ['$likes', []] } },
+          sharesCount: { $size: { $ifNull: ['$shares', []] } },
+          viewsCount: { $ifNull: ['$views', 0] }
+        }
+      },
+      // Lookup comment count for each post
+      {
+        $lookup: {
+          from: 'comments',
+          let: { postId: '$_id' },
+          pipeline: [
+            { $match: { $expr: { $and: [ { $eq: ['$post', '$$postId'] }, { $eq: ['$isActive', true] } ] } } },
+            { $count: 'count' }
+          ],
+          as: 'commentAgg'
+        }
+      },
+      {
+        $addFields: {
+          commentCount: { $ifNull: [ { $arrayElemAt: ['$commentAgg.count', 0] }, 0 ] }
+        }
+      },
+      // Time decay weight based on post age (so newer posts weigh more)
+      {
+        $addFields: {
+          ageHours: { $divide: [ { $subtract: [ new Date(), '$createdAt' ] }, 3600000 ] },
+          decayWeight: { $divide: [ 1, { $add: [ 1, { $divide: [ { $divide: [ { $subtract: [ new Date(), '$createdAt' ] }, 3600000 ] }, 24 ] } ] } ] } // 1 / (1 + ageHours/24)
+        }
+      },
+      // Per-post score with weights
+      {
+        $addFields: {
+          postScore: {
+            $multiply: [
+              { $add: [
+                1, // base
+                { $multiply: ['$likesCount', 2] },
+                { $multiply: ['$commentCount', 3] },
+                { $multiply: ['$sharesCount', 4] },
+                { $multiply: ['$viewsCount', 0.1] }
+              ] },
+              '$decayWeight'
+            ]
+          }
+        }
+      },
+      // Group by hashtag
+      {
+        $group: {
+          _id: '$hashtags',
+          count: { $sum: 1 },
+          totalLikes: { $sum: '$likesCount' },
+          totalComments: { $sum: '$commentCount' },
+          totalShares: { $sum: '$sharesCount' },
+          totalViews: { $sum: '$viewsCount' },
+          score: { $sum: '$postScore' }
+        }
+      },
+      { $sort: { score: -1 } },
+      { $limit: 5 }, // Limit to top 5 trending hashtags
+      {
+        $project: {
+          hashtag: '$_id',
+          count: 1,
+          totalLikes: 1,
+          totalComments: 1,
+          totalShares: 1,
+          totalViews: 1,
+          score: 1,
+          _id: 0
+        }
+      }
+    ]);
+
+    // Emit trending update to all connected clients
+    io.emit('trending:update', trendingHashtags);
+    console.log(`📊 Emitted trending hashtags update with ${trendingHashtags.length} hashtags`);
+  } catch (error) {
+    console.error('Error updating trending hashtags:', error);
+  }
+};
+
+// Schedule periodic trending hashtags updates (every 5 minutes)
+cron.schedule('*/5 * * * *', updateAndEmitTrendingHashtags);
+
+// Initial trending hashtags update when server starts
+setTimeout(updateAndEmitTrendingHashtags, 5000);
 
 // Root route - API documentation
 app.get('/', (req, res) => {
@@ -417,29 +528,7 @@ app.use('/api/*', (req, res) => {
 // SOCKET.IO REAL-TIME FUNCTIONALITY
 // ============================================================================
 
-// In-memory stores for live goals and polls (reset on server restart)
-const streamGoals = new Map(); // streamId -> { type: 'likes'|'donations', target: number, title?: string, progress: number }
-const streamPolls = new Map(); // streamId -> { question: string, options: string[], counts: number[], voters: Set<string>, active: boolean }
-
-function getGoal(streamId) {
-  return streamGoals.get(String(streamId)) || null;
-}
-function setGoal(streamId, goal) {
-  streamGoals.set(String(streamId), goal);
-}
-function clearGoal(streamId) {
-  streamGoals.delete(String(streamId));
-}
-
-function getPoll(streamId) {
-  return streamPolls.get(String(streamId)) || null;
-}
-function setPoll(streamId, poll) {
-  streamPolls.set(String(streamId), poll);
-}
-function clearPoll(streamId) {
-  streamPolls.delete(String(streamId));
-}
+// Stream functionality has been removed
 
 // Store connected users
 const connectedUsers = new Map();
@@ -524,6 +613,9 @@ io.on('connection', (socket) => {
     socket.broadcast.to('feed_for-you').emit('post-created', postData);
     socket.broadcast.to('feed_recent').emit('post-created', postData);
     socket.broadcast.to('feed_trending').emit('post-created', postData);
+    
+    // Trigger trending hashtags update after new post
+    updateAndEmitTrendingHashtags();
   });
 
   // Handle post interaction updates
@@ -540,435 +632,16 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Streaming rooms and WebRTC signaling
-  const streamRooms = new Map(); // streamId -> { viewers:Set<string>, hosts:Set<string>, publishers:Set<string>, peak:number, pendingRequests: Map<socketId, { socketId,userId,displayName,requestedAt,expiresAt }>, requestTimers: Map<socketId, NodeJS.Timeout> }
+  // Stream functionality has been removed
 
-  const getRoom = (streamId) => {
-    if (!streamRooms.has(streamId)) {
-      streamRooms.set(streamId, { viewers: new Set(), hosts: new Set(), publishers: new Set(), peak: 0, pendingRequests: new Map(), requestTimers: new Map() });
-    }
-    return streamRooms.get(streamId);
-  };
-
-  const getIdentityBySocket = (sid) => {
-    const sock = io.sockets.sockets.get(sid);
-    if (!sock) return { socketId: sid };
-    return {
-      socketId: sid,
-      userId: sock.userId || null,
-      displayName: sock.displayName || (sock.userId ? `user-${String(sock.userId).slice(-4)}` : `viewer-${sid.slice(-4)}`),
-    };
-  };
-
-  const emitPublishers = (streamId) => {
-    const room = getRoom(streamId);
-    const publishers = Array.from(room.publishers).map(getIdentityBySocket);
-    io.to(`stream_${streamId}`).emit('webrtc:publishers', { streamId, publishers });
-  };
-
-  const emitHosts = (streamId) => {
-    const room = getRoom(streamId);
-    const hosts = Array.from(room.hosts).map(getIdentityBySocket);
-    io.to(`stream_${streamId}`).emit('webrtc:hosts', { streamId, hosts });
-  };
-
-  const broadcastViewerUpdate = (streamId) => {
-    const room = getRoom(streamId);
-    const viewerCount = room.viewers.size + room.hosts.size; // publishers are a subset of viewers/hosts
-    room.peak = Math.max(room.peak, viewerCount);
-    io.to(`stream_${streamId}`).emit('viewer_update', {
-      streamId,
-      viewerCount,
-      peakViewerCount: room.peak,
-      viewers: Array.from(room.viewers).map((sid) => ({ id: sid, username: `viewer-${sid.slice(-4)}`, displayName: `Viewer ${sid.slice(-4)}` })),
-    });
-  };
-
-  socket.on('join-stream', async (streamId) => {
-    if (!streamId) return;
-
-    try {
-      // Join both WebRTC room and general stream room
-      socket.join(`stream_${streamId}`);
-      socket.join(`stream-${streamId}`);
-      socket.currentStream = streamId;
-
-      const room = getRoom(streamId);
-      // If socket was host for this stream, keep host role; else add as viewer
-      if (!room.hosts.has(socket.id)) room.viewers.add(socket.id);
-      broadcastViewerUpdate(streamId);
-
-      // Increment viewer count in database
-      const Stream = require('./models/Stream');
-      const stream = await Stream.findByIdAndUpdate(
-        streamId,
-        {
-          $inc: { viewerCount: 1 }
-        },
-        { new: true }
-      );
-
-      // Update peak viewer count separately if needed
-      if (stream && stream.viewerCount > (stream.peakViewerCount || 0)) {
-        await Stream.findByIdAndUpdate(streamId, {
-          peakViewerCount: stream.viewerCount
-        });
-      }
-
-      if (stream) {
-        // Broadcast updated viewer count to all viewers
-        io.to(`stream-${streamId}`).emit('stream-viewers-update', {
-          streamId,
-          viewerCount: stream.viewerCount,
-          peakViewerCount: Math.max(stream.peakViewerCount || 0, stream.viewerCount)
-        });
-
-        // Send current stream data to new viewer
-        socket.emit('stream-data', {
-          streamId,
-          isLive: stream.isLive,
-          viewerCount: stream.viewerCount,
-          peakViewerCount: Math.max(stream.peakViewerCount || 0, stream.viewerCount),
-          health: stream.health,
-          settings: stream.settings,
-          monetization: stream.monetization
-        });
-      }
-      // Toast: viewer joined
-      io.to(`stream-${streamId}`).emit('live:viewer:joined', {
-        streamId,
-        userId: socket.userId || socket.id,
-        username: socket.displayName || socket.username || `viewer-${socket.id.slice(-4)}`,
-        timestamp: new Date().toISOString()
-      });
-
-      console.log(`🎥 Socket ${socket.id} joined stream ${streamId}`);
-    } catch (error) {
-      console.error('Error joining stream:', error);
-      socket.emit('stream-error', { message: 'Failed to join stream' });
-    }
-  });
-
-  socket.on('leave-stream', async (streamId) => {
-    if (!streamId) return;
-
-    try {
-      // Leave both WebRTC room and general stream room
-      socket.leave(`stream_${streamId}`);
-      socket.leave(`stream-${streamId}`);
-
-      const room = getRoom(streamId);
-      room.viewers.delete(socket.id);
-      room.hosts.delete(socket.id);
-      broadcastViewerUpdate(streamId);
-
-      // Decrement viewer count in database
-      const Stream = require('./models/Stream');
-      await Stream.findByIdAndUpdate(streamId, {
-        $inc: { viewerCount: -1 }
-      });
-
-      const stream = await Stream.findById(streamId);
-      if (stream) {
-        // Broadcast updated viewer count
-        io.to(`stream-${streamId}`).emit('stream-viewers-update', {
-          streamId,
-          viewerCount: Math.max(0, stream.viewerCount)
-        });
-      }
-      // Toast: viewer left
-      io.to(`stream-${streamId}`).emit('live:viewer:left', {
-        streamId,
-        userId: socket.userId || socket.id,
-        username: socket.displayName || socket.username || `viewer-${socket.id.slice(-4)}`,
-        timestamp: new Date().toISOString()
-      });
-
-      console.log(`🎥 Socket ${socket.id} left stream ${streamId}`);
-    } catch (error) {
-      console.error('Error leaving stream:', error);
-    }
-  });
-
-  // Helper: validate JWT from client and attach socket.userId
-  const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
-  function authenticateSocket(auth) {
-    try {
-      const token = auth?.token;
-      if (!token || token === 'anonymous-access-token') return { userId: null };
-      const payload = jwt.verify(token, JWT_SECRET);
-      return { userId: payload.userId };
-    } catch {
-      return { userId: null };
-    }
-  }
-
-  // WebRTC: join as host/viewer and exchange signaling
-  socket.on('webrtc:join', async ({ streamId, role, token }) => {
-    if (!streamId) return;
-
-    // Attach identity if provided
-    const identity = authenticateSocket({ token });
-    if (identity.userId) socket.userId = identity.userId;
-
-    const room = getRoom(streamId);
-    socket.join(`stream_${streamId}`);
-
-    // Role validation for 'host': only the stream owner or moderators can be host
-    if (role === 'host') {
-      try {
-        const stream = await Stream.findById(streamId).lean();
-        const uid = socket.userId || null;
-        const isOwner = uid && String(stream?.streamerId) === String(uid);
-        const isModerator = uid && Array.isArray(stream?.moderators) && stream.moderators.some(m => String(m.userId) === String(uid));
-        if (isOwner || isModerator) {
-          room.hosts.add(socket.id);
-          room.viewers.delete(socket.id);
-          room.publishers.add(socket.id); // host publishes by default
-        } else {
-          // Fallback to viewer if spoofed
-          room.viewers.add(socket.id);
-          room.hosts.delete(socket.id);
-        }
-      } catch {
-        room.viewers.add(socket.id);
-      }
-    } else {
-      room.viewers.add(socket.id);
-      room.hosts.delete(socket.id);
-    }
-
-    // Attach lightweight identity for display (always set a displayName)
-    if (socket.userId) {
-      try {
-        const user = await User.findById(socket.userId).select('username displayName').lean();
-        socket.displayName = user?.displayName || user?.username || `user-${String(socket.userId).slice(-4)}`;
-      } catch {
-        socket.displayName = `user-${(socket.userId || 'anon').toString().slice(-4)}`;
-      }
-    }
-    if (!socket.displayName) {
-      socket.displayName = `viewer-${socket.id.slice(-4)}`;
-    }
-
-    // Notify room of current hosts (with identities) and current publishers
-    emitHosts(streamId);
-    emitPublishers(streamId);
-    broadcastViewerUpdate(streamId);
-    console.log(`📡 WebRTC join: ${socket.id} as ${role} in stream ${streamId}`);
-  });
-
-  socket.on('webrtc:signal', ({ to, data }) => {
-    if (!to || !data) return;
-    io.to(to).emit('webrtc:signal', { from: socket.id, data });
-  });
-
-  // Guest publishing: request/approve/deny and toggle publish state
-  socket.on('webrtc:request-publish', ({ streamId }) => {
-    if (!streamId) return;
-    const room = getRoom(streamId);
-
-    // Track pending request with TTL
-    const now = Date.now();
-    const ttlMs = Number(process.env.STREAM_REQUEST_TTL_MS || 30000);
-    const requester = { socketId: socket.id, userId: socket.userId || null, displayName: socket.displayName || `viewer-${socket.id.slice(-4)}`, requestedAt: now, expiresAt: now + ttlMs };
-    room.pendingRequests.set(socket.id, requester);
-
-    // Auto-expire request
-    if (room.requestTimers.has(socket.id)) clearTimeout(room.requestTimers.get(socket.id));
-    const timer = setTimeout(() => {
-      const r = getRoom(streamId);
-      if (!r) return;
-      r.pendingRequests.delete(socket.id);
-      r.requestTimers.delete(socket.id);
-      Array.from(r.hosts).forEach((hostId) => {
-        io.to(hostId).emit('webrtc:publish-request-expired', { streamId, requesterId: socket.id });
-      });
-    }, ttlMs);
-    room.requestTimers.set(socket.id, timer);
-
-    // Notify hosts for approval request (include requester identity)
-    Array.from(room.hosts).forEach((hostId) => {
-      io.to(hostId).emit('webrtc:publish-request', { streamId, requester });
-    });
-  });
-
-  socket.on('webrtc:approve-publish', async ({ streamId, requester, token }) => {
-    if (!streamId || !requester) return;
-    const room = getRoom(streamId);
-
-    // Strict permission: only streamer or moderators can approve
-    const identity = authenticateSocket({ token });
-    const uid = identity.userId || socket.userId || null;
-    if (!uid) return;
-
-    try {
-      const stream = await Stream.findById(streamId).lean();
-      const isOwner = uid && String(stream?.streamerId) === String(uid);
-      const isModerator = uid && Array.isArray(stream?.moderators) && stream.moderators.some(m => String(m.userId) === String(uid));
-      if (!isOwner && !isModerator) return;
-    } catch {
-      return;
-    }
-
-    room.publishers.add(requester);
-    // Clear pending request and timer
-    room.pendingRequests.delete(requester);
-    const t = room.requestTimers.get(requester);
-    if (t) { clearTimeout(t); room.requestTimers.delete(requester); }
-
-    emitPublishers(streamId);
-    // Notify requester they may start publishing
-    io.to(requester).emit('webrtc:publish-approved', { streamId, by: socket.id });
-  });
-
-  socket.on('webrtc:deny-publish', async ({ streamId, requester, token }) => {
-    if (!streamId || !requester) return;
-    const room = getRoom(streamId);
-
-    // Strict permission: only streamer or moderators can deny
-    const identity = authenticateSocket({ token });
-    const uid = identity.userId || socket.userId || null;
-    if (!uid) return;
-
-    try {
-      const stream = await Stream.findById(streamId).lean();
-      const isOwner = uid && String(stream?.streamerId) === String(uid);
-      const isModerator = uid && Array.isArray(stream?.moderators) && stream.moderators.some(m => String(m.userId) === String(uid));
-      if (!isOwner && !isModerator) return;
-    } catch {
-      return;
-    }
-
-    // Clear pending request and timer
-    room.pendingRequests.delete(requester);
-    const t = room.requestTimers.get(requester);
-    if (t) { clearTimeout(t); room.requestTimers.delete(requester); }
-
-    io.to(requester).emit('webrtc:publish-denied', { streamId, by: socket.id });
-  });
-
-  socket.on('webrtc:stop-publish', ({ streamId, token }) => {
-    if (!streamId) return;
-    const room = getRoom(streamId);
-    room.publishers.delete(socket.id);
-    emitPublishers(streamId);
-  });
-
-  // Optional: Mute/unmute per-track via signaling
-  socket.on('webrtc:moderate-track', async ({ streamId, targetSocketId, kind, action, token }) => {
-    if (!streamId || !targetSocketId || !kind || !action) return;
-    const identity = authenticateSocket({ token });
-    const uid = identity.userId || socket.userId || null;
-    if (!uid) return;
-    try {
-      const stream = await Stream.findById(streamId).lean();
-      const isOwner = uid && String(stream?.streamerId) === String(uid);
-      const isModerator = uid && Array.isArray(stream?.moderators) && stream.moderators.some(m => String(m.userId) === String(uid));
-      if (!isOwner && !isModerator) return;
-    } catch { return; }
-
-    // Forward moderation command to the target client
-    io.to(targetSocketId).emit('webrtc:moderate-track', { streamId, kind, action, by: socket.id });
-  });
-
-  // Host moderation: revoke a publisher, mute/kick, clear requests
-  socket.on('webrtc:revoke-publish', async ({ streamId, targetSocketId, token }) => {
-    if (!streamId || !targetSocketId) return;
-    const identity = authenticateSocket({ token });
-    const uid = identity.userId || socket.userId || null;
-    if (!uid) return;
-    try {
-      const stream = await Stream.findById(streamId).lean();
-      const isOwner = uid && String(stream?.streamerId) === String(uid);
-      const isModerator = uid && Array.isArray(stream?.moderators) && stream.moderators.some(m => String(m.userId) === String(uid));
-      if (!isOwner && !isModerator) return;
-    } catch { return; }
-
-    const room = getRoom(streamId);
-    room.publishers.delete(targetSocketId);
-    io.to(targetSocketId).emit('webrtc:publish-revoked', { streamId, by: socket.id });
-    emitPublishers(streamId);
-  });
-
-  socket.on('webrtc:kick', async ({ streamId, targetSocketId, token }) => {
-    if (!streamId || !targetSocketId) return;
-    const identity = authenticateSocket({ token });
-    const uid = identity.userId || socket.userId || null;
-    if (!uid) return;
-    try {
-      const stream = await Stream.findById(streamId).lean();
-      const isOwner = uid && String(stream?.streamerId) === String(uid);
-      const isModerator = uid && Array.isArray(stream?.moderators) && stream.moderators.some(m => String(m.userId) === String(uid));
-      if (!isOwner && !isModerator) return;
-    } catch { return; }
-
-    const room = getRoom(streamId);
-    room.viewers.delete(targetSocketId);
-    room.hosts.delete(targetSocketId);
-    room.publishers.delete(targetSocketId);
-    io.to(`stream_${streamId}`).emit('webrtc:participant-leave', { peerId: targetSocketId });
-    emitHosts(streamId);
-    emitPublishers(streamId);
-    broadcastViewerUpdate(streamId);
-  });
-
-  socket.on('webrtc:clear-requests', async ({ streamId, token }) => {
-    // This is a no-op server-side since requests are transient; included for API completeness
-    // Could be extended to track pending requests server-side if desired.
-    // Permission check anyway:
-    const identity = authenticateSocket({ token });
-    const uid = identity.userId || socket.userId || null;
-    if (!uid) return;
-    try {
-      const stream = await Stream.findById(streamId).lean();
-      const isOwner = uid && String(stream?.streamerId) === String(uid);
-      const isModerator = uid && Array.isArray(stream?.moderators) && stream.moderators.some(m => String(m.userId) === String(uid));
-      if (!isOwner && !isModerator) return;
-    } catch { return; }
-    // Clear all pending requests and timers
-    const room = getRoom(streamId);
-    if (room) {
-      room.pendingRequests.forEach((_v, sid) => {
-        const tt = room.requestTimers.get(sid);
-        if (tt) clearTimeout(tt);
-      });
-      room.pendingRequests.clear();
-      room.requestTimers.clear();
-    }
-
-    // Ack back
-    io.to(socket.id).emit('webrtc:requests-cleared', { streamId });
-  });
-
-  socket.on('webrtc:leave', ({ streamId }) => {
-    if (!streamId) return;
-    const room = getRoom(streamId);
-    room.viewers.delete(socket.id);
-    room.hosts.delete(socket.id);
-    room.publishers.delete(socket.id);
-    io.to(`stream_${streamId}`).emit('webrtc:participant-leave', { peerId: socket.id });
-    emitHosts(streamId);
-    emitPublishers(streamId);
-    broadcastViewerUpdate(streamId);
+  // Join trending topics room for updates
+  socket.on('join-trending', () => {
+    socket.join('trending-topics');
+    console.log(`📊 Socket ${socket.id} joined trending-topics room`);
   });
 
   // Handle user disconnect
   socket.on('disconnect', async () => {
-    // Cleanup from all stream rooms
-    for (const [streamId, room] of streamRooms.entries()) {
-      let changed = false;
-      if (room.viewers.delete(socket.id)) changed = true;
-      if (room.hosts.delete(socket.id)) changed = true;
-      if (room.publishers.delete(socket.id)) changed = true;
-      if (changed) {
-        io.to(`stream_${streamId}`).emit('webrtc:participant-leave', { peerId: socket.id });
-        emitHosts(streamId);
-        emitPublishers(streamId);
-        broadcastViewerUpdate(streamId);
-      }
-    }
-
     const userId = connectedUsers.get(socket.id);
     if (userId) {
       connectedUsers.delete(socket.id);
@@ -1140,158 +813,7 @@ io.on('connection', (socket) => {
     });
   });
 
-  // ============================================================================
-  // STREAM REAL-TIME HANDLERS (Additional handlers - join/leave consolidated above)
-  // ============================================================================
-
-  // Handle stream chat messages
-  socket.on('stream-chat', async (data) => {
-    const { streamId, message, userId, username, avatar } = data;
-
-    try {
-      const Stream = require('./models/Stream');
-      const stream = await Stream.findById(streamId);
-
-      if (!stream || !stream.isLive) {
-        socket.emit('stream-error', { message: 'Stream is not live' });
-        return;
-      }
-
-      if (!stream.settings.allowChat) {
-        socket.emit('stream-error', { message: 'Chat is disabled for this stream' });
-        return;
-      }
-
-      // Create chat message object
-      const chatMessage = {
-        id: Date.now().toString(),
-        streamId,
-        userId,
-        username,
-        avatar,
-        message: message.substring(0, 300), // Limit message length
-        timestamp: new Date().toISOString(),
-        type: 'chat'
-      };
-
-      // Increment chat message count
-      await Stream.findByIdAndUpdate(streamId, {
-        $inc: { 'analytics.totalChatMessages': 1 }
-      });
-
-      // Broadcast chat message to all stream viewers
-      io.to(`stream-${streamId}`).emit('stream-chat', chatMessage);
-
-      console.log(`💬 Chat message in stream ${streamId} from ${username}: ${message}`);
-    } catch (error) {
-      console.error('Error handling stream chat:', error);
-      socket.emit('stream-error', { message: 'Failed to send chat message' });
-    }
-  });
-
-  // Handle stream donations
-  socket.on('stream-donation', async (data) => {
-    const { streamId, donorId, streamerId, amount, currency, message, isAnonymous, paymentMethod } = data;
-
-    try {
-      const StreamDonation = require('./models/StreamDonation');
-      const Stream = require('./models/Stream');
-
-      // Create donation record
-      const donation = new StreamDonation({
-        streamId,
-        donorId,
-        streamerId,
-        amount,
-        currency,
-        message,
-        isAnonymous,
-        paymentMethod,
-        status: 'completed', // In real app, this would be 'pending' until payment confirms
-        processingFee: amount * 0.029 + 0.30, // Example: Stripe fees
-        isHighlighted: amount >= 50, // Highlight donations >= $50
-        highlightColor: amount >= 100 ? '#FFD700' : amount >= 50 ? '#FF6B6B' : null,
-        displayDuration: Math.min(Math.max(amount / 10, 5), 30) // 5-30 seconds based on amount
-      });
-
-      await donation.save();
-
-      // Update stream's total donations
-      const stream = await Stream.findByIdAndUpdate(streamId, {
-        $inc: { 'monetization.totalDonations': amount }
-      }, { new: true });
-
-      // Prepare donation notification
-      const donationNotification = {
-        id: donation._id,
-        streamId,
-        donorUsername: isAnonymous ? 'Anonymous' : data.donorUsername,
-        amount,
-        currency,
-        message,
-        isAnonymous,
-        isHighlighted: donation.isHighlighted,
-        highlightColor: donation.highlightColor,
-        displayDuration: donation.displayDuration,
-        timestamp: new Date().toISOString(),
-        type: 'donation',
-        totalDonations: stream.monetization.totalDonations
-      };
-
-      // Broadcast donation to all stream viewers
-      io.to(`stream-${streamId}`).emit('stream-donation', donationNotification);
-
-      // Send personal notification to streamer
-      io.to(`user-${streamerId}`).emit('donation-received', donationNotification);
-
-      console.log(`💰 Donation in stream ${streamId}: $${amount} from ${donationNotification.donorUsername}`);
-    } catch (error) {
-      console.error('Error handling stream donation:', error);
-      socket.emit('stream-error', { message: 'Failed to process donation' });
-    }
-  });
-
-  // Handle stream health updates (from streaming software/server)
-  socket.on('stream-health-update', async (data) => {
-    const { streamId, bitrate, fps, quality, latency, droppedFrames } = data;
-
-    try {
-      const Stream = require('./models/Stream');
-      const stream = await Stream.findByIdAndUpdate(
-        streamId,
-        {
-          'health.bitrate': bitrate,
-          'health.fps': fps,
-          'health.quality': quality,
-          'health.latency': latency,
-          'health.droppedFrames': droppedFrames,
-          'health.status': 'live'
-        },
-        { new: true }
-      );
-
-      if (stream) {
-        // Broadcast health update to stream viewers (optional, for debugging)
-        if (stream.settings.showHealthMetrics) {
-          io.to(`stream-${streamId}`).emit('stream-health', {
-            streamId,
-            health: stream.health
-          });
-        }
-
-        // Alert if quality is poor
-        if (quality === 'poor' || droppedFrames > 100) {
-          io.to(`user-${stream.streamerId}`).emit('stream-quality-alert', {
-            streamId,
-            issue: quality === 'poor' ? 'Poor quality detected' : 'High dropped frames',
-            health: stream.health
-          });
-        }
-      }
-    } catch (error) {
-      console.error('Error updating stream health:', error);
-    }
-  });
+  // Stream-related handlers have been removed
 
   // Handle general follow/unfollow updates
   socket.on('follow_update', async (data) => {
@@ -1322,165 +844,9 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Handle stream follow notifications
-  socket.on('stream-follow', async (data) => {
-    const { streamId, followerId, followerUsername, streamerId } = data;
-
+  // Handle stream follow events
+  socket.on('stream-follow', async ({ streamId, followerId, followerUsername, streamerId }) => {
     try {
-      const Stream = require('./models/Stream');
-      // ===================== TikTok-style Live Feature Events =====================
-      // Hearts on tap
-      let lastLikeAt = 0;
-      socket.on('live:like', async ({ streamId, count }) => {
-        const now = Date.now();
-        if (!streamId || now - lastLikeAt < 200) return;
-        lastLikeAt = now;
-        const incBy = Math.max(1, Math.min(Number(count) || 1, 10));
-        try {
-          const Stream = require('./models/Stream');
-          const stream = await Stream.findByIdAndUpdate(
-            streamId,
-            { $inc: { 'analytics.totalLikes': incBy } },
-            { new: true }
-          ).lean();
-          if (!stream) return;
-          io.to(`stream-${streamId}`).emit('live:like:count', {
-            streamId,
-            totalLikes: stream.analytics?.totalLikes || 0
-          });
-          io.to(`stream-${streamId}`).emit('live:like:burst', {
-            streamId,
-            count: incBy,
-            userId: socket.userId || socket.id,
-            timestamp: new Date().toISOString()
-          });
-          const goal = getGoal(streamId);
-          if (goal && goal.type === 'likes') {
-            goal.progress = (goal.progress || 0) + incBy;
-            setGoal(streamId, goal);
-            io.to(`stream-${streamId}`).emit('live:goal:update', { streamId, goal });
-            if (goal.target && goal.progress >= goal.target) {
-              io.to(`stream-${streamId}`).emit('live:goal:achieved', { streamId, goal });
-            }
-          }
-        } catch (e) {
-          console.warn('live:like error:', e?.message);
-        }
-      });
-
-      // Gifts overlay (lightweight gifts separate from donations)
-      socket.on('live:gift', async ({ streamId, giftType, targetUserId }) => {
-        if (!streamId || !giftType) return;
-        try {
-          const Stream = require('./models/Stream');
-          const stream = await Stream.findById(streamId);
-          if (!stream?.isLive || !stream.settings?.allowDonations) return;
-          const giftValues = { heart: 1, star: 5, diamond: 10, crown: 25, rocket: 50 };
-          const giftValue = giftValues[giftType] || 1;
-          await Stream.findByIdAndUpdate(streamId, { $inc: { 'monetization.totalDonations': giftValue } });
-          io.to(`stream-${streamId}`).emit('live:gift:received', {
-            streamId,
-            giftType,
-            giftValue,
-            fromUserId: socket.userId || socket.id,
-            fromUsername: socket.displayName || socket.username || 'Anonymous',
-            targetUserId,
-            timestamp: new Date().toISOString()
-          });
-          const goal = getGoal(streamId);
-          if (goal && goal.type === 'donations') {
-            goal.progress = (goal.progress || 0) + giftValue;
-            setGoal(streamId, goal);
-            io.to(`stream-${streamId}`).emit('live:goal:update', { streamId, goal });
-            if (goal.target && goal.progress >= goal.target) {
-              io.to(`stream-${streamId}`).emit('live:goal:achieved', { streamId, goal });
-            }
-          }
-        } catch (e) {
-          console.warn('live:gift error:', e?.message);
-        }
-      });
-
-      // Pinned messages (owner/moderator only)
-      socket.on('live:pin-message', async ({ streamId, messageId, messageText }) => {
-        if (!streamId || !messageId) return;
-        try {
-          const Stream = require('./models/Stream');
-          const stream = await Stream.findById(streamId).lean();
-          if (!stream) return;
-          const uid = socket.userId || null;
-          const isOwner = uid && String(stream.streamerId) === String(uid);
-          const isModerator = uid && Array.isArray(stream.moderators) && stream.moderators.some(m => String(m.userId) === String(uid));
-          if (!isOwner && !isModerator) return;
-          io.to(`stream-${streamId}`).emit('live:message:pinned', {
-            streamId,
-            messageId,
-            messageText,
-            pinnedBy: socket.displayName || socket.username || 'Moderator',
-            timestamp: new Date().toISOString()
-          });
-        } catch (e) {
-          console.warn('live:pin-message error:', e?.message);
-        }
-      });
-      socket.on('live:unpin-message', ({ streamId }) => {
-        if (!streamId) return;
-        io.to(`stream-${streamId}`).emit('live:message:unpinned', { streamId });
-      });
-
-      // Goals: set/get/clear (in-memory)
-      socket.on('live:goal:set', ({ streamId, type, target, title }) => {
-        if (!streamId || !type) return;
-        const goal = { type, target: Number(target) || 0, title: title || '', progress: 0 };
-        setGoal(streamId, goal);
-        io.to(`stream-${streamId}`).emit('live:goal:update', { streamId, goal });
-      });
-      socket.on('live:goal:get', ({ streamId }) => {
-        const goal = getGoal(streamId);
-        io.to(socket.id).emit('live:goal:current', { streamId, goal });
-      });
-      socket.on('live:goal:clear', ({ streamId }) => {
-        clearGoal(streamId);
-        io.to(`stream-${streamId}`).emit('live:goal:clear', { streamId });
-      });
-
-      // Live polls: start/vote/stop (in-memory)
-      socket.on('live:poll:start', ({ streamId, question, options }) => {
-        if (!streamId || !question || !Array.isArray(options) || options.length < 2) return;
-        const poll = { question, options, counts: options.map(() => 0), voters: new Set(), active: true };
-        setPoll(streamId, poll);
-        io.to(`stream-${streamId}`).emit('live:poll:update', {
-          streamId,
-          poll: { question: poll.question, options: poll.options, counts: poll.counts, active: poll.active }
-        });
-      });
-      socket.on('live:poll:vote', ({ streamId, optionIndex }) => {
-        const poll = getPoll(streamId);
-        if (!poll || !poll.active) return;
-        const voter = String(socket.userId || socket.id);
-        if (poll.voters.has(voter)) return;
-        const idx = Number(optionIndex);
-        if (Number.isNaN(idx) || idx < 0 || idx >= poll.counts.length) return;
-        poll.counts[idx] += 1;
-        poll.voters.add(voter);
-        setPoll(streamId, poll);
-        io.to(`stream-${streamId}`).emit('live:poll:update', {
-          streamId,
-          poll: { question: poll.question, options: poll.options, counts: poll.counts, active: poll.active }
-        });
-      });
-      socket.on('live:poll:stop', ({ streamId }) => {
-        const poll = getPoll(streamId);
-        if (!poll) return;
-        poll.active = false;
-        setPoll(streamId, poll);
-        io.to(`stream-${streamId}`).emit('live:poll:ended', {
-          streamId,
-          poll: { question: poll.question, options: poll.options, counts: poll.counts, active: poll.active }
-        });
-      });
-      // ===========================================================================
-
       await Stream.findByIdAndUpdate(streamId, {
         $inc: { 'analytics.newFollowers': 1 }
       });
@@ -1746,42 +1112,7 @@ io.on('connection', (socket) => {
       }
     }
 
-    // Handle WebRTC streamer disconnect
-    if (socket.streamerId && socket.streamId) {
-      try {
-        console.log(`🎥 WebRTC streamer disconnected: ${socket.streamerId}`);
-
-        // Update stream status
-        const Stream = require('./models/Stream');
-        await Stream.findByIdAndUpdate(socket.streamId, {
-          isLive: false,
-          endedAt: new Date(),
-          'health.status': 'offline',
-          viewerCount: 0
-        });
-
-        // Notify all viewers that stream ended
-        socket.to(`stream-${socket.streamId}`).emit('stream-stopped', {
-          streamId: socket.streamId,
-          streamerId: socket.streamerId,
-          reason: 'streamer_disconnected',
-          timestamp: new Date().toISOString()
-        });
-
-        console.log(`📡 Stream ${socket.streamId} ended due to streamer disconnect`);
-      } catch (error) {
-        console.error('Error cleaning up WebRTC stream on disconnect:', error);
-      }
-    }
-
-    // Notify WebRTC peers about disconnection
-    if (socket.currentStream) {
-      socket.to(`stream-${socket.currentStream}`).emit('viewer-left', {
-        streamId: socket.currentStream,
-        viewerId: socket.id,
-        timestamp: new Date().toISOString()
-      });
-    }
+    // Stream-related disconnect handlers have been removed
 
     // Handle user going offline
     if (socket.userId) {
@@ -1818,13 +1149,7 @@ const broadcastToAll = (event, data) => {
 const broadcastToFeed = (feedType, event, data) => {
   // Emit to feed room
   io.to(`feed_${feedType}`).emit(event, data);
-
-  // Bridge: when feedType is stream-<id>, also emit to the stream_<id> room used by join-stream
-  const m = /^stream-(.+)$/.exec(feedType);
-  if (m) {
-    const streamId = m[1];
-    io.to(`stream_${streamId}`).emit(event, data);
-  }
+  // Stream-related functionality has been removed
 };
 
 // Helper function to broadcast to specific user

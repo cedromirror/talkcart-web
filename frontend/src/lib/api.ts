@@ -1687,6 +1687,13 @@ class ApiService {
         body: JSON.stringify(args || {}),
       });
     },
+    createFlutterwaveIntent: async (args: { amount: number; currency: string; tx_ref: string; customer: { email: string; name: string; phone_number: string }; meta: Record<string, any> }) => {
+      return this.request(`${API_URL}/payments/flutterwave/init`, {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify(args),
+      });
+    },
   } as const;
 
   // Admin API
@@ -1968,6 +1975,25 @@ class ApiService {
       return this.request(`${API_URL}/cart/create-intent/${encodeURIComponent(currency)}`, {
         method: 'POST',
         headers: this.getAuthHeaders(),
+      });
+    },
+
+    // Initialize Flutterwave for a specific cart currency group
+    initFlutterwaveForCurrency: async (currency: string, args: { tx_ref: string; customer: { email: string; name?: string; phonenumber?: string }; redirect_url?: string; meta?: Record<string, any> }) => {
+      const cur = String(currency).toUpperCase();
+      return this.request(`${API_URL}/cart/flutterwave/init/${encodeURIComponent(cur)}`, {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify(args),
+      });
+    },
+
+    // Refresh Flutterwave payment status and persist in cart
+    refreshFlutterwavePaymentStatus: async (args: { tx_ref: string; flw_tx_id: string | number; currency?: string }) => {
+      return this.request(`${API_URL}/cart/payment/flutterwave/status`, {
+        method: 'PATCH',
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify(args),
       });
     },
 

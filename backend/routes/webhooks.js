@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const Order = require('../models/Order');
 const User = require('../models/User');
+const Cart = require('../models/Cart');
+const WebhookEvent = require('../models/WebhookEvent');
 const crypto = require('crypto');
 let stripe = null;
 
@@ -57,6 +59,14 @@ router.post('/stripe', express.raw({ type: 'application/json' }), verifyStripeSi
   const event = req.stripeEvent;
 
   try {
+    // Idempotency guard: store processed Stripe event IDs
+    try {
+      await WebhookEvent.create({ source: 'stripe', eventId: event.id, meta: { type: event.type } });
+    } catch (e) {
+      // Duplicate (unique index) → already processed
+      return res.status(200).json({ success: true, received: true, duplicate: true });
+    }
+
     switch (event.type) {
       case 'payment_intent.succeeded': {
         const paymentIntent = event.data.object;
@@ -71,10 +81,7 @@ router.post('/stripe', express.raw({ type: 'application/json' }), verifyStripeSi
           order.status = 'completed';
           order.completedAt = new Date().toISOString();
           await order.save();
-
           console.log(`📦 Order ${order.orderNumber} marked as completed`);
-
-          // TODO: Send email confirmation, update inventory, etc.
         } else {
           console.warn(`⚠️  No order found for PaymentIntent: ${paymentIntent.id}`);
         }
@@ -85,7 +92,6 @@ router.post('/stripe', express.raw({ type: 'application/json' }), verifyStripeSi
         const paymentIntent = event.data.object;
         console.log(`❌ Payment failed: ${paymentIntent.id}`);
 
-        // Find and update order status
         const order = await Order.findOne({
           'paymentDetails.paymentIntentId': paymentIntent.id
         });
@@ -94,7 +100,6 @@ router.post('/stripe', express.raw({ type: 'application/json' }), verifyStripeSi
           order.status = 'cancelled';
           order.cancelledAt = new Date().toISOString();
           await order.save();
-
           console.log(`📦 Order ${order.orderNumber} marked as cancelled due to payment failure`);
         }
         break;
@@ -104,7 +109,6 @@ router.post('/stripe', express.raw({ type: 'application/json' }), verifyStripeSi
         const paymentIntent = event.data.object;
         console.log(`🚫 Payment canceled: ${paymentIntent.id}`);
 
-        // Find and update order status
         const order = await Order.findOne({
           'paymentDetails.paymentIntentId': paymentIntent.id
         });
@@ -113,7 +117,6 @@ router.post('/stripe', express.raw({ type: 'application/json' }), verifyStripeSi
           order.status = 'cancelled';
           order.cancelledAt = new Date().toISOString();
           await order.save();
-
           console.log(`📦 Order ${order.orderNumber} marked as cancelled`);
         }
         break;
@@ -122,8 +125,6 @@ router.post('/stripe', express.raw({ type: 'application/json' }), verifyStripeSi
       case 'charge.dispute.created': {
         const dispute = event.data.object;
         console.log(`⚡ Dispute created: ${dispute.id}`);
-
-        // TODO: Handle dispute logic, notify administrators
         break;
       }
 
@@ -161,19 +162,37 @@ router.get('/stripe/test', (req, res) => {
 });
 
 // Flutterwave webhook verification middleware
+// Supports both official 'verif-hash' header (equals FLW_SECRET_HASH)
+// and legacy 'flutterwave-signature' (HMAC-SHA256 of raw body with FLW_SECRET_HASH)
 const verifyFlutterwaveSignature = (req, res, next) => {
   try {
     if (!FLW_SECRET_HASH) {
       return res.status(400).json({ success: false, message: 'Flutterwave webhook not configured' });
     }
-    const signature = req.headers['flutterwave-signature'];
-    if (!signature) {
-      return res.status(400).json({ success: false, message: 'Missing flutterwave-signature header' });
+
+    const verifHash = req.headers['verif-hash'];
+    const flwSignature = req.headers['flutterwave-signature'];
+    const raw = req.body; // Buffer provided by express.raw({ type: 'application/json' })
+
+    let ok = false;
+
+    // Preferred verification per Flutterwave docs
+    if (verifHash && verifHash === FLW_SECRET_HASH) {
+      ok = true;
+    } else if (flwSignature && raw) {
+      // Fallback for integrations that send HMAC signature
+      try {
+        const computed = crypto.createHmac('sha256', FLW_SECRET_HASH).update(raw).digest('hex');
+        ok = computed === flwSignature;
+      } catch (e) {
+        ok = false;
+      }
     }
-    const computed = crypto.createHmac('sha256', FLW_SECRET_HASH).update(req.body).digest('hex');
-    if (computed !== signature) {
+
+    if (!ok) {
       return res.status(400).json({ success: false, message: 'Invalid Flutterwave signature' });
     }
+
     next();
   } catch (err) {
     console.error('Flutterwave signature verification failed:', err.message);
@@ -190,10 +209,16 @@ router.post('/flutterwave', express.raw({ type: 'application/json' }), verifyFlu
     const data = payload?.data || {};
     const txId = data?.id;
     const txRef = data?.tx_ref;
-    const status = (data?.status || '').toLowerCase();
 
     if (!txId || !txRef) {
       return res.status(200).json({ success: true, received: true });
+    }
+
+    // Idempotency guard for Flutterwave (use txId) - tolerate duplicates
+    try {
+      await WebhookEvent.create({ source: 'flutterwave', eventId: String(txId), tx_ref: String(txRef), meta: { event: payload?.event } });
+    } catch (e) {
+      return res.status(200).json({ success: true, received: true, duplicate: true });
     }
 
     // Verify with Flutterwave API before fulfilling
@@ -205,13 +230,47 @@ router.post('/flutterwave', express.raw({ type: 'application/json' }), verifyFlu
     const ok = (vdata.status || '').toLowerCase() === 'successful' && String(vdata.tx_ref) === String(txRef);
 
     if (ok) {
-      // Try to update order by tx_ref mapping (requires orders storing tx_ref in paymentDetails)
-      const order = await Order.findOne({ 'paymentDetails.tx_ref': txRef });
-      if (order) {
-        order.status = 'completed';
-        order.completedAt = new Date().toISOString();
-        await order.save();
-        console.log(`📦 Order ${order.orderNumber} marked as completed via Flutterwave webhook`);
+      // 1) Update cart payment record if we can locate the cart
+      const currency = String(vdata.currency || '').toUpperCase() || undefined;
+      const amountCents = Math.max(1, Math.round(Number(vdata.amount || 0) * 100));
+      const flw_tx_id = String(vdata.id || txId);
+      const meta = vdata.meta || data.meta || {};
+      const cartId = meta.cartId || meta.cart_id;
+
+      try {
+        let cart = null;
+        if (cartId) {
+          cart = await Cart.findById(cartId);
+        }
+        if (!cart) {
+          cart = await Cart.findOne({ 'payments.tx_ref': txRef });
+        }
+
+        if (cart) {
+          const cur = currency || 'USD';
+          const idx = cart.payments.findIndex(p => p.provider === 'flutterwave' && p.currency === cur);
+          const record = { provider: 'flutterwave', currency: cur, amountCents, tx_ref: String(txRef), flw_tx_id, status: 'successful', updatedAt: new Date() };
+          if (idx >= 0) cart.payments[idx] = record; else cart.payments.push(record);
+          await cart.save();
+          console.log(`🧾 Cart ${cart._id} payment updated via Flutterwave webhook: ${cur} ${amountCents}c`);
+        }
+      } catch (cartErr) {
+        console.warn('Failed to update cart from Flutterwave webhook:', cartErr.message);
+      }
+
+      // 2) Update order if it exists and references this tx_ref (support both paymentDetails.tx_ref and top-level tx_ref)
+      try {
+        const order = await Order.findOne({ $or: [ { 'paymentDetails.tx_ref': txRef }, { tx_ref: txRef } ] });
+        if (order) {
+          order.status = 'completed';
+          order.completedAt = new Date().toISOString();
+          // persist tx_ref on order for universal linkage
+          if (!order.tx_ref) order.tx_ref = String(txRef);
+          await order.save();
+          console.log(`📦 Order ${order.orderNumber} marked as completed via Flutterwave webhook`);
+        }
+      } catch (orderErr) {
+        console.warn('Order update via Flutterwave webhook failed:', orderErr.message);
       }
     }
 

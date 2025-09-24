@@ -25,8 +25,11 @@ export class NotificationService {
     private vibrationInterval: NodeJS.Timeout | null = null;
 
     private constructor() {
-        this.initializeRingtone();
-        this.requestNotificationPermission();
+        // Guard: only run browser-specific setup on the client
+        if (typeof window !== 'undefined') {
+            this.initializeRingtone();
+            this.requestNotificationPermission();
+        }
     }
 
     public static getInstance(): NotificationService {
@@ -37,6 +40,10 @@ export class NotificationService {
     }
 
     private async initializeRingtone() {
+        if (typeof window === 'undefined' || typeof (window as any).Audio === 'undefined') {
+            this.isRingtoneLoaded = false;
+            return;
+        }
         try {
             // Create ringtone audio element
             this.ringtoneAudio = new Audio();
@@ -104,7 +111,9 @@ export class NotificationService {
     private createRingtoneDataURL(): string {
         try {
             // Create a simple ringtone using Web Audio API
-            const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+            if (typeof window === 'undefined') throw new Error('No window in SSR');
+            const AudioContextCtor = (window as any).AudioContext || (window as any).webkitAudioContext;
+            const audioContext = new AudioContextCtor();
             const sampleRate = audioContext.sampleRate;
             const duration = 3; // 3 seconds
             const length = sampleRate * duration;
@@ -191,13 +200,13 @@ export class NotificationService {
     }
 
     private async requestNotificationPermission(): Promise<void> {
-        if ('Notification' in window) {
+        if (typeof window !== 'undefined' && 'Notification' in window) {
             this.notificationPermission = await Notification.requestPermission();
         }
     }
 
     public async showIncomingCallNotification(call: Call): Promise<Notification | null> {
-        if (!('Notification' in window) || this.notificationPermission !== 'granted') {
+        if (typeof window === 'undefined' || !('Notification' in window) || this.notificationPermission !== 'granted') {
             console.warn('Notifications not supported or not permitted');
             return null;
         }
@@ -235,12 +244,16 @@ export class NotificationService {
 
             // Handle notification clicks
             notification.onclick = () => {
-                window.focus();
-                notification.close();
-                // Emit event to handle call acceptance
-                window.dispatchEvent(new CustomEvent('notification-call-accept', {
-                    detail: { callId: call.callId }
-                }));
+                if (typeof window !== 'undefined') {
+                    window.focus();
+                    notification.close();
+                    // Emit event to handle call acceptance
+                    window.dispatchEvent(new CustomEvent('notification-call-accept', {
+                        detail: { callId: call.callId }
+                    }));
+                } else {
+                    notification.close();
+                }
             };
 
             return notification;
@@ -289,7 +302,7 @@ export class NotificationService {
     }
 
     public startVibration(pattern?: number[], continuous: boolean = false): void {
-        if ('vibrate' in navigator) {
+        if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
             const vibrationPattern = pattern || this.vibrationPattern;
             navigator.vibrate(vibrationPattern);
 
@@ -299,7 +312,7 @@ export class NotificationService {
                 const totalPatternTime = vibrationPattern.reduce((sum, time) => sum + time, 0);
 
                 this.vibrationInterval = setInterval(() => {
-                    if ('vibrate' in navigator) {
+                    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
                         navigator.vibrate(vibrationPattern);
                     }
                 }, totalPatternTime + 500); // Add 500ms gap between patterns
@@ -310,7 +323,7 @@ export class NotificationService {
     }
 
     public stopVibration(): void {
-        if ('vibrate' in navigator) {
+        if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
             navigator.vibrate(0);
         }
 
@@ -363,18 +376,20 @@ export class NotificationService {
         };
 
         // Request notification permission
-        if ('Notification' in window) {
+        if (typeof window !== 'undefined' && 'Notification' in window) {
             results.notification = await Notification.requestPermission();
             this.notificationPermission = results.notification;
         }
 
         // Test audio permission by trying to play a silent audio
         try {
-            const testAudio = new Audio();
-            testAudio.volume = 0;
-            testAudio.src = 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTuR2O/Eeyw';
-            await testAudio.play();
-            results.audio = true;
+            if (typeof window !== 'undefined' && typeof (window as any).Audio !== 'undefined') {
+                const testAudio = new Audio();
+                testAudio.volume = 0;
+                testAudio.src = 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTuR2O/Eeyw';
+                await testAudio.play();
+                results.audio = true;
+            }
         } catch (error) {
             console.warn('Audio permission not granted or not available');
             results.audio = false;
@@ -389,9 +404,9 @@ export class NotificationService {
         audio: boolean;
     } {
         return {
-            notifications: 'Notification' in window,
-            vibration: 'vibrate' in navigator,
-            audio: 'Audio' in window
+            notifications: typeof window !== 'undefined' && 'Notification' in window,
+            vibration: typeof navigator !== 'undefined' && 'vibrate' in navigator,
+            audio: typeof window !== 'undefined' && 'Audio' in window
         };
     }
 

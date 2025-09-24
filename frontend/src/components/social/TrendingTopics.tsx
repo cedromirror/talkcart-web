@@ -12,6 +12,7 @@ import {
 import { TrendingUp } from 'lucide-react';
 import { useRouter } from 'next/router';
 import { getTrendingHashtags, TrendingHashtag } from '@/services/postsApi';
+import marketplaceSocket from '@/services/marketplaceSocket';
 
 const TrendingTopics: React.FC = () => {
   const theme = useTheme();
@@ -37,6 +38,15 @@ const TrendingTopics: React.FC = () => {
 
   useEffect(() => {
     fetchTrending();
+    
+    // Subscribe to real-time updates
+    const unsubscribe = marketplaceSocket.onTrendingUpdate((updatedTopics) => {
+      setTopics(updatedTopics);
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   const handleTopicClick = (hashtag: string) => {

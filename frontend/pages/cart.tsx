@@ -53,6 +53,7 @@ import Link from 'next/link';
 import { toast } from 'react-hot-toast';
 import StripeCartCheckout from '@/components/cart/StripeCartCheckout';
 import CryptoCartCheckout from '@/components/cart/CryptoCartCheckout';
+import FlutterwaveCartCheckout from '@/components/cart/FlutterwaveCartCheckout';
 import { api } from '@/lib/api';
 
 const CartPageComponent: NextPage = () => {
@@ -60,7 +61,7 @@ const CartPageComponent: NextPage = () => {
   const { isAuthenticated } = useAuth();
   const router = useRouter();
   const [checkoutDialogOpen, setCheckoutDialogOpen] = useState(false);
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'stripe' | 'crypto' | 'nft'>('stripe');
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'stripe' | 'crypto' | 'nft' | 'mobile_money'>('stripe');
   const [processingCheckout, setProcessingCheckout] = useState(false);
 
   const currencyTotals = React.useMemo(() => {
@@ -407,6 +408,19 @@ const CartPageComponent: NextPage = () => {
                   />
                 )}
 
+                {!cart.summary?.hasNFTs && (
+                  <FormControlLabel
+                    value="mobile_money"
+                    control={<Radio />}
+                    label={
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Coins size={20} />
+                        <span>Mobile Money (MTN, Airtel, etc.)</span>
+                      </Box>
+                    }
+                  />
+                )}
+
                 {cart.summary?.hasNFTs && (
                   <FormControlLabel
                     value="nft"
@@ -506,7 +520,67 @@ const CartPageComponent: NextPage = () => {
                 </Box>
               )}
 
-              {selectedPaymentMethod !== 'stripe' && cart.summary?.hasNFTs && (
+              {selectedPaymentMethod === 'mobile_money' && !cart.summary?.hasNFTs && (
+                <Box sx={{ mt: 2 }}>
+                  <Typography variant="subtitle2">Mobile Money Payment</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Complete your payment using Mobile Money. We support MTN Mobile Money, Airtel Money, Vodacom M-Pesa, and other providers in Uganda, Rwanda, Tanzania, Zambia, Ghana, and more.
+                  </Typography>
+
+                  {/* Multi-currency grouping UI for Mobile Money */}
+                  {Array.from(
+                    new Map(cart.items
+                      .filter(i => !i.productId.isNFT)
+                      .map(i => [String(i.currency || 'USD').toUpperCase(), null])
+                    ).keys()
+                  ).map((cur) => (
+                    <Box key={cur} sx={{ mb: 3, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                      <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                        Currency: {cur}
+                        {(() => {
+                          const rec = (cart as any).payments?.find((p: any) => p.provider === 'flutterwave' && p.currency === cur);
+                          if (rec?.status === 'succeeded') {
+                            return <Chip label="Paid" color="success" size="small" sx={{ ml: 1 }} />;
+                          }
+                          if (rec?.status) {
+                            return <Chip label={rec.status} size="small" sx={{ ml: 1 }} />;
+                          }
+                          return null;
+                        })()}
+                      </Typography>
+                      <FlutterwaveCartCheckout
+                        custom={{
+                          items: cart.items.filter(i => !i.productId.isNFT && String(i.currency || 'USD').toUpperCase() === cur).map(i => ({
+                            id: String(i.productId._id || i.productId.id || i._id),
+                            name: i.productId.name,
+                            price: Number(i.price),
+                            quantity: Number(i.quantity || 1),
+                          })),
+                          currency: cur.toLowerCase(),
+                          metadata: { cartId: String((cart as any)._id || ''), currency: cur },
+                        }}
+                        onPaid={async ({ tx_ref, flw_tx_id, currency }) => {
+                          // Try finalization only when all currency groups show succeeded
+                          const groups = Array.from(new Set(cart.items.filter(i => !i.productId.isNFT).map(i => String(i.currency || 'USD').toUpperCase())));
+                          const paid = groups.every(g => (cart as any).payments?.some((p: any) => p.provider === 'flutterwave' && p.currency === g && p.status === 'succeeded'));
+                          const res = await checkout('flutterwave', { tx_ref, flw_tx_id, currency });
+                          if (res) {
+                            setCheckoutDialogOpen(false);
+                            toast.success('Order placed successfully!');
+                            router.push('/orders');
+                          } else if (!paid) {
+                            toast.success(`Paid ${cur} group. Please pay remaining groups.`);
+                          }
+                        }}
+                      />
+                    </Box>
+                  ))}
+
+                  <Alert severity="info">If your cart contains multiple currencies, complete each group's payment.</Alert>
+                </Box>
+              )}
+
+              {selectedPaymentMethod !== 'stripe' && selectedPaymentMethod !== 'mobile_money' && cart.summary?.hasNFTs && (
                 <Box sx={{ mt: 2 }}>
                   <Typography variant="subtitle2">Crypto Payment</Typography>
                   <Typography variant="body2" color="text.secondary">Confirm a crypto transaction from your wallet. We will verify it on-chain.</Typography>

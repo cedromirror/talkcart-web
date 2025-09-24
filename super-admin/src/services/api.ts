@@ -11,7 +11,7 @@ const DEBUG_MODE = isDebugMode();
 // Enhanced fetch with timeout and error handling
 const fetchWithConfig = async (url: string, options: RequestInit = {}): Promise<Response> => {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+  const timeoutId = setTimeout(() => controller.abort('Request timed out'), REQUEST_TIMEOUT);
 
   try {
     if (DEBUG_MODE) {
@@ -34,6 +34,10 @@ const fetchWithConfig = async (url: string, options: RequestInit = {}): Promise<
     clearTimeout(timeoutId);
     if (DEBUG_MODE) {
       console.error(`[Super Admin API] Error for ${url}:`, error);
+    }
+    // Handle AbortError specifically
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`Request timed out after ${REQUEST_TIMEOUT}ms`);
     }
     throw error;
   }
@@ -84,7 +88,7 @@ export const AdminApi = {
     tokenId?: string;
     vendorId?: string;
   }) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/products`, {
+    const res = await fetchWithConfig(`${API_BASE}/admin/products/create`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -136,10 +140,28 @@ export const AdminApi = {
   },
   // Marketplace (create)
   createMarketplaceProduct: async (body: any) => {
+    // Create products via marketplace route (admin-only, strict auth)
     const res = await fetchWithConfig(`${API_BASE}/marketplace/products`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+    });
+    return res.json();
+  },
+
+  // Helper to build a frontend marketplace product URL
+  getMarketplaceProductUrl: (id: string) => {
+    const base = config.urls.frontend?.replace(/\/$/, '') || 'http://localhost:4000';
+    return `${base}/marketplace/${id}`;
+  },
+  // Marketplace image upload (Admin only)
+  uploadProductImages: async (files: File[]) => {
+    const form = new FormData();
+    files.forEach((f) => form.append('images', f));
+    const res = await fetchWithConfig(`${API_BASE}/marketplace/products/upload-images`, {
+      method: 'POST',
+      // Important: do not set Content-Type; the browser will set the multipart boundary
+      body: form,
     });
     return res.json();
   },

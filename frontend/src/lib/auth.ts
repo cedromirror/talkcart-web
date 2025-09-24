@@ -32,6 +32,15 @@ export const removeRefreshToken = (): void => {
   localStorage.removeItem('refreshToken');
 };
 
+// Logout function to clear auth tokens
+export const logout = (): void => {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem('token');
+  localStorage.removeItem('refreshToken');
+  // Dispatch logout event for components to react
+  window.dispatchEvent(new CustomEvent('auth:logout'));
+};
+
 // Set both tokens at once (used by biometric login, etc.)
 export const setAuthTokens = (accessToken: string, refreshToken?: string): void => {
   setAuthToken(accessToken);

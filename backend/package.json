@@ -18,7 +18,8 @@
     "clean-users": "node scripts/removeMockUsers.js",
     "clean": "rm -rf node_modules logs",
     "clean:marketplace-mocks": "node scripts/removeMockMarketplaceProducts.js",
-    "setup-test-users": "node setup-test-users.js"
+    "setup-test-users": "node setup-test-users.js",
+    "test:webhook-idempotency": "node scripts/testWebhookIdempotency.js"
   },
   "keywords": [
     "web3",

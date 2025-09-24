@@ -23,6 +23,8 @@ import {
   DialogContent,
   DialogActions,
   Autocomplete,
+  Switch,
+  Slider,
   useTheme,
   alpha,
 } from '@mui/material';
@@ -76,7 +78,12 @@ const MessagesPage: React.FC = () => {
     typingUsers,
     editMessage,
     deleteMessage,
-    forwardMessage
+    forwardMessage,
+    // Sound controls
+    soundsEnabled,
+    toggleSounds,
+    soundVolume,
+    setSoundVolume
   } = useMessages();
 
   const {
@@ -834,7 +841,32 @@ const MessagesPage: React.FC = () => {
                     </Typography>
                   </Box>
                 </Box>
-                <Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  {/* Sound toggle */}
+                  <Box sx={{ display: 'flex', alignItems: 'center', mr: 1 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
+                      Sounds
+                    </Typography>
+                    <Switch size="small" checked={!!soundsEnabled} onChange={toggleSounds} />
+                  </Box>
+                  {/* Volume */}
+                  <Box sx={{ width: 120, display: 'flex', alignItems: 'center' }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ mr: 1 }}>
+                      Vol
+                    </Typography>
+                    <Slider
+                      size="small"
+                      value={Math.round((soundVolume ?? 0.6) * 100)}
+                      onChange={(_, v) => {
+                        const num = Array.isArray(v) ? v[0] : v;
+                        if (typeof num === 'number') setSoundVolume(num / 100);
+                      }}
+                      min={0}
+                      max={100}
+                      step={5}
+                      sx={{ width: 80 }}
+                    />
+                  </Box>
                   <IconButton
                     onClick={handleAudioCall}
                     disabled={isCallActive}

@@ -32,6 +32,8 @@ import {
   DialogContent,
   DialogActions,
   Checkbox,
+  Snackbar,
+  Alert,
 } from '@mui/material';
 import { Grid } from '@mui/material';
 import {
@@ -64,7 +66,7 @@ interface Product {
   vendor?: { name: string; email: string };
   isActive: boolean;
   featured: boolean;
-  images: string[];
+  images: Array<{ public_id: string; secure_url: string; url: string }>;
   createdAt: string;
 }
 
@@ -81,6 +83,7 @@ export default function ProductsPage() {
   const [editDialog, setEditDialog] = useState<Product | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<Product | null>(null);
   const [addDialog, setAddDialog] = useState(false);
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' as 'success' | 'error', action: null as React.ReactNode });
   const [stats, setStats] = useState({
     total: 0,
     active: 0,
@@ -378,7 +381,7 @@ export default function ProductsPage() {
                     <TableCell>
                       <Stack direction="row" spacing={2} alignItems="center">
                         <Avatar
-                          src={product.images[0]}
+                          src={product.images[0]?.secure_url || product.images[0]?.url}
                           sx={{
                             width: 48,
                             height: 48,
@@ -495,6 +498,9 @@ export default function ProductsPage() {
           setAddDialog(false);
           fetchProducts();
         }}
+        onNotify={(message, severity, action) =>
+          setSnackbar({ open: true, message, severity, action })
+        }
       />
 
       {/* Delete Confirmation Dialog */}
@@ -521,6 +527,23 @@ export default function ProductsPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Snackbar for notifications */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        <Alert
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+          severity={snackbar.severity}
+          sx={{ width: '100%' }}
+          action={snackbar.action}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }
@@ -530,10 +553,15 @@ interface AddProductDialogProps {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  onNotify: (message: string, severity: 'success' | 'error', action?: React.ReactNode) => void;
 }
 
-function AddProductDialog({ open, onClose, onSuccess }: AddProductDialogProps) {
+function AddProductDialog({ open, onClose, onSuccess, onNotify }: AddProductDialogProps) {
+  const currencies = ['USD', 'EUR', 'GBP', 'JPY', 'CNY', 'INR', 'AUD', 'CAD'];
+  const categories = ['Digital Art', 'Electronics', 'Fashion', 'Gaming'];
   const [loading, setLoading] = useState(false);
+  const [imagePreview, setImagePreview] = useState<string>('');
+  const [uploadError, setUploadError] = useState<string>('');
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -546,76 +574,155 @@ function AddProductDialog({ open, onClose, onSuccess }: AddProductDialogProps) {
     isNFT: false,
     contractAddress: '',
     tokenId: '',
-    imageUrl: ''
+    imageUrl: '',
+    imageFile: null as File | null
   });
 
-  const categories = [
-    'Digital Art',
-    'Electronics', 
-    'Fashion',
-    'Gaming',
-    'Music',
-    'Books',
-    'Collectibles',
-    'Education',
-    'Accessories',
-    'Food & Beverages',
-    'Fitness',
-    'Other'
-  ];
+  const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) { // 5MB limit
+        setUploadError('Image size must be less than 5MB');
+        return;
+      }
+      if (!file.type.startsWith('image/')) {
+        setUploadError('Please upload a valid image file');
+        return;
+      }
+      setFormData({ ...formData, imageFile: file });
+      setImagePreview(URL.createObjectURL(file));
+      setUploadError('');
+    }
+  };
 
-  const currencies = ['USD', 'ETH', 'BTC', 'USDC', 'USDT'];
+  const handleImageUrlChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const url = event.target.value;
+    setFormData({ ...formData, imageUrl: url, imageFile: null });
+    setImagePreview(url);
+    setUploadError('');
+  };
+
+  const resetForm = () => {
+    setFormData({
+      name: '',
+      description: '',
+      price: '',
+      currency: 'USD',
+      category: '',
+      tags: '',
+      stock: '1',
+      featured: false,
+      isNFT: false,
+      contractAddress: '',
+      tokenId: '',
+      imageUrl: '',
+      imageFile: null
+    });
+    setImagePreview('');
+    setUploadError('');
+    setLoading(false);
+  };
+
+  const handleClose = () => {
+    resetForm();
+    onClose();
+  };
+  type UploadedImage = { public_id: string; secure_url: string; url: string };
+  const handleImageUpload = async (file: File): Promise<UploadedImage> => {
+    try {
+      // Use backend marketplace upload endpoint (expects field name 'images')
+      const res = await AdminApi.uploadProductImages([file]);
+      if (!res?.success) {
+        const msg = res?.error || 'Image upload failed';
+        throw new Error(msg);
+      }
+      const first = res?.data?.images?.[0];
+      if (!first?.secure_url || !first?.public_id) {
+        throw new Error('Image upload failed: missing required fields');
+      }
+      return { public_id: first.public_id, secure_url: first.secure_url, url: first.secure_url };
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      throw error;
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.description || !formData.price || !formData.category) {
-      return;
-    }
-
+    setLoading(true);
     try {
-      setLoading(true);
-      
+      // Form validation
+      const errors: string[] = [];
+      if (!formData.name) errors.push('Product name is required');
+      if (!formData.description) errors.push('Product description is required');
+      if (!formData.price || isNaN(parseFloat(formData.price))) errors.push('Valid price is required');
+      if (!formData.category) errors.push('Category is required');
+      if (!formData.imageFile && !formData.imageUrl) errors.push('Product image is required');
+
+      if (errors.length > 0) {
+        setUploadError(errors.join(', '));
+        setLoading(false);
+        return;
+      }
+
+      // Handle image upload if file is selected
+      let imagesPayload: { public_id: string; secure_url: string; url: string }[] = [];
+      if (formData.imageFile) {
+        try {
+          const uploaded = await handleImageUpload(formData.imageFile);
+          imagesPayload = [uploaded];
+        } catch (error) {
+          setUploadError('Failed to upload image. Please try again.');
+          setLoading(false);
+          return;
+        }
+      } else if (formData.imageUrl) {
+        imagesPayload = [{ public_id: `external-${Date.now()}`, secure_url: formData.imageUrl, url: formData.imageUrl }];
+      }
+
       const productData = {
         name: formData.name,
         description: formData.description,
         price: parseFloat(formData.price),
         currency: formData.currency,
         category: formData.category,
-        tags: formData.tags.split(',').map(tag => tag.trim()).filter(tag => tag),
-        stock: parseInt(formData.stock) || 1,
+        tags: formData.tags.split(',').map(tag => tag.trim()).filter(Boolean),
+        stock: parseInt(formData.stock, 10) || 1,
         featured: formData.featured,
         isNFT: formData.isNFT,
-        contractAddress: formData.isNFT ? formData.contractAddress : undefined,
-        tokenId: formData.isNFT ? formData.tokenId : undefined,
-        images: formData.imageUrl ? [{
-          public_id: `admin-upload-${Date.now()}`,
-          secure_url: formData.imageUrl,
-          url: formData.imageUrl
-        }] : []
+        images: imagesPayload,
+        ...(formData.isNFT && {
+          contractAddress: formData.contractAddress,
+          tokenId: formData.tokenId
+        })
       };
 
       const response = await AdminApi.createProduct(productData);
-      
-      if (response.success) {
+      if (response.success && response.data?._id) {
+        const productId = response.data._id;
+        const marketplaceUrl = AdminApi.getMarketplaceProductUrl(productId);
+        setUploadError('');
+        onNotify(
+          `Product created! ID: ${productId}. Marketplace URL: ${marketplaceUrl}`,
+          'success',
+          (
+            <Button
+              color="inherit"
+              size="small"
+              onClick={() => window.open(marketplaceUrl, '_blank')}
+            >
+              View in Marketplace
+            </Button>
+          )
+        );
         onSuccess();
-        // Reset form
-        setFormData({
-          name: '',
-          description: '',
-          price: '',
-          currency: 'USD',
-          category: '',
-          tags: '',
-          stock: '1',
-          featured: false,
-          isNFT: false,
-          contractAddress: '',
-          tokenId: '',
-          imageUrl: ''
-        });
+        resetForm();
+      } else {
+        setUploadError('Failed to create product. Please try again.');
       }
     } catch (error) {
-      console.error('Failed to create product:', error);
+      console.error('Error creating product:', error);
+      setUploadError('An error occurred while creating the product.');
     } finally {
       setLoading(false);
     }
@@ -698,13 +805,46 @@ function AddProductDialog({ open, onClose, onSuccess }: AddProductDialogProps) {
               placeholder="e.g. electronics, gaming, premium"
             />
 
-            <TextField
-              label="Image URL"
-              value={formData.imageUrl}
-              onChange={(e) => setFormData({ ...formData, imageUrl: e.target.value })}
-              fullWidth
-              placeholder="https://example.com/image.jpg"
-            />
+            <Box sx={{ mb: 2 }}>
+              <input
+                accept="image/*"
+                style={{ display: 'none' }}
+                id="product-image-upload"
+                type="file"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    setFormData({ ...formData, imageFile: file });
+                  }
+                }}
+              />
+              <label htmlFor="product-image-upload">
+                <Button
+                  variant="outlined"
+                  component="span"
+                  startIcon={<AddIcon />}
+                  sx={{ mb: 1 }}
+                >
+                  Upload Image
+                </Button>
+              </label>
+              {formData.imageFile && (
+                <Typography variant="body2" color="textSecondary">
+                  Selected: {formData.imageFile.name}
+                </Typography>
+              )}
+              <Typography variant="caption" color="textSecondary" display="block" sx={{ mt: 1 }}>
+                Or provide an image URL:
+              </Typography>
+              <TextField
+                fullWidth
+                placeholder="https://example.com/image.jpg"
+                value={formData.imageUrl}
+                onChange={(e) => setFormData({ ...formData, imageUrl: e.target.value })}
+                size="small"
+                sx={{ mt: 1 }}
+              />
+            </Box>
 
             <Stack direction="row" spacing={2}>
               <Checkbox
@@ -741,16 +881,31 @@ function AddProductDialog({ open, onClose, onSuccess }: AddProductDialogProps) {
             )}
           </Stack>
         </DialogContent>
-        <DialogActions>
+        <DialogActions sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Button onClick={onClose} disabled={loading}>Cancel</Button>
-          <Button 
-            type="submit" 
-            variant="contained" 
-            disabled={loading}
-            sx={{ background: gradients.primary }}
-          >
-            {loading ? 'Creating...' : 'Create Product'}
-          </Button>
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+            {/* Optional: View in Marketplace appears after successful creation via alert or you can enable always */}
+            <Button
+              type="button"
+              variant="outlined"
+              disabled={loading}
+              onClick={() => {
+                // Best-effort: navigate to marketplace
+                const url = AdminApi.getMarketplaceProductUrl('');
+                window.open(url, '_blank');
+              }}
+            >
+              View in Marketplace
+            </Button>
+            <Button 
+              type="submit" 
+              variant="contained" 
+              disabled={loading}
+              sx={{ background: gradients.primary }}
+            >
+              {loading ? 'Creating...' : 'Create Product'}
+            </Button>
+          </Box>
         </DialogActions>
       </form>
     </Dialog>

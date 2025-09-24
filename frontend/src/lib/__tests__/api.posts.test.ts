@@ -1,32 +1,20 @@
-import { apiClient, api } from '../api';
+import { api } from '../api';
 import { ApiResponse } from '@/types/api';
 
-// Mock axios
-jest.mock('axios', () => ({
-  create: jest.fn(() => ({
-    post: jest.fn(),
-    delete: jest.fn(),
-    get: jest.fn(),
-    interceptors: {
-      request: { use: jest.fn() },
-      response: { use: jest.fn() },
-    },
-  })),
-}));
+// We no longer use axios-based apiClient; mock the global fetch used by ApiService
 
 describe('API Posts Like/Unlike Functionality', () => {
-  const mockApiClient = {
-    post: jest.fn(),
-    delete: jest.fn(),
-    get: jest.fn(),
-  };
+  const originalFetch = global.fetch as any;
+
+  const mockFetch = jest.fn();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    // Replace the apiClient with our mock
-    (apiClient as any).post = mockApiClient.post;
-    (apiClient as any).delete = mockApiClient.delete;
-    (apiClient as any).get = mockApiClient.get;
+    (global as any).fetch = mockFetch;
+  });
+
+  afterEach(() => {
+    (global as any).fetch = originalFetch;
   });
 
   describe('Happy Path Tests', () => {
@@ -41,11 +29,17 @@ describe('API Posts Like/Unlike Functionality', () => {
         },
       };
 
-      mockApiClient.post.mockResolvedValueOnce(expectedResponse);
+      // Mock fetch to resolve with a Response-like object
+      (mockFetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        // api.request() uses safeJsonParse which reads .text(); provide minimal JSON
+        text: async () => JSON.stringify(expectedResponse),
+      } as any);
 
       const result = await api.posts.like(postId);
 
-      expect(mockApiClient.post).toHaveBeenCalledWith(`/posts/${postId}/like`);
+      expect(mockFetch).toHaveBeenCalledWith(expect.stringMatching(/\/posts\/${postId}\/like$/), expect.objectContaining({ method: 'POST' }));
       expect(result).toEqual(expectedResponse);
     });
 
@@ -269,7 +263,7 @@ describe('API Posts Like/Unlike Functionality', () => {
 
     test('should handle different response formats gracefully', async () => {
       const postId = 'video-post-123';
-      
+
       // Test with minimal response
       const minimalResponse = {
         success: true,

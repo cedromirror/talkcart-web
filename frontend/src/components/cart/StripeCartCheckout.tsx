@@ -15,16 +15,59 @@ interface StripeCustomArgs {
 
 interface InnerProps {
   onPaid: (paymentIntentId: string) => Promise<void> | void;
+  clientSecret: string;
   custom?: StripeCustomArgs; // if provided, use payments.intent instead of cart subtotal
 }
 
-const Inner: React.FC<InnerProps> = ({ onPaid, custom }) => {
+const Inner: React.FC<InnerProps> = ({ onPaid, clientSecret, custom }) => {
   const stripe = useStripe();
   const elements = useElements();
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handlePay = async () => {
+    if (!stripe || !elements) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await stripe.confirmPayment({ elements, redirect: 'if_required' });
+      if (result.error) throw result.error;
+      if (result.paymentIntent?.status === 'succeeded') {
+        // Optionally refresh currency-intent record on server when using cart-based flows
+        try {
+          if (!custom && result.paymentIntent?.id) {
+            await api.cart.refreshStripePaymentStatus(result.paymentIntent.id);
+          }
+        } catch {}
+        await onPaid(result.paymentIntent.id);
+      }
+    } catch (e: any) {
+      setError(e?.message || 'Payment failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Stack spacing={2} sx={{ mt: 2 }}>
+      <PaymentElement />
+      {error && <Alert severity="error">{error}</Alert>}
+      <Button variant="contained" disabled={!stripe || loading} onClick={handlePay}>
+        {loading ? 'Processing…' : 'Pay'}
+      </Button>
+    </Stack>
+  );
+};
+
+interface StripeCartCheckoutProps {
+  onPaid: (paymentIntentId: string) => Promise<void> | void;
+  custom?: StripeCustomArgs;
+}
+
+const StripeCartCheckout: React.FC<StripeCartCheckoutProps> = ({ onPaid, custom }) => {
   const { cart } = useCart();
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -50,35 +93,16 @@ const Inner: React.FC<InnerProps> = ({ onPaid, custom }) => {
     })();
   }, [custom ? JSON.stringify(custom) : cart.lastUpdated]);
 
-  const handlePay = async () => {
-    if (!stripe || !elements) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await stripe.confirmPayment({ elements, redirect: 'if_required' });
-      if (result.error) throw result.error;
-      if (result.paymentIntent?.status === 'succeeded') {
-        // Optionally refresh currency-intent record on server when using cart-based flows
-        try {
-          if (!custom && result.paymentIntent?.id) {
-            await api.cart.refreshStripePaymentStatus(result.paymentIntent.id);
-          }
-        } catch {}
-        await onPaid(result.paymentIntent.id);
-      }
-    } catch (e: any) {
-      setError(e?.message || 'Payment failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   if (!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY) {
     return <Alert severity="info">Stripe key missing. Set NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY.</Alert>;
   }
 
+  if (error) {
+    return <Alert severity="error">{error}</Alert>;
+  }
+
   if (!clientSecret) {
-    return error ? <Alert severity="error">{error}</Alert> : (
+    return (
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
         <CircularProgress size={18} />
         <Typography>Preparing Stripe checkout…</Typography>
@@ -87,25 +111,8 @@ const Inner: React.FC<InnerProps> = ({ onPaid, custom }) => {
   }
 
   return (
-    <Stack spacing={2} sx={{ mt: 2 }}>
-      <PaymentElement />
-      {error && <Alert severity="error">{error}</Alert>}
-      <Button variant="contained" disabled={!stripe || loading} onClick={handlePay}>
-        {loading ? 'Processing…' : 'Pay'}
-      </Button>
-    </Stack>
-  );
-};
-
-interface StripeCartCheckoutProps {
-  onPaid: (paymentIntentId: string) => Promise<void> | void;
-  custom?: StripeCustomArgs;
-}
-
-const StripeCartCheckout: React.FC<StripeCartCheckoutProps> = ({ onPaid, custom }) => {
-  return (
-    <StripeElementsWrapper>
-      <Inner onPaid={onPaid} custom={custom} />
+    <StripeElementsWrapper clientSecret={clientSecret}>
+      <Inner onPaid={onPaid} clientSecret={clientSecret} custom={custom} />
     </StripeElementsWrapper>
   );
 };

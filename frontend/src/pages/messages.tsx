@@ -91,6 +91,14 @@ const MessagesPage: React.FC = () => {
 
     const { isConnected } = useSocket();
 
+    // Sound controls from hook
+    const {
+        soundsEnabled,
+        toggleSounds,
+        soundVolume,
+        setSoundVolume
+    } = useMessages();
+
     // Local state
     const [messageInput, setMessageInput] = useState('');
     const [searchQuery, setSearchQuery] = useState('');

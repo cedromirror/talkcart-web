@@ -655,7 +655,7 @@ router.post('/checkout', authenticateTokenStrict, async (req, res) => {
     const { paymentMethod, paymentDetails } = req.body;
 
     // Validate payment method
-    const validPaymentMethods = ['stripe', 'flutterwave', 'crypto', 'nft'];
+    const validPaymentMethods = ['stripe', 'flutterwave', 'mobile_money', 'crypto', 'nft'];
     if (!validPaymentMethods.includes(paymentMethod)) {
       return res.status(400).json({
         success: false,
@@ -1037,6 +1037,9 @@ router.post('/checkout', authenticateTokenStrict, async (req, res) => {
           currency: orderItems[0]?.currency || 'USD',
           paymentMethod,
           paymentDetails: orderPaymentDetails,
+          tx_ref: Array.isArray(orderPaymentDetails)
+            ? (orderPaymentDetails[0]?.tx_ref || undefined)
+            : (orderPaymentDetails?.tx_ref || undefined),
           status: 'completed'
         });
 

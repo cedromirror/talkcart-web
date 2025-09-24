@@ -1,5 +1,5 @@
 import { useContext } from 'react';
-import { AuthContext } from '@/contexts/AuthContext';
+import { AuthContext } from '@/contexts/AuthContextDefinition';
 
 // Safe auth hook that doesn't throw if used outside AuthProvider
 export const useSafeAuth = () => {

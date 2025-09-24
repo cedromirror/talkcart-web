@@ -18,18 +18,13 @@ const nextConfig = {
     maxFileSize: 200 * 1024 * 1024, // 200MB
   },
 
-  // Improve Fast Refresh reliability
-  onDemandEntries: {
-    maxInactiveAge: 25 * 1000,
-    pagesBufferLength: 2,
-  },
   images: {
     domains: ['localhost', 'talkcart.app', 'res.cloudinary.com'],
     unoptimized: process.env.NODE_ENV === 'development',
   },
 
-  // Silence monorepo root inference for output tracing
-  outputFileTracingRoot: path.join(__dirname, '..'),
+  // Removed output: 'standalone' and outputFileTracing to avoid EPERM tracing issues on Windows
+
 
   // Development server configuration for better HMR
   ...(process.env.NODE_ENV === 'development' && {
