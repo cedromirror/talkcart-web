@@ -1,17 +1,15 @@
 # Dependencies
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-
-# Production builds
-/dist/
-/build/
-/out/
-.next/
-.nuxt/
-.vuepress/dist/
+.npm/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
+.yarn/patches/
+.yarn/plugins/
+.yarn/releases/
+.yarn/sdks/
+.yarn/versions/
 
 # Logs
 logs
@@ -20,6 +18,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
+pnpm-debug.log*
 
 # Runtime data
 pids
@@ -58,9 +57,6 @@ typings/
 # TypeScript cache
 *.tsbuildinfo
 
-# Optional npm cache directory
-.npm
-
 # Optional eslint cache
 .eslintcache
 
@@ -79,8 +75,12 @@ typings/
 # Yarn Integrity file
 .yarn-integrity
 
-# dotenv environment variables file
+# dotenv environment variables files
 .env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 .env.test
 
 # parcel-bundler cache (https://parceljs.org/)
@@ -94,13 +94,6 @@ out/
 # Nuxt.js build / generate output
 .nuxt/
 dist/
-
-# Gatsby files
-.percyrc
-.cache/
-public/
-public/**/*
-!public/robots.txt
 
 # vuepress build output
 .vuepress/dist/
@@ -119,17 +112,6 @@ public/**/*
 
 # Stores VSCode versions used for testing
 .vscode-test/
-
-# yarn v2
-.yarn/cache/
-.yarn/unplugged/
-.yarn/build-state.yml
-.yarn/install-state.gz
-.yarn/patches/
-.yarn/plugins/
-.yarn/releases/
-.yarn/sdks/
-.yarn/versions/
 
 # Terraform
 .terraform/
@@ -173,20 +155,12 @@ temp/
 *.db
 *.sqlite
 
-# Log files
-*.log
-
-# Environment files
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
 # Mac files
 .DS_Store
 
 # Windows files
 Thumbs.db
+*.lnk
 
 # Project specific ignores
 **/node_modules/
@@ -200,11 +174,14 @@ frontend/.nuxt/
 frontend/dist/
 frontend/node_modules/
 frontend/.env*
+frontend/.swc/
+frontend/.cache/
 
 backend/node_modules/
 backend/.env*
 backend/*.log
 backend/coverage/
+backend/.cache/
 
 super-admin/.next/
 super-admin/out/
@@ -212,6 +189,7 @@ super-admin/.nuxt/
 super-admin/dist/
 super-admin/node_modules/
 super-admin/.env*
+super-admin/.cache/
 
 # Ignore all .env files except .env.example
 .env*
@@ -219,3 +197,15 @@ super-admin/.env*
 
 # Ignore IDE specific files
 *.code-workspace
+
+# Docker
+.dockerignore
+
+# Additional build artifacts
+*.bak
+*.backup
+*.old
+*.orig
+*.rej
+*.tmp
+*.temp

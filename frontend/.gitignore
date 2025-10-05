@@ -10,6 +10,7 @@ coverage/
 .next/
 *.tsbuildinfo
 .cache/
+.swc/
 *.swp
 *.swo
 *.bak
@@ -34,7 +35,6 @@ __pycache__/
 *.tar.gz
 *.rar
 *.7z
-*.bak
 *.old
 *.orig
 *.rej
