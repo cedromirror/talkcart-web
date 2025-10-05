@@ -87,49 +87,6 @@ router.get('/profile/:username', authenticateToken, async (req, res) => {
 
     console.log(`Getting profile for username: ${username}, requested by: ${requestingUserId || 'anonymous'}`);
 
-    // Special-case 'anonymous' username: return a minimal public profile instead of 404
-    if (String(username).toLowerCase() === 'anonymous') {
-      const anonymousProfile = {
-        id: 'anonymous-user',
-        username: 'anonymous',
-        displayName: 'TalkCart User',
-        email: undefined,
-        avatar: '',
-        bio: '',
-        location: '',
-        website: '',
-        isVerified: false,
-        followerCount: 0,
-        followingCount: 0,
-        postCount: 0,
-        createdAt: new Date(0).toISOString(),
-        updatedAt: new Date(0).toISOString(),
-        walletAddress: undefined,
-        socialLinks: {},
-        settings: {
-          privacy: {
-            profileVisibility: 'public',
-            activityVisibility: 'public',
-            allowDirectMessages: true,
-            allowGroupInvites: true,
-            allowMentions: true,
-            showWallet: false,
-            showActivity: true,
-            showOnlineStatus: false,
-            showLastSeen: false,
-          }
-        },
-        lastSeen: undefined,
-        isOnline: false,
-        isFollowing: false,
-        isFollower: false,
-        canMessage: true,
-        canInviteToGroup: true,
-      };
-
-      return res.json({ success: true, data: anonymousProfile });
-    }
-
     const user = await User.findOne({
       username: new RegExp(`^${username}$`, 'i'),
       isActive: true
@@ -484,17 +441,27 @@ router.get('/:id/followers', authenticateTokenStrict, async (req, res) => {
 
     console.log(`Getting followers for user: ${userId}`);
 
-    // TODO: Implement with Follow model
-    // For now, return empty array
+    // Get followers using Follow model
+    const followers = await Follow.find({ following: userId, isActive: true })
+      .populate('follower', 'username displayName avatar bio isVerified followerCount')
+      .sort({ createdAt: -1 })
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .limit(parseInt(limit));
+
+    const total = await Follow.countDocuments({ following: userId, isActive: true });
+
+    // Extract follower data
+    const followersList = followers.map(follow => follow.follower).filter(Boolean);
+
     res.json({
       success: true,
       data: {
-        followers: [],
+        followers: followersList,
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
-          total: 0,
-          pages: 0
+          total,
+          pages: Math.ceil(total / parseInt(limit))
         }
       }
     });
@@ -525,17 +492,27 @@ router.get('/:id/following', authenticateTokenStrict, async (req, res) => {
 
     console.log(`Getting following for user: ${userId}`);
 
-    // TODO: Implement with Follow model
-    // For now, return empty array
+    // Get following using Follow model
+    const following = await Follow.find({ follower: userId, isActive: true })
+      .populate('following', 'username displayName avatar bio isVerified followerCount')
+      .sort({ createdAt: -1 })
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .limit(parseInt(limit));
+
+    const total = await Follow.countDocuments({ follower: userId, isActive: true });
+
+    // Extract following data
+    const followingList = following.map(follow => follow.following).filter(Boolean);
+
     res.json({
       success: true,
       data: {
-        following: [],
+        following: followingList,
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
-          total: 0,
-          pages: 0
+          total,
+          pages: Math.ceil(total / parseInt(limit))
         }
       }
     });
@@ -1080,6 +1057,65 @@ router.get('/:id/following', async (req, res) => {
   } catch (error) {
     console.error('Get following error:', error);
     res.status(500).json({ success: false, error: 'Failed to get following', message: error.message });
+  }
+});
+
+// @route   GET /api/users/:id/relationship
+// @desc    Get relationship status with user
+// @access  Private
+router.get('/:id/relationship', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { id: targetUserId } = req.params;
+    const currentUserId = req.user.userId;
+
+    if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid user ID'
+      });
+    }
+
+    if (currentUserId === targetUserId) {
+      return res.json({
+        success: true,
+        data: {
+          relationship: 'self',
+          isFollowing: false,
+          isFollowedBy: false
+        }
+      });
+    }
+
+    // Check if current user follows target user
+    const isFollowing = await Follow.isFollowing(currentUserId, targetUserId);
+    
+    // Check if target user follows current user
+    const isFollowedBy = await Follow.isFollowing(targetUserId, currentUserId);
+
+    let relationship = 'none';
+    if (isFollowing && isFollowedBy) {
+      relationship = 'mutual';
+    } else if (isFollowing) {
+      relationship = 'following';
+    } else if (isFollowedBy) {
+      relationship = 'follower';
+    }
+
+    res.json({
+      success: true,
+      data: {
+        relationship,
+        isFollowing,
+        isFollowedBy
+      }
+    });
+  } catch (error) {
+    console.error('Get relationship error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get relationship',
+      message: error.message
+    });
   }
 });
 

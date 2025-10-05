@@ -3,10 +3,12 @@ const router = express.Router();
 const mongoose = require('mongoose');
 const multer = require('multer');
 const { authenticateToken, authenticateTokenStrict } = require('./auth');
-const { Product, User } = require('../models');
+const { Product, User, Order, ProductReview } = require('../models');
 const { uploadToCloudinary } = require('../config/cloudinary');
 const Joi = require('joi');
 const { ethers } = require('ethers');
+const { validate } = require('../middleware/validation');
+const { asyncHandler, sendSuccess, sendError } = require('../middleware/errorHandler');
 
 // Canonical categories list reused across routes and validation
 const CATEGORIES = [
@@ -291,7 +293,13 @@ router.get('/products', async (req, res) => {
         isVerified: product.vendorId.isVerified,
         walletAddress: product.vendorId.walletAddress,
         role: product.vendorId.role
-      }
+      },
+      // Include new fields for enhanced marketplace experience
+      discount: product.discount || 0,
+      freeShipping: product.freeShipping || false,
+      fastDelivery: product.fastDelivery || false,
+      prime: product.prime || false,
+      inStock: product.inStock !== undefined ? product.inStock : (product.stock > 0 || product.isNFT)
     }));
 
     res.json({
@@ -372,6 +380,12 @@ router.post('/products', authenticateTokenStrict, async (req, res) => {
         then: Joi.string().pattern(/^\d+$/).required(), // positive integer as string
         otherwise: Joi.forbidden(),
       }),
+      // New fields for enhanced marketplace experience
+      discount: Joi.number().min(0).max(99).default(0),
+      freeShipping: Joi.boolean().default(false),
+      fastDelivery: Joi.boolean().default(false),
+      prime: Joi.boolean().default(false),
+      inStock: Joi.boolean().default(true),
     });
 
     const { value, error } = schema.validate(req.body, { abortEarly: false });
@@ -404,6 +418,12 @@ router.post('/products', authenticateTokenStrict, async (req, res) => {
       isNFT: value.isNFT,
       contractAddress: value.isNFT ? value.contractAddress : undefined,
       tokenId: value.isNFT ? value.tokenId : undefined,
+      // New fields for enhanced marketplace experience
+      discount: value.discount,
+      freeShipping: value.freeShipping,
+      fastDelivery: value.fastDelivery,
+      prime: value.prime,
+      inStock: value.inStock,
       isActive: true,
     });
 
@@ -423,12 +443,145 @@ router.post('/products', authenticateTokenStrict, async (req, res) => {
         isVerified: newProduct.vendorId.isVerified,
         walletAddress: newProduct.vendorId.walletAddress,
       },
+      // Include new fields for enhanced marketplace experience
+      discount: newProduct.discount || 0,
+      freeShipping: newProduct.freeShipping || false,
+      fastDelivery: newProduct.fastDelivery || false,
+      prime: newProduct.prime || false,
+      inStock: newProduct.inStock !== undefined ? newProduct.inStock : (newProduct.stock > 0 || newProduct.isNFT)
     };
 
     res.status(201).json({ success: true, data: responseData, message: 'Product created successfully' });
   } catch (error) {
     console.error('Create product error:', error);
     res.status(500).json({ success: false, error: 'Failed to create product', message: error.message });
+  }
+});
+
+// @route   GET /api/marketplace/products/random
+// @desc    Get random products for trending display
+// @access  Public
+router.get('/products/random', async (req, res) => {
+  try {
+    const { limit = 10 } = req.query;
+    
+    // First check if there are any active products
+    const productCount = await Product.countDocuments({ isActive: true });
+    
+    if (productCount === 0) {
+      return res.json({
+        success: true,
+        data: {
+          products: []
+        }
+      });
+    }
+    
+    // Get random products using MongoDB aggregation
+    const randomProducts = await Product.aggregate([
+      { $match: { isActive: true } },
+      { $sample: { size: Math.min(parseInt(limit), productCount) } },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'vendorId',
+          foreignField: '_id',
+          as: 'vendor'
+        }
+      },
+      { $unwind: '$vendor' },
+      {
+        $project: {
+          id: '$_id',
+          name: 1,
+          description: 1,
+          price: 1,
+          currency: 1,
+          images: 1,
+          category: 1,
+          isNFT: 1,
+          featured: 1,
+          tags: 1,
+          stock: 1,
+          rating: 1,
+          reviewCount: 1,
+          sales: 1,
+          views: 1,
+          createdAt: 1,
+          vendor: {
+            id: '$vendor._id',
+            username: '$vendor.username',
+            displayName: '$vendor.displayName',
+            avatar: '$vendor.avatar',
+            isVerified: '$vendor.isVerified',
+            walletAddress: '$vendor.walletAddress'
+          }
+        }
+      }
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        products: randomProducts
+      }
+    });
+  } catch (error) {
+    console.error('Get random products error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get random products',
+      message: error.message
+    });
+  }
+});
+
+// @route   GET /api/marketplace/products/trending
+// @desc    Get trending products based on views, sales, and ratings
+// @access  Public
+router.get('/products/trending', async (req, res) => {
+  try {
+    const { limit = 10 } = req.query;
+    
+    // Get trending products based on engagement metrics
+    const trendingProducts = await Product.find({ isActive: true })
+      .populate('vendorId', 'username displayName avatar isVerified walletAddress')
+      .sort({ 
+        views: -1, 
+        sales: -1, 
+        rating: -1, 
+        createdAt: -1 
+      })
+      .limit(parseInt(limit))
+      .lean();
+
+    // Transform data for frontend compatibility
+    const transformedProducts = trendingProducts.map(product => ({
+      ...product,
+      id: product._id,
+      vendor: {
+        id: product.vendorId._id,
+        username: product.vendorId.username,
+        displayName: product.vendorId.displayName,
+        avatar: product.vendorId.avatar,
+        isVerified: product.vendorId.isVerified,
+        walletAddress: product.vendorId.walletAddress
+      }
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        products: transformedProducts
+      }
+    });
+  } catch (error) {
+    console.error('Get trending products error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get trending products',
+      message: error.message
+    });
   }
 });
 
@@ -481,7 +634,13 @@ router.get('/products/:id', async (req, res) => {
         isVerified: product.vendorId.isVerified,
         walletAddress: product.vendorId.walletAddress,
         role: product.vendorId.role
-      }
+      },
+      // Include new fields for enhanced marketplace experience
+      discount: product.discount || 0,
+      freeShipping: product.freeShipping || false,
+      fastDelivery: product.fastDelivery || false,
+      prime: product.prime || false,
+      inStock: product.inStock !== undefined ? product.inStock : (product.stock > 0 || product.isNFT)
     };
 
     res.json({
@@ -549,7 +708,13 @@ router.put('/products/:id', authenticateTokenStrict, async (req, res) => {
         avatar: updatedProduct.vendorId.avatar,
         isVerified: updatedProduct.vendorId.isVerified,
         walletAddress: updatedProduct.vendorId.walletAddress
-      }
+      },
+      // Include new fields for enhanced marketplace experience
+      discount: updatedProduct.discount || 0,
+      freeShipping: updatedProduct.freeShipping || false,
+      fastDelivery: updatedProduct.fastDelivery || false,
+      prime: updatedProduct.prime || false,
+      inStock: updatedProduct.inStock !== undefined ? updatedProduct.inStock : (updatedProduct.stock > 0 || updatedProduct.isNFT)
     };
 
     res.json({
@@ -635,6 +800,118 @@ router.get('/categories', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to get categories',
+      message: error.message
+    });
+  }
+});
+
+// @route   POST /api/marketplace/products/:id/buy
+// @desc    Buy a product directly (not through cart)
+// @access  Private
+router.post('/products/:id/buy', authenticateTokenStrict, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const productId = req.params.id;
+    const { paymentMethod, paymentDetails } = req.body;
+
+    // Validate ObjectId early to avoid CastError
+    if (!mongoose.Types.ObjectId.isValid(productId)) {
+      return res.status(400).json({ success: false, error: 'Invalid product ID' });
+    }
+
+    // Find the product
+    const product = await Product.findById(productId);
+    if (!product) {
+      return res.status(404).json({ success: false, error: 'Product not found' });
+    }
+
+    // Check if product is available
+    if (!product.isActive || product.stock <= 0) {
+      return res.status(400).json({ success: false, error: 'Product is not available' });
+    }
+
+    // Handle different payment methods
+    let orderData = {
+      userId,
+      items: [{
+        productId: product._id,
+        name: product.name,
+        price: product.price,
+        quantity: 1,
+        currency: product.currency,
+        isNFT: product.isNFT
+      }],
+      totalAmount: product.price,
+      currency: product.currency,
+      paymentMethod,
+      paymentDetails: paymentDetails || {},
+      status: 'pending'
+    };
+
+    // Special handling for Flutterwave
+    if (paymentMethod === 'flutterwave') {
+      // Check if we have the required Flutterwave details
+      if (!paymentDetails || (!paymentDetails.tx_ref && !paymentDetails.flw_tx_id)) {
+        // If we don't have the details, we need to initialize the payment
+        // For now, we'll create a placeholder and expect the client to provide details later
+        orderData.tx_ref = `talkcart-product-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+        orderData.status = 'initialized';
+      } else {
+        // We have the payment details, mark as completed
+        orderData.tx_ref = paymentDetails.tx_ref;
+        orderData.status = 'completed';
+      }
+    } 
+    // Special handling for Stripe
+    else if (paymentMethod === 'stripe') {
+      if (paymentDetails && paymentDetails.paymentIntentId) {
+        orderData.paymentDetails.paymentIntentId = paymentDetails.paymentIntentId;
+        orderData.status = 'completed';
+      }
+    }
+    // Special handling for Crypto
+    else if (paymentMethod === 'crypto') {
+      orderData.status = 'completed';
+    }
+    // Special handling for NFT
+    else if (paymentMethod === 'nft') {
+      orderData.status = 'completed';
+    }
+
+    // Create the order
+    const order = new Order(orderData);
+    await order.save();
+
+    // Update product stock
+    if (!product.isNFT) {
+      product.stock -= 1;
+      product.sales += 1;
+      await product.save();
+    }
+
+    // Populate the product vendor data
+    await order.populate({
+      path: 'items.productId',
+      select: 'name images category vendorId'
+    });
+
+    res.status(201).json({
+      success: true,
+      data: {
+        order,
+        product,
+        payment: {
+          status: order.status
+        }
+      },
+      message: 'Purchase successful'
+    });
+
+  } catch (error) {
+    console.error('Buy product error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to process purchase',
       message: error.message
     });
   }
@@ -871,5 +1148,393 @@ router.get('/stats', async (req, res) => {
     });
   }
 });
+
+// @route   GET /api/marketplace/products/random
+// @desc    Get random products for trending display
+// @access  Public
+router.get('/products/random', async (req, res) => {
+  try {
+    const { limit = 10 } = req.query;
+    
+    // Get random products using MongoDB aggregation
+    const randomProducts = await Product.aggregate([
+      { $match: { isActive: true } },
+      { $sample: { size: parseInt(limit) } },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'vendorId',
+          foreignField: '_id',
+          as: 'vendor'
+        }
+      },
+      { $unwind: '$vendor' },
+      {
+        $project: {
+          id: '$_id',
+          name: 1,
+          description: 1,
+          price: 1,
+          currency: 1,
+          images: 1,
+          category: 1,
+          isNFT: 1,
+          featured: 1,
+          tags: 1,
+          stock: 1,
+          rating: 1,
+          reviewCount: 1,
+          sales: 1,
+          views: 1,
+          createdAt: 1,
+          vendor: {
+            id: '$vendor._id',
+            username: '$vendor.username',
+            displayName: '$vendor.displayName',
+            avatar: '$vendor.avatar',
+            isVerified: '$vendor.isVerified',
+            walletAddress: '$vendor.walletAddress'
+          }
+        }
+      }
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        products: randomProducts
+      }
+    });
+  } catch (error) {
+    console.error('Get random products error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get random products',
+      message: error.message
+    });
+  }
+});
+
+// @route   GET /api/marketplace/products/trending
+// @desc    Get trending products based on views, sales, and ratings
+// @access  Public
+router.get('/products/trending', async (req, res) => {
+  try {
+    const { limit = 10 } = req.query;
+    
+    // Get trending products based on engagement metrics
+    const trendingProducts = await Product.find({ isActive: true })
+      .populate('vendorId', 'username displayName avatar isVerified walletAddress')
+      .sort({ 
+        views: -1, 
+        sales: -1, 
+        rating: -1, 
+        createdAt: -1 
+      })
+      .limit(parseInt(limit))
+      .lean();
+
+    // Transform data for frontend compatibility
+    const transformedProducts = trendingProducts.map(product => ({
+      ...product,
+      id: product._id,
+      vendor: {
+        id: product.vendorId._id,
+        username: product.vendorId.username,
+        displayName: product.vendorId.displayName,
+        avatar: product.vendorId.avatar,
+        isVerified: product.vendorId.isVerified,
+        walletAddress: product.vendorId.walletAddress
+      }
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        products: transformedProducts
+      }
+    });
+  } catch (error) {
+    console.error('Get trending products error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get trending products',
+      message: error.message
+    });
+  }
+});
+
+// @route   GET /api/marketplace/recommendations/:userId
+// @desc    Get product recommendations for user
+// @access  Private
+router.get('/recommendations/:userId', authenticateToken, asyncHandler(async (req, res) => {
+  const { userId } = req.params;
+  const { limit = 10 } = req.query;
+
+  // Get user's order history to understand preferences
+  const userOrders = await Order.find({ userId })
+    .populate('items.productId', 'category tags vendorId')
+    .limit(50)
+    .sort({ createdAt: -1 });
+
+  // Extract preferred categories and vendors
+  const categoryPreferences = {};
+  const vendorPreferences = {};
+  const tagPreferences = {};
+
+  userOrders.forEach(order => {
+    order.items.forEach(item => {
+      if (item.productId) {
+        // Count category preferences
+        const category = item.productId.category;
+        categoryPreferences[category] = (categoryPreferences[category] || 0) + item.quantity;
+
+        // Count vendor preferences
+        const vendorId = item.productId.vendorId;
+        vendorPreferences[vendorId] = (vendorPreferences[vendorId] || 0) + item.quantity;
+
+        // Count tag preferences
+        item.productId.tags?.forEach(tag => {
+          tagPreferences[tag] = (tagPreferences[tag] || 0) + 1;
+        });
+      }
+    });
+  });
+
+  // Get top categories and vendors
+  const topCategories = Object.entries(categoryPreferences)
+    .sort(([,a], [,b]) => b - a)
+    .slice(0, 3)
+    .map(([category]) => category);
+
+  const topVendors = Object.entries(vendorPreferences)
+    .sort(([,a], [,b]) => b - a)
+    .slice(0, 5)
+    .map(([vendorId]) => vendorId);
+
+  const topTags = Object.entries(tagPreferences)
+    .sort(([,a], [,b]) => b - a)
+    .slice(0, 10)
+    .map(([tag]) => tag);
+
+  // Build recommendation query
+  let recommendationQuery = {
+    isActive: true,
+    $or: []
+  };
+
+  // Add category-based recommendations
+  if (topCategories.length > 0) {
+    recommendationQuery.$or.push({ category: { $in: topCategories } });
+  }
+
+  // Add vendor-based recommendations
+  if (topVendors.length > 0) {
+    recommendationQuery.$or.push({ vendorId: { $in: topVendors } });
+  }
+
+  // Add tag-based recommendations
+  if (topTags.length > 0) {
+    recommendationQuery.$or.push({ tags: { $in: topTags } });
+  }
+
+  // Fallback to trending products if no preferences
+  if (recommendationQuery.$or.length === 0) {
+    recommendationQuery = {
+      isActive: true,
+      featured: true
+    };
+  }
+
+  const recommendations = await Product.find(recommendationQuery)
+    .populate('vendorId', 'username displayName avatar')
+    .sort({ sales: -1, rating: -1, createdAt: -1 })
+    .limit(parseInt(limit));
+
+  sendSuccess(res, {
+    recommendations,
+    preferences: {
+      categories: topCategories,
+      vendors: topVendors.length,
+      tags: topTags.slice(0, 5)
+    }
+  }, 'Recommendations generated successfully');
+}));
+
+// @route   GET /api/marketplace/wishlist
+// @desc    Get user's wishlist
+// @access  Private
+router.get('/wishlist', authenticateTokenStrict, asyncHandler(async (req, res) => {
+  const userId = req.user.userId;
+  const { page = 1, limit = 20 } = req.query;
+
+  const user = await User.findById(userId).populate({
+    path: 'wishlist',
+    populate: {
+      path: 'vendorId',
+      select: 'username displayName avatar'
+    },
+    options: {
+      sort: { createdAt: -1 },
+      skip: (parseInt(page) - 1) * parseInt(limit),
+      limit: parseInt(limit)
+    }
+  });
+
+  const total = user.wishlist?.length || 0;
+
+  sendSuccess(res, {
+    wishlist: user.wishlist || [],
+    pagination: {
+      page: parseInt(page),
+      limit: parseInt(limit),
+      total,
+      pages: Math.ceil(total / parseInt(limit))
+    }
+  });
+}));
+
+// @route   POST /api/marketplace/wishlist/:productId
+// @desc    Add product to wishlist
+// @access  Private
+router.post('/wishlist/:productId', authenticateTokenStrict, asyncHandler(async (req, res) => {
+  const userId = req.user.userId;
+  const { productId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(productId)) {
+    return sendError(res, 'Invalid product ID', 400);
+  }
+
+  const product = await Product.findById(productId);
+  if (!product) {
+    return sendError(res, 'Product not found', 404);
+  }
+
+  const user = await User.findById(userId);
+  
+  // Initialize wishlist if it doesn't exist
+  if (!user.wishlist) {
+    user.wishlist = [];
+  }
+
+  // Check if already in wishlist
+  if (user.wishlist.includes(productId)) {
+    return sendError(res, 'Product already in wishlist', 409);
+  }
+
+  user.wishlist.push(productId);
+  await user.save();
+
+  sendSuccess(res, { productId }, 'Product added to wishlist');
+}));
+
+// @route   DELETE /api/marketplace/wishlist/:productId
+// @desc    Remove product from wishlist
+// @access  Private
+router.delete('/wishlist/:productId', authenticateTokenStrict, asyncHandler(async (req, res) => {
+  const userId = req.user.userId;
+  const { productId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(productId)) {
+    return sendError(res, 'Invalid product ID', 400);
+  }
+
+  const user = await User.findById(userId);
+  
+  if (!user.wishlist || !user.wishlist.includes(productId)) {
+    return sendError(res, 'Product not in wishlist', 404);
+  }
+
+  user.wishlist = user.wishlist.filter(id => id.toString() !== productId);
+  await user.save();
+
+  sendSuccess(res, { productId }, 'Product removed from wishlist');
+}));
+
+// @route   GET /api/marketplace/recently-viewed
+// @desc    Get recently viewed products
+// @access  Private
+router.get('/recently-viewed', authenticateTokenStrict, asyncHandler(async (req, res) => {
+  const userId = req.user.userId;
+  const { limit = 10 } = req.query;
+
+  const user = await User.findById(userId).populate({
+    path: 'recentlyViewed',
+    populate: {
+      path: 'vendorId',
+      select: 'username displayName avatar'
+    },
+    options: {
+      limit: parseInt(limit)
+    }
+  });
+
+  sendSuccess(res, {
+    recentlyViewed: user.recentlyViewed || []
+  });
+}));
+
+// @route   POST /api/marketplace/reviews/:productId
+// @desc    Add product review
+// @access  Private
+router.post('/reviews/:productId', authenticateTokenStrict, validate('createReview'), asyncHandler(async (req, res) => {
+  const userId = req.user.userId;
+  const { productId } = req.params;
+  const { rating, comment, title } = req.body;
+
+  if (!mongoose.Types.ObjectId.isValid(productId)) {
+    return sendError(res, 'Invalid product ID', 400);
+  }
+
+  const product = await Product.findById(productId);
+  if (!product) {
+    return sendError(res, 'Product not found', 404);
+  }
+
+  // Check if user has purchased this product
+  const hasPurchased = await Order.findOne({
+    userId,
+    'items.productId': productId,
+    status: 'completed'
+  });
+
+  if (!hasPurchased) {
+    return sendError(res, 'You can only review products you have purchased', 403);
+  }
+
+  // Check if user has already reviewed this product
+  const existingReview = await ProductReview.findOne({
+    userId,
+    productId
+  });
+
+  if (existingReview) {
+    return sendError(res, 'You have already reviewed this product', 409);
+  }
+
+  const review = new ProductReview({
+    userId,
+    productId,
+    rating,
+    comment,
+    title
+  });
+
+  await review.save();
+
+  // Update product rating
+  const reviews = await ProductReview.find({ productId });
+  const averageRating = reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length;
+  
+  product.rating = averageRating;
+  product.reviewCount = reviews.length;
+  await product.save();
+
+  await review.populate('userId', 'username displayName avatar');
+
+  sendSuccess(res, review, 'Review added successfully', 201);
+}));
+
+
 
 module.exports = router;

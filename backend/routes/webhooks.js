@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Order = require('../models/Order');
 const User = require('../models/User');
-const Cart = require('../models/Cart');
+// Cart model removed as part of cart functionality removal
 const WebhookEvent = require('../models/WebhookEvent');
 const crypto = require('crypto');
 let stripe = null;
@@ -201,23 +201,23 @@ const verifyFlutterwaveSignature = (req, res, next) => {
 };
 
 // @route   POST /api/webhooks/flutterwave
-// @desc    Handle Flutterwave webhook events (always verify via API before fulfillment)
+// @desc    Handle Flutterwave webhook events (payment completion)
 // @access  Public (with signature verification)
 router.post('/flutterwave', express.raw({ type: 'application/json' }), verifyFlutterwaveSignature, async (req, res) => {
   try {
-    const payload = JSON.parse(req.body?.toString?.() || '{}');
-    const data = payload?.data || {};
-    const txId = data?.id;
-    const txRef = data?.tx_ref;
+    // Idempotency guard: store processed Flutterwave event IDs
+    const data = JSON.parse(req.body);
+    const txId = String(data.id || '');
+    const txRef = String(data.tx_ref || data.data?.tx_ref || '');
 
     if (!txId || !txRef) {
-      return res.status(200).json({ success: true, received: true });
+      return res.status(400).json({ success: false, message: 'Invalid Flutterwave event data' });
     }
 
-    // Idempotency guard for Flutterwave (use txId) - tolerate duplicates
     try {
-      await WebhookEvent.create({ source: 'flutterwave', eventId: String(txId), tx_ref: String(txRef), meta: { event: payload?.event } });
+      await WebhookEvent.create({ source: 'flutterwave', eventId: txId, meta: { txRef } });
     } catch (e) {
+      // Duplicate (unique index) → already processed
       return res.status(200).json({ success: true, received: true, duplicate: true });
     }
 
@@ -230,35 +230,7 @@ router.post('/flutterwave', express.raw({ type: 'application/json' }), verifyFlu
     const ok = (vdata.status || '').toLowerCase() === 'successful' && String(vdata.tx_ref) === String(txRef);
 
     if (ok) {
-      // 1) Update cart payment record if we can locate the cart
-      const currency = String(vdata.currency || '').toUpperCase() || undefined;
-      const amountCents = Math.max(1, Math.round(Number(vdata.amount || 0) * 100));
-      const flw_tx_id = String(vdata.id || txId);
-      const meta = vdata.meta || data.meta || {};
-      const cartId = meta.cartId || meta.cart_id;
-
-      try {
-        let cart = null;
-        if (cartId) {
-          cart = await Cart.findById(cartId);
-        }
-        if (!cart) {
-          cart = await Cart.findOne({ 'payments.tx_ref': txRef });
-        }
-
-        if (cart) {
-          const cur = currency || 'USD';
-          const idx = cart.payments.findIndex(p => p.provider === 'flutterwave' && p.currency === cur);
-          const record = { provider: 'flutterwave', currency: cur, amountCents, tx_ref: String(txRef), flw_tx_id, status: 'successful', updatedAt: new Date() };
-          if (idx >= 0) cart.payments[idx] = record; else cart.payments.push(record);
-          await cart.save();
-          console.log(`🧾 Cart ${cart._id} payment updated via Flutterwave webhook: ${cur} ${amountCents}c`);
-        }
-      } catch (cartErr) {
-        console.warn('Failed to update cart from Flutterwave webhook:', cartErr.message);
-      }
-
-      // 2) Update order if it exists and references this tx_ref (support both paymentDetails.tx_ref and top-level tx_ref)
+      // Update order if it exists and references this tx_ref (support both paymentDetails.tx_ref and top-level tx_ref)
       try {
         const order = await Order.findOne({ $or: [ { 'paymentDetails.tx_ref': txRef }, { tx_ref: txRef } ] });
         if (order) {

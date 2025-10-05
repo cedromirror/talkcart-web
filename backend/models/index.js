@@ -2,10 +2,12 @@ const User = require('./User');
 const Post = require('./Post');
 const Comment = require('./Comment');
 const Product = require('./Product');
+const ProductReview = require('./ProductReview');
 const Order = require('./Order');
 const Settings = require('./Settings');
 const DAO = require('./DAO');
 const Proposal = require('./Proposal');
+const Notification = require('./Notification');
 
 const Conversation = require('./Conversation');
 const Message = require('./Message');
@@ -23,10 +25,12 @@ module.exports = {
   Post,
   Comment,
   Product,
+  ProductReview,
   Order,
   Settings,
   DAO,
   Proposal,
+  Notification,
   Conversation,
   Message,
   Call,

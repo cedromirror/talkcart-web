@@ -27,6 +27,7 @@ import {
   Chip,
   Tooltip,
   Badge,
+  Paper,
 } from '@mui/material';
 import {
   MessageCircle,
@@ -44,6 +45,7 @@ import {
   TrendingUp,
   Loader2,
   AlertTriangle,
+  Smile,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useAuth } from '@/contexts/AuthContext';
@@ -52,6 +54,7 @@ import FollowButton from '@/components/common/FollowButton';
 import { formatTextWithMentions } from '@/utils/mentionUtils';
 import useComments, { Comment } from '@/hooks/useComments';
 import toast from 'react-hot-toast';
+import EmojiPicker from '@/components/common/EmojiPicker';
 
 interface CommentSectionProps {
   postId: string;
@@ -85,6 +88,11 @@ const CommentSection: React.FC<CommentSectionProps> = ({
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
   const [reportReason, setReportReason] = useState('');
   const [reportDescription, setReportDescription] = useState('');
+
+  // Emoji picker state
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [emojiPickerAnchor, setEmojiPickerAnchor] = useState<HTMLElement | null>(null);
+  const [emojiPickerTarget, setEmojiPickerTarget] = useState<'newComment' | 'reply' | null>(null);
 
   // Per-comment UI state for replies pagination/loading
   const REPLIES_PAGE_SIZE = 5;
@@ -208,6 +216,30 @@ const CommentSection: React.FC<CommentSectionProps> = ({
     createComment(replyContent, parentId);
     setReplyContent('');
     setReplyingTo(null);
+  };
+
+  // Emoji handlers
+  const handleEmojiClick = (event: React.MouseEvent<HTMLElement>, target: 'newComment' | 'reply') => {
+    setEmojiPickerAnchor(event.currentTarget);
+    setEmojiPickerTarget(target);
+    setShowEmojiPicker(true);
+  };
+
+  const handleEmojiSelect = (emoji: string) => {
+    if (emojiPickerTarget === 'newComment') {
+      setNewComment(prev => prev + emoji);
+    } else if (emojiPickerTarget === 'reply') {
+      setReplyContent(prev => prev + emoji);
+    }
+    setShowEmojiPicker(false);
+    setEmojiPickerAnchor(null);
+    setEmojiPickerTarget(null);
+  };
+
+  const handleEmojiPickerClose = () => {
+    setShowEmojiPicker(false);
+    setEmojiPickerAnchor(null);
+    setEmojiPickerTarget(null);
   };
 
   const handleToggleLike = (commentId: string, isLiked: boolean) => {
@@ -436,6 +468,17 @@ const CommentSection: React.FC<CommentSectionProps> = ({
                 variant="outlined"
                 size="small"
                 disabled={isCreating}
+                InputProps={{
+                  endAdornment: (
+                    <IconButton
+                      size="small"
+                      onClick={(e) => handleEmojiClick(e, 'reply')}
+                      disabled={isCreating}
+                    >
+                      <Smile size={16} />
+                    </IconButton>
+                  ),
+                }}
               />
               <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
                 <Button
@@ -633,6 +676,17 @@ const CommentSection: React.FC<CommentSectionProps> = ({
                 onChange={(e) => setNewComment(e.target.value)}
                 variant="outlined"
                 disabled={isCreating}
+                InputProps={{
+                  endAdornment: (
+                    <IconButton
+                      size="small"
+                      onClick={(e) => handleEmojiClick(e, 'newComment')}
+                      disabled={isCreating}
+                    >
+                      <Smile size={20} />
+                    </IconButton>
+                  ),
+                }}
               />
             </Box>
             <Box display="flex" justifyContent="flex-end">
@@ -731,7 +785,14 @@ const CommentSection: React.FC<CommentSectionProps> = ({
         </Menu>
 
         {/* Report Dialog */}
-        <Dialog open={reportDialogOpen} onClose={() => setReportDialogOpen(false)} maxWidth="sm" fullWidth>
+        <Dialog 
+          open={reportDialogOpen} 
+          onClose={() => setReportDialogOpen(false)} 
+          maxWidth="sm" 
+          fullWidth
+          disableEnforceFocus  // Prevents focus trapping issues
+          hideBackdrop={false}  // Ensure backdrop is properly handled
+        >
           <DialogTitle>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <AlertTriangle size={20} color="#f57c00" />
@@ -782,6 +843,14 @@ const CommentSection: React.FC<CommentSectionProps> = ({
             </Button>
           </DialogActions>
         </Dialog>
+
+        {/* Emoji Picker */}
+        <EmojiPicker
+          open={showEmojiPicker}
+          anchorEl={emojiPickerAnchor}
+          onClose={handleEmojiPickerClose}
+          onSelect={handleEmojiSelect}
+        />
       </CardContent>
     </Card>
   );

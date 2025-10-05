@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import callService, { Call } from '@/services/callService';
+import { useSafeAuth } from './useSafeAuth';
 
 interface UseCallReturn {
   // State
@@ -17,6 +18,8 @@ interface UseCallReturn {
   activeCalls: Call[];
   loading: boolean;
   error: string | null;
+  isModerator: boolean;
+  isLocked: boolean;
 
   // Actions
   initiateCall: (conversationId: string, type: 'audio' | 'video') => Promise<void>;
@@ -32,6 +35,13 @@ interface UseCallReturn {
   declineCallTransfer: (callId: string) => Promise<void>;
   holdCall: (onHold: boolean) => Promise<void>;
   muteParticipant: (participantId: string, muted: boolean) => Promise<void>;
+  inviteParticipants: (userIds: string[]) => Promise<void>;
+  removeParticipant: (userId: string) => Promise<void>;
+  muteAllParticipants: () => Promise<void>;
+  promoteParticipant: (userId: string) => Promise<void>;
+  lockCall: () => Promise<void>;
+  unlockCall: () => Promise<void>;
+  endCallForAll: () => Promise<void>;
   getCallHistory: (conversationId: string) => Promise<void>;
   getMissedCalls: () => Promise<void>;
   getActiveCalls: () => Promise<void>;
@@ -44,6 +54,8 @@ interface UseCallReturn {
 }
 
 export const useCall = (): UseCallReturn => {
+  const { user: currentUser } = useSafeAuth();
+
   // State
   const [currentCall, setCurrentCall] = useState<Call | null>(null);
   const [incomingCall, setIncomingCall] = useState<Call | null>(null);
@@ -138,6 +150,46 @@ export const useCall = (): UseCallReturn => {
     }
   }, [currentCall]);
 
+  const handleMuteAll = useCallback((data: any) => {
+    console.log('Mute all participants:', data);
+    if (currentCall && data.callId === currentCall.callId) {
+      setCurrentCall(prev => prev ? { ...prev, ...data.call } : null);
+    }
+  }, [currentCall]);
+
+  const handleParticipantPromoted = useCallback((data: any) => {
+    console.log('Participant promoted:', data);
+    if (currentCall && data.callId === currentCall.callId) {
+      setCurrentCall(prev => prev ? { ...prev, ...data.call } : null);
+    }
+  }, [currentCall]);
+
+  const handleCallLocked = useCallback((data: any) => {
+    console.log('Call locked:', data);
+    if (currentCall && data.callId === currentCall.callId) {
+      setCurrentCall(prev => prev ? { ...prev, locked: true, ...data.call } : null);
+    }
+  }, [currentCall]);
+
+  const handleCallUnlocked = useCallback((data: any) => {
+    console.log('Call unlocked:', data);
+    if (currentCall && data.callId === currentCall.callId) {
+      setCurrentCall(prev => prev ? { ...prev, locked: false, ...data.call } : null);
+    }
+  }, [currentCall]);
+
+  const handleCallEndedByModerator = useCallback((data: any) => {
+    console.log('Call ended by moderator:', data);
+    if (currentCall && data.callId === currentCall.callId) {
+      setCurrentCall(null);
+      setIsCallActive(false);
+      setLocalStream(null);
+      setRemoteStreams(new Map());
+      setConnectionStates(new Map());
+      setError('Call was ended by a moderator');
+    }
+  }, [currentCall]);
+
   // Setup event listeners
   useEffect(() => {
     callService.on('incomingCall', handleIncomingCall);
@@ -147,6 +199,11 @@ export const useCall = (): UseCallReturn => {
     callService.on('participantLeft', handleParticipantLeft);
     callService.on('callEnded', handleCallEnded);
     callService.on('callDeclined', handleCallDeclined);
+    callService.on('call:mute-all', handleMuteAll);
+    callService.on('call:participant-promoted', handleParticipantPromoted);
+    callService.on('call:locked', handleCallLocked);
+    callService.on('call:unlocked', handleCallUnlocked);
+    callService.on('call:ended', handleCallEndedByModerator);
 
     return () => {
       callService.off('incomingCall', handleIncomingCall);
@@ -156,6 +213,11 @@ export const useCall = (): UseCallReturn => {
       callService.off('participantLeft', handleParticipantLeft);
       callService.off('callEnded', handleCallEnded);
       callService.off('callDeclined', handleCallDeclined);
+      callService.off('call:mute-all', handleMuteAll);
+      callService.off('call:participant-promoted', handleParticipantPromoted);
+      callService.off('call:locked', handleCallLocked);
+      callService.off('call:unlocked', handleCallUnlocked);
+      callService.off('call:ended', handleCallEndedByModerator);
     };
   }, [
     handleIncomingCall,
@@ -164,7 +226,12 @@ export const useCall = (): UseCallReturn => {
     handleParticipantJoined,
     handleParticipantLeft,
     handleCallEnded,
-    handleCallDeclined
+    handleCallDeclined,
+    handleMuteAll,
+    handleParticipantPromoted,
+    handleCallLocked,
+    handleCallUnlocked,
+    handleCallEndedByModerator
   ]);
 
   // Actions
@@ -443,6 +510,122 @@ export const useCall = (): UseCallReturn => {
     }
   }, [currentCall]);
 
+  // Invite participants method
+  const inviteParticipants = useCallback(async (userIds: string[]) => {
+    if (!currentCall) {
+      setError('No active call');
+      return;
+    }
+
+    try {
+      const updatedCall = await callService.inviteParticipants(currentCall.callId, userIds);
+      setCurrentCall(updatedCall);
+    } catch (err: any) {
+      setError(err.message);
+      console.error('Error inviting participants:', err);
+    }
+  }, [currentCall]);
+
+  // Remove participant method
+  const removeParticipant = useCallback(async (userId: string) => {
+    if (!currentCall) {
+      setError('No active call');
+      return;
+    }
+
+    try {
+      const updatedCall = await callService.removeParticipant(currentCall.callId, userId);
+      setCurrentCall(updatedCall);
+    } catch (err: any) {
+      setError(err.message);
+      console.error('Error removing participant:', err);
+    }
+  }, [currentCall]);
+
+  // Mute all participants method
+  const muteAllParticipants = useCallback(async () => {
+    if (!currentCall) {
+      setError('No active call');
+      return;
+    }
+
+    try {
+      const updatedCall = await callService.muteAllParticipants(currentCall.callId);
+      setCurrentCall(updatedCall);
+    } catch (err: any) {
+      setError(err.message);
+      console.error('Error muting all participants:', err);
+    }
+  }, [currentCall]);
+
+  // Promote participant method
+  const promoteParticipant = useCallback(async (userId: string) => {
+    if (!currentCall) {
+      setError('No active call');
+      return;
+    }
+
+    try {
+      const updatedCall = await callService.promoteParticipant(currentCall.callId, userId);
+      setCurrentCall(updatedCall);
+    } catch (err: any) {
+      setError(err.message);
+      console.error('Error promoting participant:', err);
+    }
+  }, [currentCall]);
+
+  // Lock call method
+  const lockCall = useCallback(async () => {
+    if (!currentCall) {
+      setError('No active call');
+      return;
+    }
+
+    try {
+      const updatedCall = await callService.lockCall(currentCall.callId);
+      setCurrentCall(updatedCall);
+    } catch (err: any) {
+      setError(err.message);
+      console.error('Error locking call:', err);
+    }
+  }, [currentCall]);
+
+  // Unlock call method
+  const unlockCall = useCallback(async () => {
+    if (!currentCall) {
+      setError('No active call');
+      return;
+    }
+
+    try {
+      const updatedCall = await callService.unlockCall(currentCall.callId);
+      setCurrentCall(updatedCall);
+    } catch (err: any) {
+      setError(err.message);
+      console.error('Error unlocking call:', err);
+    }
+  }, [currentCall]);
+
+  // End call for all method
+  const endCallForAll = useCallback(async () => {
+    if (!currentCall) {
+      setError('No active call');
+      return;
+    }
+
+    try {
+      const updatedCall = await callService.endCallForAll(currentCall.callId);
+      setCurrentCall(updatedCall);
+      setIsCallActive(false);
+      setLocalStream(null);
+      setRemoteStreams(new Map());
+      setConnectionStates(new Map());
+    } catch (err: any) {
+      setError(err.message);
+      console.error('Error ending call for all:', err);
+    }
+  }, [currentCall]);
+
   // Get waiting queue
   const getWaitingQueue = useCallback(async () => {
     try {
@@ -501,6 +684,8 @@ export const useCall = (): UseCallReturn => {
     activeCalls,
     loading,
     error,
+    isModerator: currentCall ? currentCall.participants.some(p => p.userId.id === currentUser?.id && p.role === 'moderator') || currentCall.initiator.id === currentUser?.id : false,
+    isLocked: currentCall?.isLocked || false,
 
     // Actions
     initiateCall,
@@ -516,6 +701,13 @@ export const useCall = (): UseCallReturn => {
     declineCallTransfer,
     holdCall,
     muteParticipant,
+    inviteParticipants,
+    removeParticipant,
+    muteAllParticipants,
+    promoteParticipant,
+    lockCall,
+    unlockCall,
+    endCallForAll,
     getCallHistory,
     getMissedCalls,
     getActiveCalls,

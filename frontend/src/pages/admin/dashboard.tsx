@@ -41,7 +41,6 @@ import {
   Badge
 } from '@mui/material';
 import {
-  Dashboard,
   ShoppingBag,
   Users,
   TrendingUp,
@@ -50,11 +49,11 @@ import {
   Delete,
   Check,
   X,
-  MoreVert,
+  MoreHorizontal,
   Download,
-  FilterList,
+  Filter,
   Search,
-  Refresh,
+  RefreshCw,
   Star,
   Package,
   DollarSign,
@@ -101,6 +100,25 @@ interface DashboardStats {
   totalRevenue: number;
   totalUsers: number;
   totalVendors: number;
+  totalOrders?: number;
+  completedOrders?: number;
+}
+
+// API Response interfaces following standardized format { success: boolean, data: any }
+interface ApiResponse<T = any> {
+  success: boolean;
+  data: T;
+  message?: string;
+}
+
+interface ProductsApiResponse {
+  products: Product[];
+  pagination: {
+    total: number;
+    pages: number;
+    page: number;
+    limit: number;
+  };
 }
 
 const AdminDashboard: React.FC = () => {
@@ -115,7 +133,9 @@ const AdminDashboard: React.FC = () => {
     totalSales: 0,
     totalRevenue: 0,
     totalUsers: 0,
-    totalVendors: 0
+    totalVendors: 0,
+    totalOrders: 0,
+    completedOrders: 0
   });
   const [loading, setLoading] = useState(true);
   const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
@@ -168,32 +188,59 @@ const AdminDashboard: React.FC = () => {
         ...filters
       };
       
-      const [productsResponse] = await Promise.all([
-        api.admin.products.getProducts(productParams)
+      // Fetch both products and comprehensive dashboard analytics
+      const [productsResponse, dashboardStatsResponse] = await Promise.all([
+        api.admin.products.getProducts(productParams),
+        api.admin.analytics.getDashboardStats()
       ]);
 
-      if (productsResponse.success) {
-        setProducts(productsResponse.data.products || []);
+      // Using standardized API response format { success: boolean, data: any }
+      const productsResult = productsResponse as ApiResponse<ProductsApiResponse>;
+      const statsResult = dashboardStatsResponse as ApiResponse<DashboardStats>;
+
+      if (productsResult.success) {
+        setProducts(productsResult.data.products || []);
         setPagination(prev => ({
           ...prev,
-          total: productsResponse.data.pagination?.total || 0,
-          pages: productsResponse.data.pagination?.pages || 0
+          total: productsResult.data.pagination?.total || 0,
+          pages: productsResult.data.pagination?.pages || 0
         }));
+      }
 
-        // Calculate stats from products
-        const allProducts = productsResponse.data.products || [];
+      // Use real dashboard stats from backend instead of calculating from limited product data
+      if (statsResult.success && statsResult.data) {
+        const realStats = statsResult.data;
+        setStats({
+          totalProducts: realStats.totalProducts || 0,
+          activeProducts: realStats.activeProducts || 0,
+          pendingProducts: realStats.pendingProducts || 0,
+          totalSales: realStats.totalSales || 0,
+          totalRevenue: realStats.totalRevenue || 0,
+          totalUsers: realStats.totalUsers || 0,
+          totalVendors: realStats.totalVendors || 0,
+          totalOrders: realStats.totalOrders || 0,
+          completedOrders: realStats.completedOrders || 0
+        });
+      } else {
+        // Fallback: calculate basic stats from visible products only
+        const allProducts = productsResult.success ? (productsResult.data.products || []) : [];
         const activeProducts = allProducts.filter((p: Product) => p.isActive);
         const pendingProducts = allProducts.filter((p: Product) => !p.isActive);
         const totalSales = allProducts.reduce((sum: number, p: Product) => sum + (p.sales || 0), 0);
         const totalRevenue = allProducts.reduce((sum: number, p: Product) => sum + ((p.sales || 0) * p.price), 0);
 
+        console.warn('Dashboard analytics API failed, using fallback calculation from visible products');
         setStats(prev => ({
           ...prev,
-          totalProducts: allProducts.length,
+          totalProducts: pagination.total || allProducts.length,
           activeProducts: activeProducts.length,
           pendingProducts: pendingProducts.length,
           totalSales,
-          totalRevenue
+          totalRevenue,
+          totalUsers: prev.totalUsers,
+          totalVendors: prev.totalVendors,
+          totalOrders: prev.totalOrders || 0,
+          completedOrders: prev.completedOrders || 0
         }));
       }
     } catch (error) {
@@ -207,7 +254,8 @@ const AdminDashboard: React.FC = () => {
     try {
       const data = { [field]: value };
       const response = await api.admin.products.toggleProduct(productId, data);
-      if (response.success) {
+      const result = response as ApiResponse;
+      if (result.success) {
         fetchDashboardData();
       }
     } catch (error) {
@@ -218,7 +266,8 @@ const AdminDashboard: React.FC = () => {
   const handleProductApprove = async (productId: string, featured: boolean = false) => {
     try {
       const response = await api.admin.products.approveProduct(productId, { featured });
-      if (response.success) {
+      const result = response as ApiResponse;
+      if (result.success) {
         fetchDashboardData();
       }
     } catch (error) {
@@ -229,7 +278,8 @@ const AdminDashboard: React.FC = () => {
   const handleProductDelete = async (productId: string) => {
     try {
       const response = await api.admin.products.deleteProduct(productId);
-      if (response.success) {
+      const result = response as ApiResponse;
+      if (result.success) {
         setDeleteDialog(false);
         fetchDashboardData();
       }
@@ -248,7 +298,8 @@ const AdminDashboard: React.FC = () => {
         payload
       });
       
-      if (response.success) {
+      const result = response as ApiResponse;
+      if (result.success) {
         setSelectedProducts([]);
         setBulkMenuAnchor(null);
         fetchDashboardData();
@@ -338,7 +389,7 @@ const AdminDashboard: React.FC = () => {
             </Button>
             <Button
               variant="outlined"
-              startIcon={<Refresh />}
+              startIcon={<RefreshCw />}
               onClick={fetchDashboardData}
             >
               Refresh
@@ -346,7 +397,7 @@ const AdminDashboard: React.FC = () => {
           </Stack>
         </Box>
 
-        {/* Stats Cards */}
+        {/* Stats Cards - Real Database Data Only */}
         <Grid container spacing={3} sx={{ mb: 4 }}>
           <Grid item xs={12} sm={6} md={3}>
             <Card sx={{ borderRadius: 3, boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}>
@@ -392,15 +443,15 @@ const AdminDashboard: React.FC = () => {
             <Card sx={{ borderRadius: 3, boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}>
               <CardContent>
                 <Stack direction="row" alignItems="center" spacing={2}>
-                  <Avatar sx={{ bgcolor: 'warning.main', width: 56, height: 56 }}>
-                    <AlertTriangle size={24} />
+                  <Avatar sx={{ bgcolor: 'info.main', width: 56, height: 56 }}>
+                    <ShoppingBag size={24} />
                   </Avatar>
                   <Box>
                     <Typography variant="h4" fontWeight={700}>
-                      {stats.pendingProducts}
+                      {stats.totalOrders || 0}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      Pending Approval
+                      Total Orders
                     </Typography>
                   </Box>
                 </Stack>
@@ -412,7 +463,27 @@ const AdminDashboard: React.FC = () => {
             <Card sx={{ borderRadius: 3, boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}>
               <CardContent>
                 <Stack direction="row" alignItems="center" spacing={2}>
-                  <Avatar sx={{ bgcolor: 'info.main', width: 56, height: 56 }}>
+                  <Avatar sx={{ bgcolor: 'secondary.main', width: 56, height: 56 }}>
+                    <Users size={24} />
+                  </Avatar>
+                  <Box>
+                    <Typography variant="h4" fontWeight={700}>
+                      {stats.totalUsers}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Total Users
+                    </Typography>
+                  </Box>
+                </Stack>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          <Grid item xs={12} sm={6} md={3}>
+            <Card sx={{ borderRadius: 3, boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}>
+              <CardContent>
+                <Stack direction="row" alignItems="center" spacing={2}>
+                  <Avatar sx={{ bgcolor: 'green', color: 'white', width: 56, height: 56 }}>
                     <DollarSign size={24} />
                   </Avatar>
                   <Box>
@@ -421,6 +492,66 @@ const AdminDashboard: React.FC = () => {
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
                       Total Revenue
+                    </Typography>
+                  </Box>
+                </Stack>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          <Grid item xs={12} sm={6} md={3}>
+            <Card sx={{ borderRadius: 3, boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}>
+              <CardContent>
+                <Stack direction="row" alignItems="center" spacing={2}>
+                  <Avatar sx={{ bgcolor: 'purple', color: 'white', width: 56, height: 56 }}>
+                    <ShoppingBag size={24} />
+                  </Avatar>
+                  <Box>
+                    <Typography variant="h4" fontWeight={700}>
+                      {stats.totalVendors}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Total Vendors
+                    </Typography>
+                  </Box>
+                </Stack>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          <Grid item xs={12} sm={6} md={3}>
+            <Card sx={{ borderRadius: 3, boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}>
+              <CardContent>
+                <Stack direction="row" alignItems="center" spacing={2}>
+                  <Avatar sx={{ bgcolor: 'orange', color: 'white', width: 56, height: 56 }}>
+                    <TrendingUp size={24} />
+                  </Avatar>
+                  <Box>
+                    <Typography variant="h4" fontWeight={700}>
+                      {stats.totalSales}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Total Sales
+                    </Typography>
+                  </Box>
+                </Stack>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          <Grid item xs={12} sm={6} md={3}>
+            <Card sx={{ borderRadius: 3, boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}>
+              <CardContent>
+                <Stack direction="row" alignItems="center" spacing={2}>
+                  <Avatar sx={{ bgcolor: 'warning.main', width: 56, height: 56 }}>
+                    <AlertTriangle size={24} />
+                  </Avatar>
+                  <Box>
+                    <Typography variant="h4" fontWeight={700}>
+                      {stats.pendingProducts}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Pending Products
                     </Typography>
                   </Box>
                 </Stack>
@@ -497,7 +628,7 @@ const AdminDashboard: React.FC = () => {
                   <Button
                     variant="contained"
                     onClick={fetchDashboardData}
-                    startIcon={<FilterList />}
+                    startIcon={<Filter />}
                   >
                     Apply Filters
                   </Button>

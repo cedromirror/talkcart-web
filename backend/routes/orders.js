@@ -127,4 +127,66 @@ router.post('/:id/cancel', authenticateTokenStrict, async (req, res) => {
   }
 });
 
+// @route   POST /api/orders/:id/track
+// @desc    Get tracking information for an order
+// @access  Private
+router.post('/:id/track', authenticateTokenStrict, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const orderId = req.params.id;
+
+    const order = await Order.findOne({ _id: orderId, userId });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+
+    // In a real implementation, this would integrate with a shipping carrier API
+    // For now, we'll return mock tracking data
+    const trackingInfo = {
+      trackingNumber: order.trackingNumber || 'TRK-' + Date.now(),
+      carrier: order.carrier || 'Standard Shipping',
+      estimatedDelivery: order.estimatedDelivery || new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
+      status: order.status,
+      events: [
+        {
+          timestamp: order.createdAt,
+          location: 'Order Placed',
+          description: 'Your order has been placed successfully'
+        },
+        {
+          timestamp: order.processingAt || order.createdAt,
+          location: 'Processing Center',
+          description: 'Your order is being processed'
+        },
+        ...(order.status === 'shipped' || order.status === 'delivered' ? [{
+          timestamp: order.shippedAt || new Date(),
+          location: 'Shipping Facility',
+          description: 'Your order has been shipped'
+        }] : []),
+        ...(order.status === 'delivered' ? [{
+          timestamp: order.deliveredAt || new Date(),
+          location: order.shippingAddress?.city || 'Delivery Location',
+          description: 'Your order has been delivered'
+        }] : [])
+      ]
+    };
+
+    res.json({
+      success: true,
+      data: trackingInfo
+    });
+
+  } catch (error) {
+    console.error('Error fetching tracking info:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch tracking information'
+    });
+  }
+});
+
 module.exports = router;

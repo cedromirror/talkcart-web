@@ -81,6 +81,29 @@ const productSchema = new mongoose.Schema({
     type: String,
     enum: ['available', 'sold', 'unavailable', 'limited'],
     default: 'available'
+  },
+  // New fields for enhanced marketplace experience
+  discount: {
+    type: Number,
+    default: 0,
+    min: 0,
+    max: 99
+  },
+  freeShipping: {
+    type: Boolean,
+    default: false
+  },
+  fastDelivery: {
+    type: Boolean,
+    default: false
+  },
+  prime: {
+    type: Boolean,
+    default: false
+  },
+  inStock: {
+    type: Boolean,
+    default: true
   }
 }, {
   timestamps: true

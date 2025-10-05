@@ -17,14 +17,8 @@ import {
 import {
     Play,
     Pause,
-    Download,
     MoreVertical,
-    Volume2,
-    VolumeX,
-    SkipBack,
-    SkipForward,
     Mic,
-    Clock,
     FileAudio,
     Reply,
     Forward
@@ -61,20 +55,10 @@ const VoiceMessageBubble: React.FC<VoiceMessageBubbleProps> = ({
     const [currentTime, setCurrentTime] = useState(0);
     const [audioDuration, setAudioDuration] = useState(duration);
     const [isLoading, setIsLoading] = useState(false);
-    const [isMuted, setIsMuted] = useState(false);
     const [playbackRate, setPlaybackRate] = useState(1);
     const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
-    const [waveformData, setWaveformData] = useState<number[]>([]);
 
-    // Generate mock waveform data (in a real app, this would come from audio analysis)
-    useEffect(() => {
-        const generateWaveform = () => {
-            const bars = 40;
-            const data = Array.from({ length: bars }, () => Math.random() * 0.8 + 0.2);
-            setWaveformData(data);
-        };
-        generateWaveform();
-    }, []);
+    // Removed waveform generation
 
     useEffect(() => {
         const audio = audioRef.current;
@@ -148,14 +132,6 @@ const VoiceMessageBubble: React.FC<VoiceMessageBubbleProps> = ({
         setCurrentTime(newTime);
     };
 
-    const toggleMute = () => {
-        const audio = audioRef.current;
-        if (!audio) return;
-
-        audio.muted = !audio.muted;
-        setIsMuted(audio.muted);
-    };
-
     const changePlaybackRate = (rate: number) => {
         const audio = audioRef.current;
         if (!audio) return;
@@ -196,10 +172,10 @@ const VoiceMessageBubble: React.FC<VoiceMessageBubbleProps> = ({
             <Paper
                 elevation={0}
                 sx={{
-                    p: 2,
-                    borderRadius: 3,
-                    minWidth: 280,
-                    maxWidth: 350,
+                    p: 0.75,
+                    borderRadius: 2,
+                    minWidth: 100,
+                    maxWidth: 140,
                     bgcolor: isOwn
                         ? alpha(theme.palette.primary.main, 0.1)
                         : alpha(theme.palette.background.paper, 0.8),
@@ -219,234 +195,96 @@ const VoiceMessageBubble: React.FC<VoiceMessageBubbleProps> = ({
                     }
                 }}
             >
-                {/* Header */}
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Box
+                {/* Ultra Compact Header with inline layout */}
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.3 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <IconButton
+                            onClick={handlePlayPause}
+                            disabled={isLoading}
                             sx={{
-                                p: 0.5,
-                                borderRadius: '50%',
-                                bgcolor: alpha(theme.palette.primary.main, 0.1),
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center'
+                                bgcolor: theme.palette.primary.main,
+                                color: theme.palette.primary.contrastText,
+                                width: 20,
+                                height: 20,
+                                minWidth: 'unset',
+                                '&:hover': {
+                                    bgcolor: theme.palette.primary.dark,
+                                },
+                                '&.Mui-disabled': {
+                                    bgcolor: alpha(theme.palette.primary.main, 0.3),
+                                }
                             }}
                         >
-                            <Mic size={14} color={theme.palette.primary.main} />
-                        </Box>
-                        <Typography variant="body2" fontWeight={600} color="text.primary">
-                            Voice Message
-                        </Typography>
-                    </Box>
-
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        {fileSize && (
-                            <Chip
-                                label={formatFileSize(fileSize)}
-                                size="small"
-                                sx={{
-                                    height: 20,
-                                    fontSize: '0.7rem',
-                                    bgcolor: alpha(theme.palette.background.paper, 0.5)
-                                }}
-                            />
-                        )}
-                        <IconButton
-                            size="small"
-                            onClick={(e) => setMenuAnchor(e.currentTarget)}
-                            sx={{ opacity: 0.7, '&:hover': { opacity: 1 } }}
-                        >
-                            <MoreVertical size={14} />
-                        </IconButton>
-                    </Box>
-                </Box>
-
-                {/* Waveform Visualization */}
-                <Box sx={{ mb: 2, px: 1 }}>
-                    <Box
-                        sx={{
-                            display: 'flex',
-                            alignItems: 'end',
-                            gap: 0.5,
-                            height: 40,
-                            cursor: 'pointer'
-                        }}
-                        onClick={(e) => {
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            const clickX = e.clientX - rect.left;
-                            const percentage = clickX / rect.width;
-                            const seekTime = percentage * audioDuration;
-                            if (audioRef.current) {
-                                audioRef.current.currentTime = seekTime;
-                                setCurrentTime(seekTime);
-                            }
-                        }}
-                    >
-                        {waveformData.map((height, index) => {
-                            const barProgress = (index / waveformData.length) * 100;
-                            const isActive = barProgress <= progress;
-
-                            return (
+                            {isLoading ? (
                                 <Box
-                                    key={index}
                                     sx={{
-                                        flex: 1,
-                                        height: `${height * 100}%`,
-                                        bgcolor: isActive
-                                            ? theme.palette.primary.main
-                                            : alpha(theme.palette.text.secondary, 0.3),
-                                        borderRadius: 1,
-                                        transition: 'all 0.2s ease',
-                                        minHeight: 4,
-                                        transform: isPlaying && isActive ? 'scaleY(1.2)' : 'scaleY(1)',
-                                        animation: isPlaying && isActive ? 'pulse 1s infinite' : 'none',
-                                        '@keyframes pulse': {
-                                            '0%, 100%': { opacity: 1 },
-                                            '50%': { opacity: 0.7 }
+                                        width: 8,
+                                        height: 8,
+                                        border: `1px solid ${theme.palette.primary.contrastText}`,
+                                        borderTop: '1px solid transparent',
+                                        borderRadius: '50%',
+                                        animation: 'spin 1s linear infinite',
+                                        '@keyframes spin': {
+                                            '0%': { transform: 'rotate(0deg)' },
+                                            '100%': { transform: 'rotate(360deg)' }
                                         }
                                     }}
                                 />
-                            );
-                        })}
+                            ) : isPlaying ? (
+                                <Pause size={10} />
+                            ) : (
+                                <Play size={10} />
+                            )}
+                        </IconButton>
+                        <Mic size={8} color={theme.palette.primary.main} />
+                        <Typography variant="caption" fontWeight={500} color="text.secondary" sx={{ fontSize: '0.6rem' }}>Voice</Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3 }}>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.55rem' }}>
+                            {formatTime(currentTime)} / {formatTime(audioDuration)}
+                        </Typography>
+                        <IconButton
+                            size="small"
+                            onClick={(e) => setMenuAnchor(e.currentTarget)}
+                            sx={{ opacity: 0.7, '&:hover': { opacity: 1 }, width: 16, height: 16, minWidth: 'unset' }}
+                        >
+                            <MoreVertical size={8} />
+                        </IconButton>
                     </Box>
                 </Box>
 
-                {/* Controls */}
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                    {/* Skip Back */}
-                    <Tooltip title="Skip back 10s">
-                        <IconButton
-                            size="small"
-                            onClick={() => handleSkip(-10)}
-                            disabled={currentTime < 10}
-                            sx={{ opacity: currentTime < 10 ? 0.3 : 0.7 }}
-                        >
-                            <SkipBack size={16} />
-                        </IconButton>
-                    </Tooltip>
+                {/* Removed Waveform - Using simple progress bar instead */}
 
-                    {/* Play/Pause */}
-                    <IconButton
-                        onClick={handlePlayPause}
-                        disabled={isLoading}
-                        sx={{
-                            bgcolor: theme.palette.primary.main,
-                            color: theme.palette.primary.contrastText,
-                            width: 40,
-                            height: 40,
-                            '&:hover': {
-                                bgcolor: theme.palette.primary.dark,
-                            },
-                            '&.Mui-disabled': {
-                                bgcolor: alpha(theme.palette.primary.main, 0.3),
-                            }
-                        }}
-                    >
-                        {isLoading ? (
-                            <Box
-                                sx={{
-                                    width: 16,
-                                    height: 16,
-                                    border: `2px solid ${theme.palette.primary.contrastText}`,
-                                    borderTop: '2px solid transparent',
-                                    borderRadius: '50%',
-                                    animation: 'spin 1s linear infinite',
-                                    '@keyframes spin': {
-                                        '0%': { transform: 'rotate(0deg)' },
-                                        '100%': { transform: 'rotate(360deg)' }
-                                    }
-                                }}
-                            />
-                        ) : isPlaying ? (
-                            <Pause size={18} />
-                        ) : (
-                            <Play size={18} />
-                        )}
-                    </IconButton>
+                {/* Removed duplicate controls - now integrated in header */}
 
-                    {/* Skip Forward */}
-                    <Tooltip title="Skip forward 10s">
-                        <IconButton
-                            size="small"
-                            onClick={() => handleSkip(10)}
-                            disabled={currentTime > audioDuration - 10}
-                            sx={{ opacity: currentTime > audioDuration - 10 ? 0.3 : 0.7 }}
-                        >
-                            <SkipForward size={16} />
-                        </IconButton>
-                    </Tooltip>
-
-                    {/* Time Display */}
-                    <Box sx={{ flex: 1, mx: 1 }}>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Typography variant="caption" color="text.secondary" fontWeight={500}>
-                                {formatTime(currentTime)}
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary">
-                                {formatTime(audioDuration)}
-                            </Typography>
-                        </Box>
-                    </Box>
-
-                    {/* Mute */}
-                    <Tooltip title={isMuted ? 'Unmute' : 'Mute'}>
-                        <IconButton size="small" onClick={toggleMute} sx={{ opacity: 0.7 }}>
-                            {isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
-                        </IconButton>
-                    </Tooltip>
-                </Box>
-
-                {/* Progress Bar */}
-                <Box sx={{ px: 1, mb: 1 }}>
+                {/* Minimal Progress Bar */}
+                <Box sx={{ px: 0.5, mb: 0 }}>
                     <Slider
                         value={progress}
                         onChange={handleSeek}
+                        size="small"
                         sx={{
-                            height: 4,
+                            height: 1.5,
                             '& .MuiSlider-track': {
                                 bgcolor: theme.palette.primary.main,
                                 border: 'none'
                             },
                             '& .MuiSlider-rail': {
-                                bgcolor: alpha(theme.palette.text.secondary, 0.2)
+                                bgcolor: alpha(theme.palette.text.secondary, 0.15)
                             },
                             '& .MuiSlider-thumb': {
-                                width: 12,
-                                height: 12,
+                                width: 4,
+                                height: 4,
                                 bgcolor: theme.palette.primary.main,
                                 '&:hover': {
-                                    boxShadow: `0 0 0 8px ${alpha(theme.palette.primary.main, 0.16)}`
+                                    boxShadow: `0 0 0 3px ${alpha(theme.palette.primary.main, 0.16)}`
                                 }
                             }
                         }}
                     />
                 </Box>
 
-                {/* Footer */}
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Clock size={12} />
-                        <Typography variant="caption" color="text.secondary">
-                            {timestamp}
-                        </Typography>
-                    </Box>
-
-                    <Chip
-                        label={`${playbackRate}x`}
-                        size="small"
-                        clickable
-                        onClick={(e) => setMenuAnchor(e.currentTarget)}
-                        sx={{
-                            height: 20,
-                            fontSize: '0.7rem',
-                            bgcolor: alpha(theme.palette.primary.main, 0.1),
-                            color: theme.palette.primary.main,
-                            '&:hover': {
-                                bgcolor: alpha(theme.palette.primary.main, 0.2)
-                            }
-                        }}
-                    />
-                </Box>
+                {/* Removed Footer - timestamp already in main message */}
 
                 {/* Hidden Audio Element */}
                 <audio
@@ -456,7 +294,7 @@ const VoiceMessageBubble: React.FC<VoiceMessageBubbleProps> = ({
                     style={{ display: 'none' }}
                 />
 
-                {/* Context Menu */}
+                {/* Simplified Context Menu */}
                 <Menu
                     anchorEl={menuAnchor}
                     open={Boolean(menuAnchor)}
@@ -464,35 +302,10 @@ const VoiceMessageBubble: React.FC<VoiceMessageBubbleProps> = ({
                     transformOrigin={{ horizontal: 'right', vertical: 'top' }}
                     anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
                 >
-                    <MenuItem onClick={() => changePlaybackRate(0.5)}>
-                        <ListItemText>0.5x Speed</ListItemText>
-                    </MenuItem>
-                    <MenuItem onClick={() => changePlaybackRate(0.75)}>
-                        <ListItemText>0.75x Speed</ListItemText>
-                    </MenuItem>
-                    <MenuItem onClick={() => changePlaybackRate(1)}>
-                        <ListItemText>Normal Speed</ListItemText>
-                    </MenuItem>
-                    <MenuItem onClick={() => changePlaybackRate(1.25)}>
-                        <ListItemText>1.25x Speed</ListItemText>
-                    </MenuItem>
-                    <MenuItem onClick={() => changePlaybackRate(1.5)}>
-                        <ListItemText>1.5x Speed</ListItemText>
-                    </MenuItem>
-                    <MenuItem onClick={() => changePlaybackRate(2)}>
-                        <ListItemText>2x Speed</ListItemText>
-                    </MenuItem>
-
-                    {onDownload && (
-                        <>
-                            <MenuItem onClick={() => { onDownload(); setMenuAnchor(null); }}>
-                                <ListItemIcon>
-                                    <Download size={16} />
-                                </ListItemIcon>
-                                <ListItemText>Download</ListItemText>
-                            </MenuItem>
-                        </>
-                    )}
+                    <MenuItem onClick={() => changePlaybackRate(0.75)}>0.75x Speed</MenuItem>
+                    <MenuItem onClick={() => changePlaybackRate(1)}>Normal Speed</MenuItem>
+                    <MenuItem onClick={() => changePlaybackRate(1.25)}>1.25x Speed</MenuItem>
+                    <MenuItem onClick={() => changePlaybackRate(1.5)}>1.5x Speed</MenuItem>
 
                     {onReply && (
                         <MenuItem onClick={() => { onReply(); setMenuAnchor(null); }}>

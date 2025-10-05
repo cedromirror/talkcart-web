@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Drawer,
   List,
@@ -15,6 +15,7 @@ import {
   LinearProgress,
   Card,
   CardContent,
+  Tooltip,
 } from '@mui/material';
 import {
   MessageCircle,
@@ -32,6 +33,10 @@ import {
   Settings,
   Package,
   ShoppingBag,
+  LogOut,
+  TrendingUp,
+  Users,
+  Bookmark,
 } from 'lucide-react';
 import { useRouter } from 'next/router';
 import { useAuth } from '@/contexts/AuthContext';
@@ -81,6 +86,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     'Main': true,
     'Features': true,
+    'Marketplace': true,
   });
 
   // Toggle section expansion
@@ -91,7 +97,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }));
   };
 
-  // Simplified navigation sections with only the specified pages
+  // Enhanced navigation sections with more pages
   const navigationSections: NavigationSection[] = [
     {
       title: 'Main',
@@ -111,6 +117,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
           tooltip: 'Private messages & conversations',
           badge: totalUnread > 0 ? totalUnread.toString() : undefined,
         },
+        {
+          label: 'Trending',
+          path: '/trending',
+          icon: <TrendingUp size={20} />,
+          tooltip: 'See what\'s trending',
+          new: true,
+        },
+        {
+          label: 'Who to Follow',
+          path: '/suggestions',
+          icon: <Users size={20} />,
+          tooltip: 'Find people to follow',
+        },
       ],
     },
     {
@@ -125,24 +144,44 @@ export const Sidebar: React.FC<SidebarProps> = ({
           badge: 'Hot',
         },
         {
-          label: 'Cart',
-          path: '/cart',
-          icon: <ShoppingBag size={20} />,
-          tooltip: 'Shopping Cart',
-          requireAuth: true,
-        },
-        {
-          label: 'Orders',
-          path: '/orders',
-          icon: <Package size={20} />,
-          tooltip: 'Order History',
-          requireAuth: true,
-        },
-        {
           label: 'Wallet',
           path: '/wallet',
           icon: <Wallet size={20} />,
           tooltip: 'Manage your wallet',
+          requireAuth: true,
+        },
+        {
+          label: 'Bookmarks',
+          path: '/bookmarks',
+          icon: <Bookmark size={20} />,
+          tooltip: 'Your saved posts',
+          requireAuth: true,
+        },
+      ],
+    },
+    {
+      title: 'Marketplace',
+      defaultExpanded: true,
+      items: [
+        {
+          label: 'Dashboard',
+          path: '/marketplace/dashboard',
+          icon: <ShoppingBag size={20} />,
+          tooltip: 'Manage your marketplace',
+          requireAuth: true,
+        },
+        {
+          label: 'My Orders',
+          path: '/marketplace/dashboard?tab=0',
+          icon: <Package size={20} />,
+          tooltip: 'View your orders',
+          requireAuth: true,
+        },
+        {
+          label: 'My Products',
+          path: '/marketplace/dashboard?tab=1',
+          icon: <Star size={20} />,
+          tooltip: 'Your listed products',
           requireAuth: true,
         },
       ],
@@ -162,9 +201,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   };
 
+  // Handle focus management when sidebar closes
+  useEffect(() => {
+    if (!open && variant === 'temporary') {
+      // Move focus back to the main content when sidebar closes
+      const mainContent = document.querySelector('main');
+      if (mainContent) {
+        (mainContent as HTMLElement).focus();
+      }
+    }
+  }, [open, variant]);
+
   const handleLogout = async () => {
-    await logout();
-    onClose();
+    try {
+      await logout();
+      onClose();
+      router.push('/auth/login');
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
   };
 
   // User stats for premium users
@@ -222,26 +277,85 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </Stack>
       </Box>
 
-      {/* Simplified User Profile Section: avatar only */}
+      {/* Enhanced User Profile Section */}
       {isAuthenticated && user && (
-        <Box sx={{ p: 3, borderBottom: `1px solid ${theme.palette.divider}` }}>
-          <Stack direction="row" alignItems="center" justifyContent="center">
+        <Box 
+          sx={{ 
+            p: 3, 
+            borderBottom: `1px solid ${theme.palette.divider}`,
+            cursor: 'pointer',
+            '&:hover': {
+              bgcolor: alpha(theme.palette.action.hover, 0.3)
+            }
+          }}
+          onClick={() => handleNavigation('/profile')}
+        >
+          <Stack direction="row" alignItems="center" spacing={2}>
             <UserAvatar
               src={user.avatar}
               alt={user.displayName || user.username}
-              size={56}
+              size={48}
               isVerified={user.isVerified}
-              onClick={() => handleNavigation('/profile')}
               sx={{
-                cursor: 'pointer',
-                border: `3px solid ${alpha(theme.palette.primary.main, 0.2)}`,
-                transition: 'all 0.2s ease',
-                '&:hover': {
-                  transform: 'scale(1.05)',
-                  boxShadow: `0 4px 12px ${alpha(theme.palette.primary.main, 0.3)}`,
-                }
+                border: `2px solid ${alpha(theme.palette.primary.main, 0.3)}`,
               }}
             />
+            <Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                <Typography variant="subtitle2" fontWeight={600} noWrap>
+                  {user.displayName || user.username}
+                </Typography>
+                {user.isVerified && (
+                  <Tooltip title="Verified User">
+                    <Box 
+                      component="span" 
+                      sx={{ 
+                        width: 14, 
+                        height: 14, 
+                        bgcolor: 'primary.main', 
+                        borderRadius: '50%', 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        justifyContent: 'center' 
+                      }}
+                    >
+                      <Box component="span" sx={{ color: 'white', fontSize: '0.5rem', fontWeight: 'bold' }}>✓</Box>
+                    </Box>
+                  </Tooltip>
+                )}
+              </Box>
+              <Typography variant="caption" color="text.secondary" noWrap>
+                @{user.username}
+              </Typography>
+            </Box>
+          </Stack>
+          
+          {/* User stats */}
+          <Stack direction="row" spacing={2} sx={{ mt: 2 }}>
+            <Box sx={{ textAlign: 'center' }}>
+              <Typography variant="body2" fontWeight={700}>
+                {user.followerCount || 0}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Followers
+              </Typography>
+            </Box>
+            <Box sx={{ textAlign: 'center' }}>
+              <Typography variant="body2" fontWeight={700}>
+                {user.followingCount || 0}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Following
+              </Typography>
+            </Box>
+            <Box sx={{ textAlign: 'center' }}>
+              <Typography variant="body2" fontWeight={700}>
+                {user.postCount || 0}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Posts
+              </Typography>
+            </Box>
           </Stack>
         </Box>
       )}
@@ -329,7 +443,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <NavigationItem
               label="Logout"
               path="#"
-              icon={<User size={20} />}
+              icon={<LogOut size={20} />}
               tooltip="Sign out of your account"
               onClick={handleLogout}
             />
@@ -396,6 +510,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
           bgcolor: 'background.paper',
           backgroundImage: 'none',
         },
+      }}
+      ModalProps={{
+        keepMounted: true, // Better accessibility
+        disablePortal: false,
+        hideBackdrop: false,
+      }}
+      PaperProps={{
+        // Ensure proper accessibility attributes
+        role: "dialog",
+        "aria-modal": variant === 'temporary' ? "true" : undefined,
       }}
     >
       {sidebarContent}

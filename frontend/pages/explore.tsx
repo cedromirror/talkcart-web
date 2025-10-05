@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { NextPage } from 'next';
 import Head from 'next/head';
-import { Box, Container, Typography, Paper, useTheme, Grid, TextField, InputAdornment } from '@mui/material';
+import { Box, Container, Typography, Paper, useTheme, Grid, TextField, InputAdornment, CircularProgress } from '@mui/material';
 import { Globe, TrendingUp, Clock, ThumbsUp, Search } from 'lucide-react';
-import { PublicFeed } from '@/components/social/PublicFeed';
-import WhoToFollow from '@/components/social/WhoToFollow';
+import WhoToFollow from '@/components/social/new/WhoToFollow';
 import { useRouter } from 'next/router';
 import useDebounce from '@/hooks/useDebounce';
+import { PostCardEnhanced as PostCard } from '@/components/social/new/PostCardEnhanced';
+import api from '@/lib/api';
+import { Post } from '@/types/social';
 
 /**
  * Explore page - Shows public content that everyone can see
@@ -92,10 +94,10 @@ const ExplorePage: NextPage = () => {
         </Paper>
 
         {/* Main Content */}
-        <Container maxWidth="lg" sx={{ pb: 4 }}>
-          <Grid container spacing={3}>
-            {/* Main Feed */}
-            <Grid item xs={12} md={8}>
+        <Container maxWidth="xl" sx={{ pb: 4 }}>
+          <Grid container spacing={4}>
+            {/* Main Feed - Increased width */}
+            <Grid item xs={12} md={9}>
               {/* Public Feed with different sorting options */}
               <Box mb={4}>
                 <Typography variant="h5" fontWeight={600} gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -118,13 +120,7 @@ const ExplorePage: NextPage = () => {
                     }}
                   />
                 </Box>
-                <PublicFeed
-                  showHeader={false}
-                  maxPosts={10}
-                  contentFilter="all"
-                  sortBy="recent"
-                  query={searchQuery}
-                />
+                <RecentPostsSection query={searchQuery} />
               </Box>
 
               <Box mb={4}>
@@ -132,13 +128,7 @@ const ExplorePage: NextPage = () => {
                   <TrendingUp size={20} />
                   Trending Now
                 </Typography>
-                <PublicFeed
-                  showHeader={false}
-                  maxPosts={8}
-                  contentFilter="all"
-                  sortBy="trending"
-                  query={searchQuery}
-                />
+                <TrendingPostsSection />
               </Box>
 
               <Box mb={4}>
@@ -146,18 +136,12 @@ const ExplorePage: NextPage = () => {
                   <ThumbsUp size={20} />
                   Most Popular
                 </Typography>
-                <PublicFeed
-                  showHeader={false}
-                  maxPosts={6}
-                  contentFilter="all"
-                  sortBy="popular"
-                  query={searchQuery}
-                />
+                <PopularPostsSection query={searchQuery} />
               </Box>
             </Grid>
 
-            {/* Sidebar */}
-            <Grid item xs={12} md={4}>
+            {/* Sidebar - Reduced width */}
+            <Grid item xs={12} md={3}>
               <Box sx={{ position: 'sticky', top: 20 }}>
                 <WhoToFollow limit={5} />
               </Box>
@@ -233,6 +217,327 @@ const ExplorePage: NextPage = () => {
         </Container>
       </Box>
     </>
+  );
+};
+
+const RecentPostsSection: React.FC<{ query?: string }> = ({ query }) => {
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchPosts = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        // Fetch recent posts using the API
+        const response: any = await api.posts.getAll({ 
+          feedType: 'recent',
+          limit: 10,
+          search: query
+        });
+        
+        if (response?.success && response?.data?.posts) {
+          // Transform the posts to match the Post interface
+          const transformedPosts: Post[] = response.data.posts.map((post: any) => ({
+            id: post.id || post._id,
+            _id: post._id,
+            type: post.type || 'text',
+            content: post.content,
+            author: {
+              id: post.author?.id || post.author?._id,
+              _id: post.author?._id,
+              username: post.author?.username,
+              displayName: post.author?.displayName,
+              name: post.author?.displayName || post.author?.username,
+              avatar: post.author?.avatar,
+              isVerified: post.author?.isVerified,
+              bio: post.author?.bio,
+              role: post.author?.role,
+              followerCount: post.author?.followerCount,
+              location: post.author?.location,
+            },
+            authorId: post.authorId || post.author?._id,
+            media: post.media,
+            createdAt: post.createdAt,
+            updatedAt: post.updatedAt,
+            likes: post.likeCount || post.likes || 0,
+            comments: post.commentCount || post.comments || 0,
+            shares: post.shareCount || post.shares || 0,
+            views: post.views || 0,
+            likeCount: post.likeCount || post.likes || 0,
+            commentCount: post.commentCount || post.comments || 0,
+            shareCount: post.shareCount || post.shares || 0,
+            bookmarkCount: post.bookmarkCount || 0,
+            isLiked: post.isLiked || false,
+            isBookmarked: post.isBookmarked || false,
+            isShared: post.isShared || false,
+            hashtags: post.hashtags,
+            mentions: post.mentions,
+            location: post.location,
+            privacy: post.privacy,
+            isActive: post.isActive !== undefined ? post.isActive : true,
+          }));
+          
+          setPosts(transformedPosts);
+        } else {
+          setError(response?.message || response?.error || 'Failed to load recent posts');
+        }
+      } catch (err: any) {
+        console.error('Error fetching recent posts:', err);
+        setError(err?.message || 'Failed to load recent posts');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPosts();
+  }, [query]);
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (error) {
+    return (
+      <Paper sx={{ p: 3, textAlign: 'center' }}>
+        <Typography color="error">{error}</Typography>
+      </Paper>
+    );
+  }
+
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {posts.map((post) => (
+        <Box key={post.id}>
+          <PostCard post={post} />
+        </Box>
+      ))}
+    </Box>
+  );
+};
+
+const PopularPostsSection: React.FC<{ query?: string }> = ({ query }) => {
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchPosts = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        // Fetch popular posts using the API
+        const response: any = await api.posts.getAll({ 
+          feedType: 'popular',
+          limit: 6,
+          search: query
+        });
+        
+        if (response?.success && response?.data?.posts) {
+          // Transform the posts to match the Post interface
+          const transformedPosts: Post[] = response.data.posts.map((post: any) => ({
+            id: post.id || post._id,
+            _id: post._id,
+            type: post.type || 'text',
+            content: post.content,
+            author: {
+              id: post.author?.id || post.author?._id,
+              _id: post.author?._id,
+              username: post.author?.username,
+              displayName: post.author?.displayName,
+              name: post.author?.displayName || post.author?.username,
+              avatar: post.author?.avatar,
+              isVerified: post.author?.isVerified,
+              bio: post.author?.bio,
+              role: post.author?.role,
+              followerCount: post.author?.followerCount,
+              location: post.author?.location,
+            },
+            authorId: post.authorId || post.author?._id,
+            media: post.media,
+            createdAt: post.createdAt,
+            updatedAt: post.updatedAt,
+            likes: post.likeCount || post.likes || 0,
+            comments: post.commentCount || post.comments || 0,
+            shares: post.shareCount || post.shares || 0,
+            views: post.views || 0,
+            likeCount: post.likeCount || post.likes || 0,
+            commentCount: post.commentCount || post.comments || 0,
+            shareCount: post.shareCount || post.shares || 0,
+            bookmarkCount: post.bookmarkCount || 0,
+            isLiked: post.isLiked || false,
+            isBookmarked: post.isBookmarked || false,
+            isShared: post.isShared || false,
+            hashtags: post.hashtags,
+            mentions: post.mentions,
+            location: post.location,
+            privacy: post.privacy,
+            isActive: post.isActive !== undefined ? post.isActive : true,
+          }));
+          
+          setPosts(transformedPosts);
+        } else {
+          setError(response?.message || response?.error || 'Failed to load popular posts');
+        }
+      } catch (err: any) {
+        console.error('Error fetching popular posts:', err);
+        setError(err?.message || 'Failed to load popular posts');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPosts();
+  }, [query]);
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (error) {
+    return (
+      <Paper sx={{ p: 3, textAlign: 'center' }}>
+        <Typography color="error">{error}</Typography>
+      </Paper>
+    );
+  }
+
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {posts.map((post) => (
+        <Box key={post.id}>
+          <PostCard post={post} />
+        </Box>
+      ))}
+    </Box>
+  );
+};
+
+const TrendingPostsSection: React.FC = () => {
+  const [trendingPosts, setTrendingPosts] = useState<Post[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchTrendingPosts = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        // Fetch trending posts using the API
+        const response: any = await api.posts.getTrending({ limit: 30 }); // Fetch more to ensure we have enough after filtering
+        
+        if (response?.success && response?.data?.posts) {
+          // Transform the posts to match the Post interface
+          const transformedPosts: Post[] = response.data.posts.map((post: any) => ({
+            id: post.id || post._id,
+            _id: post._id,
+            type: post.type || 'text',
+            content: post.content,
+            author: {
+              id: post.author?.id || post.author?._id,
+              _id: post.author?._id,
+              username: post.author?.username,
+              displayName: post.author?.displayName,
+              name: post.author?.displayName || post.author?.username,
+              avatar: post.author?.avatar,
+              isVerified: post.author?.isVerified,
+              bio: post.author?.bio,
+              role: post.author?.role,
+              followerCount: post.author?.followerCount,
+              location: post.author?.location,
+            },
+            authorId: post.authorId || post.author?._id,
+            media: post.media,
+            createdAt: post.createdAt,
+            updatedAt: post.updatedAt,
+            likes: post.likeCount || post.likes || 0,
+            comments: post.commentCount || post.comments || 0,
+            shares: post.shareCount || post.shares || 0,
+            views: post.views || 0,
+            likeCount: post.likeCount || post.likes || 0,
+            commentCount: post.commentCount || post.comments || 0,
+            shareCount: post.shareCount || post.shares || 0,
+            bookmarkCount: post.bookmarkCount || 0,
+            isLiked: post.isLiked || false,
+            isBookmarked: post.isBookmarked || false,
+            isShared: post.isShared || false,
+            hashtags: post.hashtags,
+            mentions: post.mentions,
+            location: post.location,
+            privacy: post.privacy,
+            isActive: post.isActive !== undefined ? post.isActive : true,
+          }));
+          
+          // Filter posts based on criteria: 200+ likes, 20+ comments, 10+ shares
+          const filteredPosts = transformedPosts.filter(post => 
+            (post.likeCount || post.likes || 0) >= 200 && 
+            (post.commentCount || post.comments || 0) >= 20 && 
+            (post.shareCount || post.shares || 0) >= 10
+          );
+          
+          // Limit to 10 posts after filtering
+          setTrendingPosts(filteredPosts.slice(0, 10));
+        } else {
+          setError(response?.message || response?.error || 'Failed to load trending posts');
+        }
+      } catch (err: any) {
+        console.error('Error fetching trending posts:', err);
+        setError(err?.message || 'Failed to load trending posts');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTrendingPosts();
+  }, []);
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (error) {
+    return (
+      <Paper sx={{ p: 3, textAlign: 'center' }}>
+        <Typography color="error">{error}</Typography>
+      </Paper>
+    );
+  }
+
+  // Show message if no posts meet the criteria
+  if (trendingPosts.length === 0) {
+    return (
+      <Paper sx={{ p: 3, textAlign: 'center' }}>
+        <Typography color="text.secondary">
+          No trending posts meet the criteria (200+ likes, 20+ comments, 10+ shares)
+        </Typography>
+      </Paper>
+    );
+  }
+
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {trendingPosts.map((post) => (
+        <Box key={post.id}>
+          <PostCard post={post} />
+        </Box>
+      ))}
+    </Box>
   );
 };
 

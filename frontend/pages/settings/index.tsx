@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { User, ProfileUser } from '@/types';
 import { useCustomTheme } from '@/contexts/ThemeContext';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -81,11 +81,14 @@ import Head from 'next/head';
 import { useRouter } from 'next/router';
 import ProfilePictureUpload from '@/components/profile/ProfilePictureUpload';
 import { useAuth } from '@/contexts/AuthContext';
+import { useProfile } from '@/contexts/ProfileContext';
 import { api } from '@/lib/api';
 import toast from 'react-hot-toast';
+import { syncSettings } from '@/services/settingsSync';
 
 export default function SettingsPage() {
   const { user, isLoading, isAuthenticated, logout, updateProfile } = useAuth();
+  const { profile, loading: profileLoading, updateProfile: updateProfileContext } = useProfile();
   const router = useRouter();
   const { themeMode, actualTheme, fontSize, reducedMotion, highContrast, setThemeMode, setFontSize, setReducedMotion, setHighContrast } = useCustomTheme();
   const { language, setLanguage, t } = useLanguage();
@@ -195,8 +198,8 @@ export default function SettingsPage() {
     const loadSettings = async () => {
       if (isAuthenticated && user) {
         try {
-          const response = await api.auth.getSettings();
-          const settings = (response as any).data?.data || (response as any).data;
+          const response: any = await api.auth.getSettings();
+          const settings = response.data || {};
 
           if (settings.notifications) {
             setNotifications(prev => ({ ...prev, ...settings.notifications }));
@@ -258,10 +261,12 @@ export default function SettingsPage() {
 
   // Initialize form with user data
   useEffect(() => {
-    if (user) {
-      updateFormFromUser(user);
+    // Use profile from ProfileContext if available, otherwise fallback to user from AuthContext
+    const currentUser = profile || user;
+    if (currentUser) {
+      updateFormFromUser(currentUser);
     }
-  }, [user, updateFormFromUser]);
+  }, [profile, user, updateFormFromUser]);
 
   // Listen for user profile updates
   useEffect(() => {
@@ -377,6 +382,9 @@ export default function SettingsPage() {
       ...prev,
       language: newLanguage,
     }));
+    
+    // Also sync to backend
+    syncSettings.language({ ...themeSettings, language: newLanguage }, { retryOnFailure: true });
   };
 
   const handleWalletSettingChange = (setting: string, value: any) => {
@@ -420,26 +428,14 @@ export default function SettingsPage() {
         website: profileForm.website,
       };
 
-      // Update local UI immediately to show the changes
-      // This ensures the user sees the changes right away, even before the API call completes
-      if (user) {
-        // Create a temporary local update
-        const updatedUser = { ...user, ...profileData };
-
-        // Update the user in the context (this will update all components using the user data)
-        updateUser(updatedUser);
-      }
-
-      // Update profile in the backend
-      const success = await updateProfile(profileData);
+      // Update profile through ProfileContext which will sync with AuthContext
+      const success = await updateProfileContext(profileData);
 
       if (success) {
         toast.success('Profile updated successfully');
         setEditingProfile(false);
       } else {
         toast.error('Failed to update profile on the server');
-        // Note: The AuthContext's updateProfile function already handles setting the user
-        // state with the response from the server, so we don't need to manually revert here
       }
     } catch (error) {
       handleApiError(error, 'Failed to update profile');
@@ -538,7 +534,28 @@ export default function SettingsPage() {
 
       try {
         // Call the API to update the settings
-        await api.auth.updateSettings(settingType, settingsData);
+        const response: any = await api.auth.updateSettings(settingType, settingsData);
+        
+        // Update local state with the server response
+        if (response.data) {
+          switch (settingType) {
+            case 'Notification':
+              setNotifications(response.data.notifications || settingsData);
+              break;
+            case 'Privacy':
+              setPrivacy(response.data.privacy || settingsData);
+              break;
+            case 'Appearance':
+              setThemeSettings(response.data.theme || settingsData);
+              break;
+            case 'Wallet':
+              setWalletSettings(response.data.wallet || settingsData);
+              break;
+            case 'Security':
+              setSecuritySettings(response.data.security || settingsData);
+              break;
+          }
+        }
 
         toast.success(`${settingType} settings saved successfully`);
       } catch (apiError) {
@@ -613,10 +630,10 @@ export default function SettingsPage() {
 
       try {
         // Call the API to export the data
-        const response = await api.auth.exportData();
+        const response: any = await api.auth.exportData();
 
         // Create and trigger download
-        const exportData = response.data?.data || response.data;
+        const exportData = (response as any).data?.data || (response as any).data;
         const dataStr = JSON.stringify(exportData, null, 2);
         const dataBlob = new Blob([dataStr], { type: 'application/json' });
         const url = URL.createObjectURL(dataBlob);
@@ -643,11 +660,8 @@ export default function SettingsPage() {
 
   const handleAvatarUploadSuccess = async (avatarUrl: string) => {
     try {
-      // Optimistically update UI (local only) to reflect new avatar immediately
-      // The persisted state will be handled by updateProfile below
-
-      // Update profile with new avatar in the backend
-      const success = await updateProfile({ avatar: avatarUrl });
+      // Update profile with new avatar through ProfileContext
+      const success = await updateProfileContext({ avatar: avatarUrl });
 
       if (success) {
         toast.success('Profile picture updated successfully');
@@ -871,7 +885,6 @@ export default function SettingsPage() {
                         startAdornment: <InputAdornment position="start">@</InputAdornment>,
                       }}
                     />
-
                     <TextField
                       label="Email"
                       value={profileForm.email}
@@ -1493,6 +1506,8 @@ export default function SettingsPage() {
         onClose={() => setShowPasswordDialog(false)}
         maxWidth="sm"
         fullWidth
+        disableEnforceFocus  // Prevents focus trapping issues
+        hideBackdrop={false}  // Ensure backdrop is properly handled
       >
         <DialogTitle>
           Change Password
@@ -1605,6 +1620,8 @@ export default function SettingsPage() {
         }}
         maxWidth="sm"
         fullWidth
+        disableEnforceFocus  // Prevents focus trapping issues
+        hideBackdrop={false}  // Ensure backdrop is properly handled
       >
         <DialogTitle sx={{ color: 'error.main' }}>
           Delete Account

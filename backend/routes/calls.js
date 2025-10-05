@@ -38,16 +38,51 @@ router.post('/initiate', authenticateTokenStrict, async (req, res) => {
     }
 
     // Check if there's already an active call in this conversation
-    const activeCall = await Call.findOne({
+    let activeCall = await Call.findOne({
       conversationId,
       status: { $in: ['initiated', 'ringing', 'active'] }
     });
 
     if (activeCall) {
-      return res.status(409).json({
-        success: false,
-        message: 'There is already an active call in this conversation'
-      });
+      // Consider stale calls as ended if no one joined within 60s
+      const now = Date.now();
+      const createdAt = new Date(activeCall.createdAt || activeCall.startedAt || Date.now()).getTime();
+      const ageMs = now - createdAt;
+      const hasJoined = (activeCall.participants || []).some(p => p.status === 'joined');
+      const isStale = (['initiated', 'ringing'].includes(activeCall.status) && ageMs > 60_000 && !hasJoined);
+
+      console.log('Found active call:', { id: activeCall._id, status: activeCall.status, ageMs, hasJoined, isStale });
+
+      if (isStale) {
+        console.log('Marking call as ended due to staleness');
+        activeCall.status = 'ended';
+        activeCall.endedAt = new Date();
+        await activeCall.save();
+      } else {
+        // Return the existing active call so the client can join instead of failing
+        console.log('Returning existing active call instead of 409');
+        await activeCall.populate([
+          { path: 'initiator', select: 'id displayName avatar' },
+          { path: 'participants.userId', select: 'id displayName avatar' }
+        ]);
+
+        return res.status(200).json({
+          success: true,
+          message: 'Returning existing active call',
+          data: {
+            call: {
+              id: activeCall._id,
+              callId: activeCall.callId,
+              conversationId: activeCall.conversationId,
+              initiator: activeCall.initiator,
+              participants: activeCall.participants,
+              type: activeCall.type,
+              status: activeCall.status,
+              startedAt: activeCall.startedAt
+            }
+          }
+        });
+      }
     }
 
     // Create call participants (exclude initiator, they'll be added when they join)
@@ -162,11 +197,13 @@ router.post('/:callId/join', authenticateTokenStrict, async (req, res) => {
         call.participants.push({
           userId: userId,
           joinedAt: new Date(),
-          status: 'joined'
+          status: 'joined',
+          role: 'moderator'
         });
       } else {
         initiatorParticipant.joinedAt = new Date();
         initiatorParticipant.status = 'joined';
+        initiatorParticipant.role = 'moderator';
       }
     } else {
       call.participants[participantIndex].joinedAt = new Date();
@@ -1350,6 +1387,630 @@ router.get('/stats', authenticateTokenStrict, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to get call statistics'
+    });
+  }
+});
+
+// Invite participants to an existing call (moderator feature)
+router.post('/:callId/invite', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { callId } = req.params;
+    const { userIds } = req.body; // array of user IDs to invite
+    const initiatorId = req.user.userId;
+
+    // Validate input
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'userIds must be a non-empty array'
+      });
+    }
+
+    // Find the call
+    const call = await Call.findById(callId)
+      .populate('initiator', 'id displayName avatar')
+      .populate('participants.userId', 'id displayName avatar');
+
+    if (!call) {
+      return res.status(404).json({
+        success: false,
+        message: 'Call not found'
+      });
+    }
+
+    // Check if caller is a moderator
+    const callerParticipant = call.participants.find(p => p.userId.id === initiatorId);
+    const isModerator = callerParticipant && callerParticipant.role === 'moderator';
+
+    if (!isModerator) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only moderators can invite participants to this call'
+      });
+    }
+
+    // Check if call is locked
+    if (call.locked) {
+      return res.status(403).json({
+        success: false,
+        message: 'Call is locked, cannot invite new participants'
+      });
+    }
+
+    // Find the conversation to verify users are participants
+    const conversation = await Conversation.findById(call.conversationId)
+      .populate('participants', 'id displayName avatar isOnline');
+
+    if (!conversation) {
+      return res.status(404).json({
+        success: false,
+        message: 'Conversation not found'
+      });
+    }
+
+    // Filter valid user IDs (must be conversation participants and not already in call)
+    const validUserIds = userIds.filter(userId =>
+      conversation.participants.some(p => p.id === userId) &&
+      !call.participants.some(p => p.userId.id === userId) &&
+      userId !== initiatorId
+    );
+
+    if (validUserIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No valid users to invite (users must be conversation participants and not already in the call)'
+      });
+    }
+
+    // Add new participants to the call
+    const newParticipants = validUserIds.map(userId => ({
+      userId,
+      status: 'invited'
+    }));
+
+    call.participants.push(...newParticipants);
+    await call.save();
+
+    // Populate the new participants
+    await call.populate([
+      { path: 'participants.userId', select: 'id displayName avatar' }
+    ]);
+
+    // Emit call invitation to new participants
+    const io = req.app.get('io');
+    if (io) {
+      validUserIds.forEach(userId => {
+        io.to(`user_${userId}`).emit('call:incoming', {
+          call: {
+            id: call._id,
+            callId: call.callId,
+            conversationId: call.conversationId,
+            initiator: call.initiator,
+            type: call.type,
+            status: call.status,
+            startedAt: call.startedAt
+          }
+        });
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Participants invited successfully',
+      data: {
+        call: {
+          id: call._id,
+          callId: call.callId,
+          conversationId: call.conversationId,
+          initiator: call.initiator,
+          participants: call.participants,
+          type: call.type,
+          status: call.status,
+          startedAt: call.startedAt
+        },
+        invitedUsers: validUserIds
+      }
+    });
+
+  } catch (error) {
+    console.error('Error inviting participants:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to invite participants'
+    });
+  }
+});
+
+// Remove participant from call (moderator feature)
+router.post('/:callId/remove', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { callId } = req.params;
+    const { userId } = req.body; // user ID to remove
+    const initiatorId = req.user.userId;
+
+    // Validate input
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required'
+      });
+    }
+
+    // Find the call
+    const call = await Call.findById(callId)
+      .populate('initiator', 'id displayName avatar')
+      .populate('participants.userId', 'id displayName avatar');
+
+    if (!call) {
+      return res.status(404).json({
+        success: false,
+        message: 'Call not found'
+      });
+    }
+
+    // Check if caller is a moderator
+    const callerParticipant = call.participants.find(p => p.userId.id === initiatorId);
+    const isModerator = callerParticipant && callerParticipant.role === 'moderator';
+
+    if (!isModerator) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only moderators can remove participants'
+      });
+    }
+
+    // Cannot remove yourself
+    if (userId === initiatorId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot remove yourself from the call'
+      });
+    }
+
+    // Find and remove the participant
+    const participantIndex = call.participants.findIndex(p => p.userId.id === userId);
+    if (participantIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: 'User is not a participant in this call'
+      });
+    }
+
+    const removedParticipant = call.participants.splice(participantIndex, 1)[0];
+    removedParticipant.leftAt = new Date();
+    removedParticipant.status = 'removed';
+
+    // Add back as removed for history
+    call.participants.push(removedParticipant);
+
+    await call.save();
+
+    // Emit to all participants that user was removed
+    const io = req.app.get('io');
+    if (io) {
+      const allParticipantIds = [call.initiator.id, ...call.participants.map(p => p.userId.id)];
+      allParticipantIds.forEach(participantId => {
+        if (participantId !== userId) {
+          io.to(`user_${participantId}`).emit('call:participant-removed', {
+            callId: call.callId,
+            removedUserId: userId,
+            call: {
+              id: call._id,
+              status: call.status,
+              participants: call.participants
+            }
+          });
+        }
+      });
+
+      // Notify the removed user
+      io.to(`user_${userId}`).emit('call:removed', {
+        callId: call.callId,
+        call: {
+          id: call._id,
+          status: call.status
+        }
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Participant removed successfully',
+      data: {
+        call: {
+          id: call._id,
+          callId: call.callId,
+          conversationId: call.conversationId,
+          initiator: call.initiator,
+          participants: call.participants,
+          type: call.type,
+          status: call.status,
+          startedAt: call.startedAt
+        },
+        removedUserId: userId
+      }
+    });
+
+  } catch (error) {
+    console.error('Error removing participant:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to remove participant'
+    });
+  }
+});
+
+// Mute all participants (moderator feature)
+router.post('/:callId/mute-all', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { callId } = req.params;
+    const moderatorId = req.user.userId;
+
+    // Find the call
+    const call = await Call.findById(callId)
+      .populate('initiator', 'id displayName avatar')
+      .populate('participants.userId', 'id displayName avatar');
+
+    if (!call) {
+      return res.status(404).json({
+        success: false,
+        message: 'Call not found'
+      });
+    }
+
+    // Check if user is a moderator
+    const moderatorParticipant = call.participants.find(p => p.userId.id === moderatorId);
+    if (!moderatorParticipant || moderatorParticipant.role !== 'moderator') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only moderators can mute all participants'
+      });
+    }
+
+    // Mute all participants except the moderator
+    call.participants.forEach(participant => {
+      if (participant.userId.id !== moderatorId && participant.status === 'joined') {
+        participant.muted = true;
+        participant.mutedAt = new Date();
+        participant.mutedBy = moderatorId;
+      }
+    });
+
+    await call.save();
+
+    // Emit mute all event to all participants
+    const io = req.app.get('io');
+    if (io) {
+      const allParticipantIds = [call.initiator.id, ...call.participants.map(p => p.userId.id)];
+      allParticipantIds.forEach(participantId => {
+        io.to(`user_${participantId}`).emit('call:mute-all', {
+          callId: call.callId,
+          mutedBy: moderatorId,
+          call: {
+            id: call._id,
+            participants: call.participants
+          }
+        });
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'All participants muted successfully',
+      data: {
+        call: {
+          id: call._id,
+          callId: call.callId,
+          participants: call.participants
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error muting all participants:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to mute all participants'
+    });
+  }
+});
+
+// Promote participant to moderator
+router.post('/:callId/promote', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { callId } = req.params;
+    const { userId } = req.body;
+    const moderatorId = req.user.userId;
+
+    // Validate input
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required'
+      });
+    }
+
+    // Find the call
+    const call = await Call.findById(callId)
+      .populate('initiator', 'id displayName avatar')
+      .populate('participants.userId', 'id displayName avatar');
+
+    if (!call) {
+      return res.status(404).json({
+        success: false,
+        message: 'Call not found'
+      });
+    }
+
+    // Check if requester is a moderator
+    const requesterParticipant = call.participants.find(p => p.userId.id === moderatorId);
+    if (!requesterParticipant || requesterParticipant.role !== 'moderator') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only moderators can promote participants'
+      });
+    }
+
+    // Find the target participant
+    const targetParticipant = call.participants.find(p => p.userId.id === userId);
+    if (!targetParticipant) {
+      return res.status(404).json({
+        success: false,
+        message: 'User is not a participant in this call'
+      });
+    }
+
+    // Promote to moderator
+    targetParticipant.role = 'moderator';
+    await call.save();
+
+    // Emit promotion event
+    const io = req.app.get('io');
+    if (io) {
+      const allParticipantIds = [call.initiator.id, ...call.participants.map(p => p.userId.id)];
+      allParticipantIds.forEach(participantId => {
+        io.to(`user_${participantId}`).emit('call:participant-promoted', {
+          callId: call.callId,
+          promotedUserId: userId,
+          promotedBy: moderatorId,
+          call: {
+            id: call._id,
+            participants: call.participants
+          }
+        });
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Participant promoted to moderator successfully',
+      data: {
+        call: {
+          id: call._id,
+          callId: call.callId,
+          participants: call.participants
+        },
+        promotedUserId: userId
+      }
+    });
+
+  } catch (error) {
+    console.error('Error promoting participant:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to promote participant'
+    });
+  }
+});
+
+// Lock call (prevent new participants from joining)
+router.post('/:callId/lock', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { callId } = req.params;
+    const moderatorId = req.user.userId;
+
+    // Find the call
+    const call = await Call.findById(callId)
+      .populate('initiator', 'id displayName avatar')
+      .populate('participants.userId', 'id displayName avatar');
+
+    if (!call) {
+      return res.status(404).json({
+        success: false,
+        message: 'Call not found'
+      });
+    }
+
+    // Check if user is a moderator
+    const moderatorParticipant = call.participants.find(p => p.userId.id === moderatorId);
+    if (!moderatorParticipant || moderatorParticipant.role !== 'moderator') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only moderators can lock the call'
+      });
+    }
+
+    // Lock the call
+    call.locked = true;
+    await call.save();
+
+    // Emit lock event
+    const io = req.app.get('io');
+    if (io) {
+      const allParticipantIds = [call.initiator.id, ...call.participants.map(p => p.userId.id)];
+      allParticipantIds.forEach(participantId => {
+        io.to(`user_${participantId}`).emit('call:locked', {
+          callId: call.callId,
+          lockedBy: moderatorId,
+          call: {
+            id: call._id,
+            locked: call.locked
+          }
+        });
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Call locked successfully',
+      data: {
+        call: {
+          id: call._id,
+          callId: call.callId,
+          locked: call.locked
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error locking call:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to lock call'
+    });
+  }
+});
+
+// Unlock call
+router.post('/:callId/unlock', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { callId } = req.params;
+    const moderatorId = req.user.userId;
+
+    // Find the call
+    const call = await Call.findById(callId)
+      .populate('initiator', 'id displayName avatar')
+      .populate('participants.userId', 'id displayName avatar');
+
+    if (!call) {
+      return res.status(404).json({
+        success: false,
+        message: 'Call not found'
+      });
+    }
+
+    // Check if user is a moderator
+    const moderatorParticipant = call.participants.find(p => p.userId.id === moderatorId);
+    if (!moderatorParticipant || moderatorParticipant.role !== 'moderator') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only moderators can unlock the call'
+      });
+    }
+
+    // Unlock the call
+    call.locked = false;
+    await call.save();
+
+    // Emit unlock event
+    const io = req.app.get('io');
+    if (io) {
+      const allParticipantIds = [call.initiator.id, ...call.participants.map(p => p.userId.id)];
+      allParticipantIds.forEach(participantId => {
+        io.to(`user_${participantId}`).emit('call:unlocked', {
+          callId: call.callId,
+          unlockedBy: moderatorId,
+          call: {
+            id: call._id,
+            locked: call.locked
+          }
+        });
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Call unlocked successfully',
+      data: {
+        call: {
+          id: call._id,
+          callId: call.callId,
+          locked: call.locked
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error unlocking call:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to unlock call'
+    });
+  }
+});
+
+// End call for all participants (moderator feature)
+router.post('/:callId/end-all', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { callId } = req.params;
+    const moderatorId = req.user.userId;
+
+    // Find the call
+    const call = await Call.findById(callId)
+      .populate('initiator', 'id displayName avatar')
+      .populate('participants.userId', 'id displayName avatar');
+
+    if (!call) {
+      return res.status(404).json({
+        success: false,
+        message: 'Call not found'
+      });
+    }
+
+    // Check if user is a moderator
+    const moderatorParticipant = call.participants.find(p => p.userId.id === moderatorId);
+    if (!moderatorParticipant || moderatorParticipant.role !== 'moderator') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only moderators can end the call for all participants'
+      });
+    }
+
+    // End the call
+    call.status = 'ended';
+    call.endedAt = new Date();
+    call.duration = Math.floor((call.endedAt - call.startedAt) / 1000);
+
+    await call.save();
+
+    // Emit end call event to all participants
+    const io = req.app.get('io');
+    if (io) {
+      const allParticipantIds = [call.initiator.id, ...call.participants.map(p => p.userId.id)];
+      allParticipantIds.forEach(participantId => {
+        io.to(`user_${participantId}`).emit('call:ended', {
+          callId: call.callId,
+          endedBy: moderatorId,
+          reason: 'ended_by_moderator',
+          call: {
+            id: call._id,
+            status: call.status,
+            endedAt: call.endedAt,
+            duration: call.duration
+          }
+        });
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Call ended for all participants successfully',
+      data: {
+        call: {
+          id: call._id,
+          callId: call.callId,
+          status: call.status,
+          endedAt: call.endedAt,
+          duration: call.duration
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error ending call for all:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to end call for all participants'
     });
   }
 });

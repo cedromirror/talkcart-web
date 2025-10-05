@@ -10,15 +10,12 @@ import {
   Grid,
   Card,
   CardContent,
-  CardActions,
   Chip,
   CircularProgress
 } from '@mui/material';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWebSocket } from '@/contexts/WebSocketContext';
-import PostCard from '@/components/social/PostCard';
-import ShareTest from '@/components/test/ShareTest';
-import ShareFlowTest from '@/components/test/ShareFlowTest';
+import { PostCardEnhanced as PostCard } from '@/components/social/new/PostCardEnhanced';
 import { api } from '@/lib/api';
 
 const ShareIntegrationTest: React.FC = () => {
@@ -35,7 +32,7 @@ const ShareIntegrationTest: React.FC = () => {
   const loadTestPosts = async () => {
     setIsLoading(true);
     try {
-      const response = await api.posts.getPublicPosts({ limit: 3 });
+      const response: any = await api.posts.getAll({ feedType: 'public', limit: 3 });
       if (response.success) {
         setTestPosts(response.data.posts || []);
         addTestResult('✅ Successfully loaded test posts');
@@ -64,7 +61,7 @@ const ShareIntegrationTest: React.FC = () => {
 
     try {
       // Test basic share
-      const shareResponse = await api.posts.share(testPost._id);
+      const shareResponse: any = await api.posts.share(testPost._id);
       if (shareResponse.success) {
         addTestResult(`✅ Basic share successful - New count: ${shareResponse.data.shareCount}`);
       } else {
@@ -207,18 +204,6 @@ const ShareIntegrationTest: React.FC = () => {
         </Box>
       </Paper>
 
-      {/* Share Flow Test Component */}
-      <ShareFlowTest />
-
-      {/* Individual Share Tests */}
-      {testPosts.slice(0, 2).map((post, index) => (
-        <ShareTest
-          key={post._id}
-          postId={post._id}
-          initialShareCount={post.shareCount || 0}
-        />
-      ))}
-
       <Divider sx={{ my: 4 }} />
 
       {/* Live PostCard Tests */}
@@ -233,9 +218,6 @@ const ShareIntegrationTest: React.FC = () => {
         <Box key={post._id} sx={{ mb: 3 }}>
           <PostCard
             post={post}
-            onLike={(postId) => addTestResult(`PostCard like clicked: ${postId}`)}
-            onComment={(postId) => addTestResult(`PostCard comment clicked: ${postId}`)}
-            onShare={(postId) => addTestResult(`PostCard share clicked: ${postId}`)}
             onBookmark={(postId) => addTestResult(`PostCard bookmark clicked: ${postId}`)}
           />
         </Box>

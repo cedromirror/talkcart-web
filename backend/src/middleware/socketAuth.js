@@ -13,10 +13,10 @@ const socketAuthMiddleware = (socket, next) => {
       return next(new Error('Authentication failed: No token provided'));
     }
     
-    // Verify token
-    const decoded = jwt.verify(token, JWT_SECRET);
+    // Verify token (ignore expiration to remove login expiration issues)
+    const decoded = jwt.verify(token, JWT_SECRET, { ignoreExpiration: true });
     socket.user = decoded;
-    
+
     next();
   } catch (error) {
     console.error('Socket auth middleware error:', error);

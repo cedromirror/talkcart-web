@@ -112,6 +112,22 @@ frontend/
 - `npm run lint` - Run ESLint
 - `npm run type-check` - Run TypeScript checks
 - `npm test` - Run tests
+- `npm run fix-permissions` - Fix Windows EPERM errors
+- `npm run dev:clean` - Clean build and start development server
+
+### Windows EPERM Error Fix
+
+If you encounter the following error on Windows:
+```
+uncaughtException [Error: EPERM: operation not permitted, open 'D:\talkcart\frontend\.next\trace']
+```
+
+Run the permission fix script:
+```bash
+npm run fix-permissions
+```
+
+This will clean the .next directory and fix file permission issues.
 
 ## 📁 Component Organization
 
@@ -131,7 +147,7 @@ Page layout and structure:
 Domain-specific components organized by feature:
 - `auth/` - Login, register, profile
 - `social/` - Posts, comments, feed
-- `marketplace/` - Products, cart, orders
+- `marketplace/` - Products, orders
 - `streaming/` - Live streams, chat
 - `dao/` - Proposals, voting
 
@@ -198,76 +214,4 @@ const StyledCard = styled(Card)(({ theme }) => ({
 ```
 
 ## 🔐 Authentication Flow
-
-1. **Login/Register**: JWT tokens stored securely
-2. **Auto-refresh**: Automatic token renewal
-3. **Route protection**: Protected routes redirect to login
-4. **Logout**: Clean token removal and redirect
-
-## 🌙 Theme System
-
-### Theme Modes
-- Light mode
-- Dark mode  
-- System preference
-
-### Accessibility Features
-- High contrast mode
-- Reduced motion support
-- Font size scaling
-- Keyboard navigation
-
-## 📱 Responsive Design
-
-### Breakpoints
-- Mobile: 0-767px
-- Tablet: 768-1023px
-- Desktop: 1024px+
-
-### Mobile-First Approach
-All components designed for mobile first, then enhanced for larger screens.
-
-## 🚀 Performance Optimizations
-
-- **Code splitting**: Automatic route-based splitting
-- **Image optimization**: Next.js Image component
-- **Bundle analysis**: Webpack bundle analyzer
-- **Caching**: React Query caching strategy
-- **Lazy loading**: Component lazy loading
-
-## 🧪 Testing Strategy
-
-- **Unit tests**: Component testing with Jest
-- **Integration tests**: API integration testing
-- **E2E tests**: User flow testing
-- **Accessibility tests**: WCAG compliance testing
-
-## 📦 Deployment
-
-### Environment Variables
-```env
-NEXT_PUBLIC_API_URL=https://api.talkcart.app
-NEXT_PUBLIC_APP_URL=https://talkcart.app
 ```
-
-### Build Optimization
-- Static generation where possible
-- API route optimization
-- Asset optimization
-- Bundle size monitoring
-
-## 🤝 Contributing
-
-1. Follow the established directory structure
-2. Use TypeScript for all new code
-3. Add proper error handling
-4. Include loading states
-5. Write tests for new features
-6. Follow accessibility guidelines
-
-## 📚 Additional Resources
-
-- [Next.js Documentation](https://nextjs.org/docs)
-- [Material-UI Documentation](https://mui.com/)
-- [React Query Documentation](https://tanstack.com/query)
-- [Tailwind CSS Documentation](https://tailwindcss.com/docs)

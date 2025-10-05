@@ -89,6 +89,8 @@ const IncomingCallModal: React.FC<IncomingCallModalProps> = ({
       open={!!call}
       maxWidth="sm"
       fullWidth
+      disableEnforceFocus  // Prevents focus trapping issues
+      hideBackdrop={false}  // Ensure backdrop is properly handled
       PaperProps={{
         sx: {
           borderRadius: 3,

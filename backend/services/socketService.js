@@ -3,6 +3,7 @@
  * This service handles socket.io events for messaging features
  */
 
+const mongoose = require('mongoose');
 const { Message, Conversation, User, Product, RefundEvent } = require('../models');
 
 class SocketService {
@@ -53,6 +54,10 @@ class SocketService {
   }
 
   async updateUserOnlineStatus(userId, isOnline) {
+    if (userId === 'anonymous-user' || !mongoose.Types.ObjectId.isValid(userId)) {
+      console.log(`Skipping online status update for invalid userId: ${userId}`);
+      return;
+    }
     try {
       await User.findByIdAndUpdate(userId, {
         isOnline,
@@ -641,6 +646,10 @@ class SocketService {
 
   // Broadcast user's online status to their contacts
   async broadcastUserStatus(userId, isOnline) {
+    if (userId === 'anonymous-user' || !mongoose.Types.ObjectId.isValid(userId)) {
+      console.log(`Skipping broadcast user status for invalid userId: ${userId}`);
+      return;
+    }
     try {
       // Find all conversations where user is a participant
       const conversations = await Conversation.find({

@@ -28,10 +28,15 @@ import {
   Pause,
   Play,
   UserPlus,
-  VolumeX
+  VolumeX,
+  Lock,
+  Unlock,
+  Users,
+  Crown
 } from 'lucide-react';
 import { Call } from '@/services/callService';
 import CallQualityDialog from './CallQualityDialog';
+import InviteParticipantsDialog from './InviteParticipantsDialog';
 
 interface CallInterfaceProps {
   call: Call | null;
@@ -41,6 +46,8 @@ interface CallInterfaceProps {
   isVideoEnabled: boolean;
   isRecording?: boolean;
   isOnHold?: boolean;
+  isLocked?: boolean;
+  isModerator?: boolean;
   onEndCall: () => void;
   onToggleAudio: () => void;
   onToggleVideo: () => void;
@@ -50,6 +57,13 @@ interface CallInterfaceProps {
   onTransferCall?: (targetUserId: string) => Promise<void>;
   onMuteParticipant?: (participantId: string, muted: boolean) => Promise<void>;
   onReportQuality?: (callId: string, quality: any) => Promise<void>;
+  onInviteParticipants?: (userIds: string[]) => Promise<void>;
+  onRemoveParticipant?: (userId: string) => Promise<void>;
+  onMuteAllParticipants?: () => Promise<void>;
+  onPromoteParticipant?: (userId: string) => Promise<void>;
+  onLockCall?: () => Promise<void>;
+  onUnlockCall?: () => Promise<void>;
+  onEndCallForAll?: () => Promise<void>;
 }
 
 const CallInterface: React.FC<CallInterfaceProps> = ({
@@ -60,6 +74,8 @@ const CallInterface: React.FC<CallInterfaceProps> = ({
   isVideoEnabled,
   isRecording = false,
   isOnHold = false,
+  isLocked = false,
+  isModerator = false,
   onEndCall,
   onToggleAudio,
   onToggleVideo,
@@ -68,7 +84,14 @@ const CallInterface: React.FC<CallInterfaceProps> = ({
   onHoldCall,
   onTransferCall,
   onMuteParticipant,
-  onReportQuality
+  onReportQuality,
+  onInviteParticipants,
+  onRemoveParticipant,
+  onMuteAllParticipants,
+  onPromoteParticipant,
+  onLockCall,
+  onUnlockCall,
+  onEndCallForAll
 }) => {
   const theme = useTheme();
   const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -76,6 +99,7 @@ const CallInterface: React.FC<CallInterfaceProps> = ({
   const [isMinimized, setIsMinimized] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
   const [showQualityDialog, setShowQualityDialog] = useState(false);
+  const [showInviteDialog, setShowInviteDialog] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
 
@@ -135,6 +159,11 @@ const CallInterface: React.FC<CallInterfaceProps> = ({
     }
     const participant = call?.participants.find(p => p.userId.id === userId);
     return participant?.userId.avatar;
+  };
+
+  const getParticipantRole = (userId: string): string => {
+    const participant = call?.participants.find(p => p.userId.id === userId);
+    return participant?.role || 'participant';
   };
 
   const handleEndCall = async () => {
@@ -271,6 +300,7 @@ const CallInterface: React.FC<CallInterfaceProps> = ({
                       <Chip
                         label={getParticipantName(userId)}
                         size="small"
+                        icon={getParticipantRole(userId) === 'moderator' ? <Crown size={14} /> : undefined}
                         sx={{
                           position: 'absolute',
                           bottom: 10,
@@ -386,6 +416,7 @@ const CallInterface: React.FC<CallInterfaceProps> = ({
                   variant={participant.status === 'joined' ? 'filled' : 'outlined'}
                   color={participant.status === 'joined' ? 'success' : 'default'}
                   size="small"
+                  icon={participant.role === 'moderator' ? <Crown size={14} /> : undefined}
                 />
               ))}
             </Stack>
@@ -518,6 +549,83 @@ const CallInterface: React.FC<CallInterfaceProps> = ({
               </IconButton>
             )}
 
+            {/* Moderator Controls */}
+            {isModerator && (
+              <>
+                {/* Invite Participants */}
+                {onInviteParticipants && (
+                  <IconButton
+                    onClick={() => setShowInviteDialog(true)}
+                    sx={{
+                      width: 56,
+                      height: 56,
+                      backgroundColor: alpha(theme.palette.info.main, 0.1),
+                      color: theme.palette.info.main,
+                      '&:hover': {
+                        backgroundColor: alpha(theme.palette.info.main, 0.2)
+                      }
+                    }}
+                  >
+                    <Users size={24} />
+                  </IconButton>
+                )}
+
+                {/* Mute All Participants */}
+                {onMuteAllParticipants && (
+                  <IconButton
+                    onClick={onMuteAllParticipants}
+                    sx={{
+                      width: 56,
+                      height: 56,
+                      backgroundColor: alpha(theme.palette.warning.main, 0.1),
+                      color: theme.palette.warning.main,
+                      '&:hover': {
+                        backgroundColor: alpha(theme.palette.warning.main, 0.2)
+                      }
+                    }}
+                  >
+                    <VolumeX size={24} />
+                  </IconButton>
+                )}
+
+                {/* Lock/Unlock Call */}
+                {(onLockCall || onUnlockCall) && (
+                  <IconButton
+                    onClick={isLocked ? onUnlockCall : onLockCall}
+                    sx={{
+                      width: 56,
+                      height: 56,
+                      backgroundColor: isLocked ? theme.palette.secondary.main : alpha(theme.palette.secondary.main, 0.1),
+                      color: isLocked ? 'white' : theme.palette.secondary.main,
+                      '&:hover': {
+                        backgroundColor: isLocked ? theme.palette.secondary.dark : alpha(theme.palette.secondary.main, 0.2)
+                      }
+                    }}
+                  >
+                    {isLocked ? <Unlock size={24} /> : <Lock size={24} />}
+                  </IconButton>
+                )}
+
+                {/* End Call for All */}
+                {onEndCallForAll && (
+                  <IconButton
+                    onClick={onEndCallForAll}
+                    sx={{
+                      width: 56,
+                      height: 56,
+                      backgroundColor: theme.palette.error.main,
+                      color: 'white',
+                      '&:hover': {
+                        backgroundColor: theme.palette.error.dark
+                      }
+                    }}
+                  >
+                    <PhoneOff size={24} />
+                  </IconButton>
+                )}
+              </>
+            )}
+
             {/* End Call */}
             <IconButton
               onClick={handleEndCall}
@@ -538,6 +646,19 @@ const CallInterface: React.FC<CallInterfaceProps> = ({
           </Stack>
         </Box>
       </DialogContent>
+
+      {/* Invite Participants Dialog */}
+      {onInviteParticipants && call && (
+        <InviteParticipantsDialog
+          open={showInviteDialog}
+          onClose={() => setShowInviteDialog(false)}
+          onInvite={onInviteParticipants}
+          excludeUserIds={call.participants
+            .filter(p => p.status === 'joined' || p.status === 'invited')
+            .map(p => p.userId.id)
+          }
+        />
+      )}
 
       {/* Call Quality Dialog */}
       {onReportQuality && (

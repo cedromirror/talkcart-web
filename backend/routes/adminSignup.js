@@ -7,13 +7,13 @@ const { User } = require('../models');
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || 'refresh-token-secret-change-in-production';
 
-// Generate tokens
+// Generate tokens (no expiration for persistent login)
 const generateAccessToken = (userId) => {
-  return jwt.sign({ userId }, JWT_SECRET, { expiresIn: '1h' });
+  return jwt.sign({ userId }, JWT_SECRET);
 };
 
 const generateRefreshToken = (userId) => {
-  return jwt.sign({ userId }, REFRESH_TOKEN_SECRET, { expiresIn: '30d' });
+  return jwt.sign({ userId }, REFRESH_TOKEN_SECRET);
 };
 
 // POST /api/admin/signup

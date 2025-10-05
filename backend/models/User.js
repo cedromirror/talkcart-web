@@ -327,6 +327,17 @@ const userSchema = new mongoose.Schema({
     instagram: String,
     linkedin: String
   },
+  
+  // E-commerce related fields
+  wishlist: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Product'
+  }],
+  recentlyViewed: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Product'
+  }],
+  
   // Password reset fields
   resetPasswordToken: {
     type: String,

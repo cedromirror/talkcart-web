@@ -8,36 +8,53 @@ export const useSafeAuth = () => {
     
     if (!context) {
       // Return default values instead of throwing
-      console.warn('useSafeAuth: AuthContext not found, returning default values');
+      // Only log warning in development mode to avoid console spam in production
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('useSafeAuth: AuthContext not found, returning default values');
+      }
       return {
         user: null,
         token: null,
         isLoading: false,
         isAuthenticated: false,
         login: async () => {
-          console.warn('useSafeAuth: login called outside AuthProvider');
+          if (process.env.NODE_ENV === 'development') {
+            console.warn('useSafeAuth: login called outside AuthProvider');
+          }
           return false;
         },
         register: async () => {
-          console.warn('useSafeAuth: register called outside AuthProvider');
+          if (process.env.NODE_ENV === 'development') {
+            console.warn('useSafeAuth: register called outside AuthProvider');
+          }
           return false;
         },
         loginWithWallet: async () => {
-          console.warn('useSafeAuth: loginWithWallet called outside AuthProvider');
+          if (process.env.NODE_ENV === 'development') {
+            console.warn('useSafeAuth: loginWithWallet called outside AuthProvider');
+          }
           return false;
         },
         updateProfile: async () => {
-          console.warn('useSafeAuth: updateProfile called outside AuthProvider');
+          if (process.env.NODE_ENV === 'development') {
+            console.warn('useSafeAuth: updateProfile called outside AuthProvider');
+          }
           return false;
         },
         refreshUser: async () => {
-          console.warn('useSafeAuth: refreshUser called outside AuthProvider');
+          if (process.env.NODE_ENV === 'development') {
+            console.warn('useSafeAuth: refreshUser called outside AuthProvider');
+          }
         },
         logout: async () => {
-          console.warn('useSafeAuth: logout called outside AuthProvider');
+          if (process.env.NODE_ENV === 'development') {
+            console.warn('useSafeAuth: logout called outside AuthProvider');
+          }
         },
         updateUser: () => {
-          console.warn('useSafeAuth: updateUser called outside AuthProvider');
+          if (process.env.NODE_ENV === 'development') {
+            console.warn('useSafeAuth: updateUser called outside AuthProvider');
+          }
         },
       };
     }

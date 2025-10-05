@@ -1,6 +1,7 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
+import api from '@/lib/api';
 import {
   Box,
   Container,
@@ -30,14 +31,24 @@ import {
   Alert,
   Fab,
   Tooltip,
+  Fade,
+  Zoom,
+  Slide,
+  Avatar,
+  AvatarGroup,
+  CircularProgress,
+  LinearProgress,
+  Backdrop,
+  IconButton,
+  Drawer,
 } from '@mui/material';
-import { 
-  Search, 
-  Filter, 
-  ShoppingCart, 
-  Tag, 
-  Wallet, 
-  AlertCircle, 
+import {
+  Search,
+  Filter,
+  ShoppingCart,
+  Tag,
+  Wallet,
+  AlertCircle,
   TrendingUp,
   Eye,
   Star,
@@ -48,58 +59,46 @@ import {
   Grid3x3,
   List,
   RefreshCcw,
-  FilterX
+  FilterX,
+  Sparkles,
+  Users,
+  Package,
+  Globe,
+  Zap,
+  Award,
+  Heart,
+  Share2,
+  Bookmark,
+  ShoppingBag,
+  ArrowRight,
+  TrendingDown,
+  Clock,
+  Shield,
+  Verified,
+  Bell,
+  Settings,
+  Menu,
+  X,
+  Truck
 } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWebSocket } from '@/contexts/WebSocketContext';
+// Cart context removed as part of cart functionality removal
 import useMarketplace from '@/hooks/useMarketplace';
+import ProductCard from '@/components/marketplace/ProductCard';
+
+import MarketplaceGrid from '@/components/marketplace/MarketplaceGrid';
 import toast from 'react-hot-toast';
 
-// Enhanced Product type definition matching backend
-interface Product {
-  id: string;
-  _id?: string;
-  name: string;
-  description: string;
-  price: number;
-  currency: string;
-  images: Array<{
-    secure_url: string;
-    url: string;
-    public_id: string;
-  } | string>;
-  category: string;
-  vendor: {
-    id: string;
-    username: string;
-    displayName: string;
-    avatar: string;
-    isVerified: boolean;
-    walletAddress?: string;
-  };
-  isNFT: boolean;
-  featured: boolean;
-  tags: string[];
-  stock: number;
-  rating: number;
-  reviewCount: number;
-  sales: number;
-  views: number;
-  availability: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-// Categories are fetched from API via useMarketplace; remove hardcoded fallback
-
+// Define sort options for the marketplace
 const SORT_OPTIONS = [
-  { value: 'newest', label: 'Newest First', icon: <TrendingUp size={16} /> },
-  { value: 'priceAsc', label: 'Price: Low to High', icon: <SortAsc size={16} /> },
-  { value: 'priceDesc', label: 'Price: High to Low', icon: <SortDesc size={16} /> },
-  { value: 'sales', label: 'Best Selling', icon: <TrendingUp size={16} /> },
-  { value: 'views', label: 'Most Viewed', icon: <Eye size={16} /> },
-  { value: 'featured', label: 'Featured Items', icon: <Star size={16} /> },
+  { value: 'newest', label: 'Newest First' },
+  { value: 'priceAsc', label: 'Price: Low to High' },
+  { value: 'priceDesc', label: 'Price: High to Low' },
+  { value: 'sales', label: 'Best Selling' },
+  { value: 'views', label: 'Most Viewed' },
+  { value: 'featured', label: 'Featured Items' },
 ];
 
 const MarketplacePage: React.FC = () => {
@@ -120,7 +119,8 @@ const MarketplacePage: React.FC = () => {
     loading, 
     error, 
     fetchProducts, 
-    fetchCategories 
+    fetchCategories,
+    buyProduct
   } = useMarketplace();
   
   // View mode
@@ -136,7 +136,23 @@ const MarketplacePage: React.FC = () => {
     featured: false,
     sortBy: 'newest' as 'priceAsc' | 'priceDesc' | 'newest' | 'sales' | 'views' | 'featured',
     page: 1,
+    currency: 'all',
+    vendor: 'all',
+    inStock: false,
+    freeShipping: false,
+    rating: 0,
+    condition: 'all',
+    location: 'all',
+    tags: [] as string[],
+    priceRange: [0, 10000] as [number, number],
   });
+
+  // UI States
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Add comparison state
+  const [selectedForComparison, setSelectedForComparison] = useState<Set<string>>(new Set());
+  
 
   // Initialize from URL params
   useEffect(() => {
@@ -275,6 +291,50 @@ const MarketplacePage: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // Handle product share
+  const handleProductShare = async (product: any) => {
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: product.name,
+          text: product.description,
+          url: `${window.location.origin}/marketplace/${product.id}`,
+        });
+      } else {
+        await navigator.clipboard.writeText(`${window.location.origin}/marketplace/${product.id}`);
+        toast.success('Product link copied to clipboard');
+      }
+    } catch (error) {
+      toast.error('Failed to share product');
+    }
+  };
+
+  // Handle product buy (direct purchase)
+  const handleProductBuy = async (product: any) => {
+    try {
+      // Use the marketplace hook to directly purchase the product
+      const result = await buyProduct(product.id, {
+        paymentMethod: 'flutterwave',
+        product: product
+      });
+      if (result) {
+        toast.success(`${product.name} purchased successfully!`);
+      } else {
+        toast.error(`Failed to purchase ${product.name}`);
+      }
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to purchase product');
+    }
+  };
+
+  // Handle refresh
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await handleFiltersChange({});
+    setIsRefreshing(false);
+    toast.success('Marketplace refreshed');
+  };
+
   // Clear all filters
   const clearFilters = () => {
     const defaultFilters = {
@@ -284,8 +344,17 @@ const MarketplacePage: React.FC = () => {
       maxPrice: '',
       isNFT: false,
       featured: false,
-      sortBy: 'newest' as const,
+      sortBy: 'newest' as 'priceAsc' | 'priceDesc' | 'newest' | 'sales' | 'views' | 'featured',
       page: 1,
+      currency: 'all',
+      vendor: 'all',
+      inStock: false,
+      freeShipping: false,
+      rating: 0,
+      condition: 'all',
+      location: 'all',
+      tags: [] as string[],
+      priceRange: [0, 10000] as [number, number],
     };
     setFilters(defaultFilters);
     updateURL(defaultFilters);
@@ -305,7 +374,7 @@ const MarketplacePage: React.FC = () => {
   };
 
   // Get proper image URL
-  const getImageUrl = (images: Product['images']) => {
+  const getImageUrl = (images: any) => {
     if (!images || images.length === 0) {
       return 'https://via.placeholder.com/400x400?text=No+Image';
     }
@@ -319,111 +388,157 @@ const MarketplacePage: React.FC = () => {
   const hasActiveFilters = filters.search || filters.category !== 'all' || filters.minPrice || 
                           filters.maxPrice || filters.isNFT || filters.featured || filters.sortBy !== 'newest';
   
+  // Handle comparison toggle
+  const handleComparisonToggle = (productId: string) => {
+    setSelectedForComparison(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(productId)) {
+        newSet.delete(productId);
+      } else {
+        newSet.add(productId);
+      }
+      return newSet;
+    });
+  };
+
   return (
     <Layout>
       <Container maxWidth="xl" sx={{ py: 3 }}>
         {/* Header Section */}
-        <Box sx={{ mb: 4 }}>
-          <Grid container alignItems="center" justifyContent="space-between" spacing={2}>
-            <Grid item xs={12} md={8}>
-              <Typography variant="h4" component="h1" gutterBottom sx={{ fontWeight: 700 }}>
-                🛍️ Marketplace
-              </Typography>
-              <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
-                Discover unique digital and physical items from our verified community
-              </Typography>
-              
-              {/* Stats Bar */}
-              <Stack direction="row" spacing={3} sx={{ mb: 2 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <TrendingUp size={16} color={theme.palette.primary.main} />
-                  <Typography variant="body2" color="text.secondary">
-                    {pagination.total} Products
-                  </Typography>
-                </Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Star size={16} color={theme.palette.warning.main} />
-                  <Typography variant="body2" color="text.secondary">
-                    Featured Items Available
-                  </Typography>
-                </Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <BadgeCheck size={16} color={theme.palette.success.main} />
-                  <Typography variant="body2" color="text.secondary">
-                    Verified Sellers
-                  </Typography>
-                </Box>
-              </Stack>
-            </Grid>
+        <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
+          <Box>
+            <Typography 
+              variant="h4" 
+              component="h1" 
+              sx={{ 
+                fontWeight: 400,
+                color: '#232F3E',
+                mb: 1,
+                fontSize: { xs: '1.75rem', md: '2.125rem' }
+              }}
+            >
+              Marketplace
+            </Typography>
             
-            <Grid item xs={12} md={4} sx={{ textAlign: { xs: 'left', md: 'right' } }}>
-              {/* Selling disabled: hide create button for all users */}
-              {false && user && (
-                <Button
-                  component={Link}
-                  href="/marketplace/create"
-                  variant="contained"
-                  size="large"
-                  startIcon={<Plus size={20} />}
-                  sx={{ 
-                    mb: 2,
-                    borderRadius: 2,
-                    px: 3,
-                    background: `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.primary.dark})`,
-                    '&:hover': {
-                      background: `linear-gradient(135deg, ${theme.palette.primary.dark}, ${theme.palette.primary.main})`,
-                    }
-                  }}
-                >
-                  Sell Your Item
-                </Button>
+            {/* Results Summary */}
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }} component="p">
+              {pagination.total > 0 ? (
+                `1-${Math.min(pagination.limit, pagination.total)} of over ${pagination.total.toLocaleString()} results`
+              ) : (
+                'No results found'
               )}
-            </Grid>
-          </Grid>
+            </Typography>
+          </Box>
+          
+          {user && (
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Button
+                variant="contained"
+                startIcon={<Package size={20} />}
+                onClick={() => router.push('/marketplace/dashboard')}
+                sx={{
+                  bgcolor: '#232F3E',
+                  color: 'white',
+                  '&:hover': {
+                    bgcolor: '#1d2733',
+                  },
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                My Orders
+              </Button>
+              <Button
+                variant="contained"
+                startIcon={<ShoppingBag size={20} />}
+                onClick={() => router.push('/marketplace/dashboard')}
+                sx={{
+                  bgcolor: '#FF9900',
+                  color: 'white',
+                  '&:hover': {
+                    bgcolor: '#e88900',
+                  },
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                My Dashboard
+              </Button>
+            </Box>
+          )}
         </Box>
         
-        {/* Enhanced Search and Filters */}
-        <Paper elevation={2} sx={{ mb: 4, p: 3, borderRadius: 3 }}>
+        {/* Search and Filters */}
+        <Paper 
+          elevation={0} 
+          sx={{ 
+            mb: 3, 
+            p: 2, 
+            border: '1px solid #ddd',
+            borderRadius: 1,
+            backgroundColor: '#f8f8f8',
+          }}
+        >
           {/* Main Search Row */}
-          <Box component="form" onSubmit={handleSearch} sx={{ mb: 3 }}>
+          <Box component="form" onSubmit={handleSearch} sx={{ mb: 2 }}>
             <Grid container spacing={2} alignItems="center">
-              <Grid item xs={12} md={4}>
+              <Grid item xs={12} md={5}>
                 <TextField
                   fullWidth
                   placeholder="Search products, creators, or NFTs..."
                   value={filters.search}
                   onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
+                  size="medium"
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
-                        <Search size={20} />
+                        <Search size={20} color="#666" />
                       </InputAdornment>
                     ),
                   }}
-                  sx={{ borderRadius: 2 }}
+                  sx={{ 
+                    backgroundColor: 'white',
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: 1,
+                      '& fieldset': {
+                        borderColor: '#ddd',
+                      },
+                      '&:hover fieldset': {
+                        borderColor: '#FF9900',
+                      },
+                      '&.Mui-focused fieldset': {
+                        borderColor: '#FF9900',
+                        borderWidth: '2px',
+                      },
+                    }
+                  }}
                 />
               </Grid>
               
-              <Grid item xs={12} md={2}>
+              <Grid item xs={12} md={2.5}>
                 <FormControl fullWidth>
                   <InputLabel>Category</InputLabel>
                   <Select
                     value={filters.category}
                     label="Category"
                     onChange={(e) => handleFiltersChange({ category: e.target.value })}
+                    size="medium"
+                    sx={{
+                      backgroundColor: 'white',
+                      '& .MuiOutlinedInput-notchedOutline': {
+                        borderColor: '#ddd',
+                      },
+                      '&:hover .MuiOutlinedInput-notchedOutline': {
+                        borderColor: '#FF9900',
+                      },
+                      '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                        borderColor: '#FF9900',
+                        borderWidth: '2px',
+                      },
+                    }}
                   >
-                    <MenuItem value="all">
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Grid3x3 size={16} />
-                        All Categories
-                      </Box>
-                    </MenuItem>
+                    <MenuItem value="all">All Categories</MenuItem>
                     {categories.map((category) => (
                       <MenuItem key={category} value={category}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <Tag size={16} />
-                          {category}
-                        </Box>
+                        {category}
                       </MenuItem>
                     ))}
                   </Select>
@@ -437,8 +552,17 @@ const MarketplacePage: React.FC = () => {
                   type="number"
                   value={filters.minPrice}
                   onChange={(e) => setFilters(prev => ({ ...prev, minPrice: e.target.value }))}
+                  size="medium"
                   InputProps={{
                     inputProps: { min: 0, step: 0.01 }
+                  }}
+                  sx={{
+                    backgroundColor: 'white',
+                    '& .MuiOutlinedInput-root': {
+                      '& fieldset': { borderColor: '#ddd' },
+                      '&:hover fieldset': { borderColor: '#FF9900' },
+                      '&.Mui-focused fieldset': { borderColor: '#FF9900', borderWidth: '2px' },
+                    }
                   }}
                 />
               </Grid>
@@ -450,26 +574,39 @@ const MarketplacePage: React.FC = () => {
                   type="number"
                   value={filters.maxPrice}
                   onChange={(e) => setFilters(prev => ({ ...prev, maxPrice: e.target.value }))}
+                  size="medium"
                   InputProps={{
                     inputProps: { min: 0, step: 0.01 }
+                  }}
+                  sx={{
+                    backgroundColor: 'white',
+                    '& .MuiOutlinedInput-root': {
+                      '& fieldset': { borderColor: '#ddd' },
+                      '&:hover fieldset': { borderColor: '#FF9900' },
+                      '&.Mui-focused fieldset': { borderColor: '#FF9900', borderWidth: '2px' },
+                    }
                   }}
                 />
               </Grid>
               
-              <Grid item xs={12} md={3}>
+              <Grid item xs={12} md={1.5}>
                 <FormControl fullWidth>
                   <InputLabel>Sort By</InputLabel>
                   <Select
                     value={filters.sortBy}
                     label="Sort By"
                     onChange={(e) => handleFiltersChange({ sortBy: e.target.value as any })}
+                    size="medium"
+                    sx={{
+                      backgroundColor: 'white',
+                      '& .MuiOutlinedInput-notchedOutline': { borderColor: '#ddd' },
+                      '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#FF9900' },
+                      '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#FF9900', borderWidth: '2px' },
+                    }}
                   >
                     {SORT_OPTIONS.map((option) => (
                       <MenuItem key={option.value} value={option.value}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          {option.icon}
-                          {option.label}
-                        </Box>
+                        {option.label}
                       </MenuItem>
                     ))}
                   </Select>
@@ -478,105 +615,97 @@ const MarketplacePage: React.FC = () => {
             </Grid>
           </Box>
 
-          {/* Filter Toggles and Actions */}
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
-            <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
-              <FormControlLabel
-                control={
-                  <Switch 
-                    checked={filters.isNFT} 
-                    onChange={(e) => handleFiltersChange({ isNFT: e.target.checked })}
-                    color="primary"
-                  />
-                }
-                label={
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <Wallet size={16} />
-                    NFTs Only
-                  </Box>
-                }
-              />
-              
-              <FormControlLabel
-                control={
-                  <Switch 
-                    checked={filters.featured} 
-                    onChange={(e) => handleFiltersChange({ featured: e.target.checked })}
-                    color="secondary"
-                  />
-                }
-                label={
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <Star size={16} />
-                    Featured
-                  </Box>
-                }
-              />
-              
-              {hasActiveFilters && (
-                <Button
-                  variant="outlined"
+          {/* Quick Filters */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+            <FormControlLabel
+              control={
+                <Switch 
+                  checked={filters.isNFT} 
+                  onChange={(e) => handleFiltersChange({ isNFT: e.target.checked })}
+                  sx={{
+                    '& .MuiSwitch-switchBase.Mui-checked': {
+                      color: '#FF9900',
+                    },
+                    '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': {
+                      backgroundColor: '#FF9900',
+                    },
+                  }}
+                />
+              }
+              label="NFTs Only"
+              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
+            />
+            
+            <FormControlLabel
+              control={
+                <Switch 
+                  checked={filters.featured} 
+                  onChange={(e) => handleFiltersChange({ featured: e.target.checked })}
+                  sx={{
+                    '& .MuiSwitch-switchBase.Mui-checked': {
+                      color: '#146EB4',
+                    },
+                    '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': {
+                      backgroundColor: '#146EB4',
+                    },
+                  }}
+                />
+              }
+              label="Featured"
+              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
+            />
+            
+            {hasActiveFilters && (
+              <Button
+                variant="text"
+                size="small"
+                startIcon={<FilterX size={16} />}
+                onClick={clearFilters}
+                sx={{ 
+                  color: '#0066c0',
+                  textTransform: 'none',
+                  '&:hover': {
+                    backgroundColor: '#f0f8ff',
+                  }
+                }}
+              >
+                Clear filters
+              </Button>
+            )}
+            
+            <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography variant="body2" color="text.secondary">
+                View:
+              </Typography>
+              <Box sx={{ display: 'flex', border: '1px solid #ddd', borderRadius: 1 }}>
+                <IconButton
                   size="small"
-                  startIcon={<FilterX size={16} />}
-                  onClick={clearFilters}
-                  sx={{ borderRadius: 2 }}
-                >
-                  Clear Filters
-                </Button>
-              )}
-            </Stack>
-
-            <Stack direction="row" spacing={1} alignItems="center">
-              {/* View Mode Toggle */}
-              <Box sx={{ display: 'flex', borderRadius: 1, border: 1, borderColor: 'divider' }}>
-                <Button
-                  size="small"
-                  variant={viewMode === 'grid' ? 'contained' : 'text'}
                   onClick={() => setViewMode('grid')}
-                  sx={{ minWidth: 40, borderRadius: '4px 0 0 4px' }}
+                  sx={{
+                    backgroundColor: viewMode === 'grid' ? '#e7f3ff' : 'transparent',
+                    color: viewMode === 'grid' ? '#0066c0' : '#666',
+                    borderRadius: '4px 0 0 4px',
+                  }}
                 >
                   <Grid3x3 size={16} />
-                </Button>
-                <Button
+                </IconButton>
+                <IconButton
                   size="small"
-                  variant={viewMode === 'list' ? 'contained' : 'text'}
                   onClick={() => setViewMode('list')}
-                  sx={{ minWidth: 40, borderRadius: '0 4px 4px 0' }}
+                  sx={{
+                    backgroundColor: viewMode === 'list' ? '#e7f3ff' : 'transparent',
+                    color: viewMode === 'list' ? '#0066c0' : '#666',
+                    borderRadius: '0 4px 4px 0',
+                  }}
                 >
                   <List size={16} />
-                </Button>
+                </IconButton>
               </Box>
-              
-              <Button
-                variant="outlined"
-                size="small"
-                startIcon={<RefreshCcw size={16} />}
-                onClick={() => handleFiltersChange({})}
-                disabled={loading}
-              >
-                Refresh
-              </Button>
-            </Stack>
-          </Box>
-
-          {/* Active Filters Display */}
-          {hasActiveFilters && (
-            <Box sx={{ mt: 2, pt: 2, borderTop: 1, borderColor: 'divider' }}>
-              <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center">
-                <Typography variant="body2" color="text.secondary">
-                  Active filters:
-                </Typography>
-                {filters.search && <Chip label={`"${filters.search}"`} size="small" variant="outlined" />}
-                {filters.category !== 'all' && <Chip label={filters.category} size="small" variant="outlined" />}
-                {filters.minPrice && <Chip label={`Min: $${filters.minPrice}`} size="small" variant="outlined" />}
-                {filters.maxPrice && <Chip label={`Max: $${filters.maxPrice}`} size="small" variant="outlined" />}
-                {filters.isNFT && <Chip label="NFT" size="small" color="primary" />}
-                {filters.featured && <Chip label="Featured" size="small" color="secondary" />}
-                {filters.sortBy !== 'newest' && <Chip label={SORT_OPTIONS.find(o => o.value === filters.sortBy)?.label} size="small" variant="outlined" />}
-              </Stack>
             </Box>
-          )}
+          </Box>
         </Paper>
+        
+
         
         {/* Error State */}
         {error && (
@@ -593,255 +722,102 @@ const MarketplacePage: React.FC = () => {
           </Alert>
         )}
         
-        {/* Products Grid/List */}
-        <Box sx={{ mb: 4 }}>
-          {loading ? (
-            <Grid container spacing={3}>
-              {Array.from(new Array(12)).map((_, index) => (
-                <Grid item xs={12} sm={6} md={4} lg={3} key={index}>
-                  <Card sx={{ height: 400, borderRadius: 2 }}>
-                    <Skeleton variant="rectangular" height={200} />
-                    <CardContent>
-                      <Skeleton variant="text" height={28} width="80%" />
-                      <Skeleton variant="text" height={20} width="60%" />
-                      <Skeleton variant="text" height={24} width="40%" sx={{ mt: 1 }} />
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 2 }}>
-                        <Skeleton variant="rectangular" height={36} width="48%" />
-                        <Skeleton variant="rectangular" height={36} width="48%" />
-                      </Box>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              ))}
-            </Grid>
-          ) : products.length === 0 ? (
-            <Paper sx={{ p: 8, textAlign: 'center', borderRadius: 3 }}>
-              <AlertCircle size={64} color={theme.palette.text.disabled} style={{ marginBottom: 16 }} />
-              <Typography variant="h5" gutterBottom color="text.secondary">
-                No products found
-              </Typography>
-              <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-                {hasActiveFilters 
-                  ? 'Try adjusting your filters or search terms' 
-                  : 'Be the first to list a product on our marketplace!'
-                }
-              </Typography>
-              {hasActiveFilters ? (
-                <Button variant="outlined" onClick={clearFilters} startIcon={<FilterX size={16} />}>
-                  Clear All Filters
-                </Button>
-              ) : user && (
-                <Button 
-                  component={Link} 
-                  href="/marketplace/create" 
-                  variant="contained" 
-                  startIcon={<Plus size={16} />}
-                >
-                  Create First Product
-                </Button>
-              )}
-            </Paper>
-          ) : (
-            <Grid container spacing={3}>
-              {products.map((product) => (
-                <Grid item xs={12} sm={6} md={viewMode === 'grid' ? 4 : 12} lg={viewMode === 'grid' ? 3 : 12} key={product.id}>
-                  <Card 
-                    sx={{ 
-                      height: '100%', 
-                      display: 'flex', 
-                      flexDirection: viewMode === 'list' ? 'row' : 'column',
-                      borderRadius: 2,
-                      transition: 'all 0.3s ease',
-                      position: 'relative',
-                      '&:hover': {
-                        transform: 'translateY(-4px)',
-                        boxShadow: theme.shadows[8],
-                      }
-                    }}
-                  >
-                    {/* Featured Badge */}
-                    {product.featured && (
-                      <Chip
-                        label="Featured"
-                        size="small"
-                        color="secondary"
-                        sx={{
-                          position: 'absolute',
-                          top: 8,
-                          left: 8,
-                          zIndex: 1,
-                          fontWeight: 600,
-                        }}
-                      />
-                    )}
+        {/* Amazon-Style Products Grid */}
+        <MarketplaceGrid
+          products={products.map(p => ({
+            id: p.id,
+            name: p.name,
+            description: p.description,
+            price: p.price,
+            currency: p.currency,
+            images: p.images,
+            category: p.category,
+            vendor: p.vendor,
+            isNFT: p.isNFT,
+            featured: p.featured,
+            tags: p.tags || [],
+            stock: p.stock !== undefined ? p.stock : 0,
+            rating: p.rating !== undefined ? p.rating : 0,
+            reviewCount: p.reviewCount !== undefined ? p.reviewCount : 0,
+            sales: p.sales !== undefined ? p.sales : 0,
+            views: p.views !== undefined ? p.views : 0,
+            availability: '',
+            createdAt: p.createdAt,
+            discount: (p as any).discount !== undefined ? (p as any).discount : 0,
+            freeShipping: (p as any).freeShipping !== undefined ? (p as any).freeShipping : false,
+            fastDelivery: (p as any).fastDelivery !== undefined ? (p as any).fastDelivery : false,
+            prime: (p as any).prime !== undefined ? (p as any).prime : false,
+          }))}
+          loading={loading}
+        />
 
-                    {/* NFT Badge */}
-                    {product.isNFT && (
-                      <Chip
-                        label="NFT"
-                        size="small"
-                        color="primary"
-                        sx={{
-                          position: 'absolute',
-                          top: 8,
-                          right: 8,
-                          zIndex: 1,
-                          fontWeight: 600,
-                        }}
-                      />
-                    )}
-
-                    <CardMedia
-                      component="img"
-                      height={viewMode === 'list' ? 150 : 200}
-                      sx={{ 
-                        width: viewMode === 'list' ? 200 : '100%',
-                        objectFit: 'cover',
-                      }}
-                      image={getImageUrl(product.images)}
-                      alt={product.name}
-                    />
-                    
-                    <CardContent sx={{ flexGrow: 1, p: 2 }}>
-                      {/* Product Title & Category */}
-                      <Box sx={{ mb: 1 }}>
-                        <Typography variant="h6" component="h3" noWrap sx={{ fontWeight: 600 }}>
-                          {product.name}
-                        </Typography>
-                        <Chip 
-                          label={product.category} 
-                          size="small" 
-                          variant="outlined" 
-                          sx={{ mt: 0.5 }}
-                        />
-                      </Box>
-
-                      {/* Vendor Info */}
-                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 1.5 }}>
-                        <Typography variant="body2" color="text.secondary" noWrap>
-                          by {product.vendor.displayName || product.vendor.username}
-                        </Typography>
-                        {product.vendor.isVerified && (
-                          <Tooltip title="Verified Seller">
-                            <BadgeCheck size={16} color={theme.palette.success.main} style={{ marginLeft: 4 }} />
-                          </Tooltip>
-                        )}
-                      </Box>
-
-                      {/* Description */}
-                      <Typography 
-                        variant="body2" 
-                        color="text.secondary" 
-                        sx={{ 
-                          mb: 2,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          display: '-webkit-box',
-                          WebkitLineClamp: 2,
-                          WebkitBoxOrient: 'vertical',
-                          minHeight: 40,
-                        }}
-                      >
-                        {product.description}
-                      </Typography>
-
-                      {/* Stats Row */}
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-                        {(product.rating || 0) > 0 && (
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                            <Rating value={product.rating} size="small" readOnly />
-                            <Typography variant="caption" color="text.secondary">
-                              ({product.reviewCount})
-                            </Typography>
-                          </Box>
-                        )}
-                        
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                          <Eye size={12} />
-                          <Typography variant="caption" color="text.secondary">
-                            {product.views || 0}
-                          </Typography>
-                        </Box>
-                        
-                        {(product.sales || 0) > 0 && (
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                            <TrendingUp size={12} />
-                            <Typography variant="caption" color="text.secondary">
-                              {product.sales} sold
-                            </Typography>
-                          </Box>
-                        )}
-                      </Box>
-
-                      {/* Price */}
-                      <Typography variant="h6" color="primary" fontWeight="bold" sx={{ mb: 2 }}>
-                        {formatPrice(product.price, product.currency)}
-                      </Typography>
-
-                      {/* Action Buttons */}
-                      <Stack direction="row" spacing={1}>
-                        <Button
-                          component={Link}
-                          href={`/marketplace/${product.id}`}
-                          variant="outlined"
-                          size="small"
-                          sx={{ flex: 1, borderRadius: 1.5 }}
-                        >
-                          View Details
-                        </Button>
-                        <Button
-                          component={Link}
-                          href={`/marketplace/${product.id}`}
-                          variant="contained"
-                          size="small"
-                          startIcon={product.isNFT ? <Wallet size={16} /> : <ShoppingCart size={16} />}
-                          sx={{ flex: 1, borderRadius: 1.5 }}
-                        >
-                          {product.isNFT ? 'Buy NFT' : 'Add to Cart'}
-                        </Button>
-                      </Stack>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              ))}
-            </Grid>
-          )}
-        </Box>
-        
-        {/* Pagination */}
+        {/* Amazon-Style Pagination */}
         {pagination.pages > 1 && (
           <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
-            <Paper sx={{ p: 2, borderRadius: 2 }}>
+            <Paper 
+              elevation={0}
+              sx={{ 
+                p: 2, 
+                border: '1px solid #ddd',
+                borderRadius: 1,
+                backgroundColor: '#f8f8f8',
+              }}
+            >
               <Stack direction="row" spacing={2} alignItems="center">
-                <Typography variant="body2" color="text.secondary">
-                  Page {pagination.page} of {pagination.pages} ({pagination.total} total items)
+                <Typography variant="body2" color="text.secondary" component="span">
+                  Page {pagination.page} of {pagination.pages}
                 </Typography>
                 <Pagination
                   count={pagination.pages}
                   page={pagination.page}
                   onChange={handlePageChange}
-                  color="primary"
-                  size="large"
+                  size="medium"
                   showFirstButton
                   showLastButton
+                  sx={{
+                    '& .MuiPaginationItem-root': {
+                      borderRadius: 1,
+                      border: '1px solid #ddd',
+                      backgroundColor: 'white',
+                      '&:hover': {
+                        backgroundColor: '#f0f8ff',
+                        borderColor: '#0066c0',
+                      },
+                      '&.Mui-selected': {
+                        backgroundColor: '#FF9900',
+                        color: 'white',
+                        borderColor: '#FF9900',
+                        '&:hover': {
+                          backgroundColor: '#e88900',
+                        }
+                      }
+                    }
+                  }}
                 />
               </Stack>
             </Paper>
           </Box>
         )}
 
-        {/* Floating Action Button for Mobile */}
+        {/* Amazon-Style Mobile Action Button */}
         {user && (
           <Fab
             component={Link}
             href="/marketplace/create"
-            color="primary"
             sx={{
               position: 'fixed',
-              bottom: 16,
-              right: 16,
+              bottom: 24,
+              right: 24,
               display: { xs: 'flex', md: 'none' },
               zIndex: 1000,
+              backgroundColor: '#FF9900',
+              color: 'white',
+              border: '1px solid #ddd',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+              '&:hover': {
+                backgroundColor: '#e88900',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+              },
             }}
           >
             <Plus size={24} />

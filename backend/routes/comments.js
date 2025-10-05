@@ -248,18 +248,7 @@ router.post('/', authenticateToken, async (req, res) => {
     // Resolve authorId (ObjectId). For anonymous, create/find a persistent anonymous user.
     let authorId;
     if (!userId || userId === 'anonymous-user' || req.user?.isAnonymous) {
-      let anonUser = await User.findOne({ username: 'anonymous', isAnonymous: true }).select('_id');
-      if (!anonUser) {
-        anonUser = await User.create({
-          username: 'anonymous',
-          displayName: 'TalkCart User',
-          email: `anonymous+${Date.now()}@talkcart.local`,
-          password: Math.random().toString(36).slice(2),
-          isAnonymous: true,
-          isVerified: false
-        });
-      }
-      authorId = anonUser._id;
+      return res.status(401).json({ success: false, error: 'Authentication required' });
     } else {
       const user = await User.findById(userId).select('_id');
       if (!user) {

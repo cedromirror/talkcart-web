@@ -1,45 +1,67 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '@/lib/api';
-import { Post } from '@/types/social';
+import { Post, PostsApiResponse } from '@/types/social';
 
 interface UsePostsReturn {
   posts: Post[];
   loading: boolean;
   error: string | null;
-  fetchPosts: (query?: string, tags?: string[]) => Promise<void>;
+  fetchPosts: (params?: { feedType?: string; limit?: number; page?: number }) => Promise<void>;
+  fetchBookmarkedPosts: (userId: string, params?: { limit?: number; page?: number }) => Promise<void>;
   likePost: (postId: string) => Promise<void>;
   bookmarkPost: (postId: string) => Promise<void>;
   sharePost: (postId: string) => Promise<void>;
 }
 
-export const usePosts = (): UsePostsReturn => {
+interface FetchPostsParams {
+  feedType?: string;
+  limit?: number;
+  page?: number;
+  contentType?: string;
+  authorId?: string;
+  hashtag?: string;
+  search?: string;
+}
+
+export const usePosts = (initialFeedType?: string): UsePostsReturn => {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchPosts = useCallback(async (query?: string, tags?: string[]) => {
+  const fetchPosts = useCallback(async (params?: FetchPostsParams) => {
     setLoading(true);
     setError(null);
     
     try {
-      const params: Record<string, string | string[]> = {};
+      // Set the feed type, defaulting to the initial or 'for-you' if not provided
+      const feedType = params?.feedType || initialFeedType || 'for-you';
       
-      if (query) {
-        params.search = query;
+      // Handle bookmarked posts specially
+      if (feedType === 'bookmarks') {
+        // For bookmarks, we need to get the current user ID
+        // This would typically come from context or be passed as a parameter
+        // For now, we'll throw an error indicating this needs special handling
+        throw new Error('Bookmarks feed type requires special handling with user ID');
       }
       
-      if (tags && tags.length > 0) {
-        params.tags = tags;
-      }
+      const apiParams = {
+        feedType,
+        limit: params?.limit || 20,
+        page: params?.page || 1,
+        contentType: params?.contentType,
+        authorId: params?.authorId,
+        hashtag: params?.hashtag,
+        search: params?.search
+      };
       
       // Try authenticated endpoint first, fallback to public
-      let response;
+      let response: PostsApiResponse;
       try {
-        response = await api.posts.getAll(params);
+        response = await api.posts.getAll(apiParams) as PostsApiResponse;
       } catch (authError) {
         // Fallback to public endpoint if authentication fails
         const publicResponse = await fetch('/api/posts/public?limit=20');
-        response = await publicResponse.json();
+        response = await publicResponse.json() as PostsApiResponse;
       }
       
       if (response.success) {
@@ -64,6 +86,36 @@ export const usePosts = (): UsePostsReturn => {
     } finally {
       setLoading(false);
     }
+  }, [initialFeedType]);
+
+  const fetchBookmarkedPosts = useCallback(async (userId: string, params?: { limit?: number; page?: number }) => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const response: any = await api.posts.getBookmarkedPosts(userId, params);
+      
+      if (response.success) {
+        // Ensure posts have required properties
+        const postsWithDefaults = response.data.posts.map((post: any) => ({
+          ...post,
+          type: post.type || (post.media && post.media.length > 0 ? 
+            (post.media[0].resource_type === 'video' ? 'video' : 'image') : 'text'),
+          views: post.views || 0,
+          isBookmarked: true // All posts from this endpoint are bookmarked
+        }));
+        setPosts(postsWithDefaults);
+      } else {
+        setError('Failed to fetch bookmarked posts');
+        setPosts([]);
+      }
+    } catch (err) {
+      console.error('Error fetching bookmarked posts:', err);
+      setError('Failed to fetch bookmarked posts. Please try again later.');
+      setPosts([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   const likePost = useCallback(async (postId: string) => {
@@ -74,7 +126,7 @@ export const usePosts = (): UsePostsReturn => {
 
   const bookmarkPost = useCallback(async (postId: string) => {
     try {
-      const response = await api.posts.bookmark(postId);
+      const response: any = await api.posts.bookmark(postId);
       
       if (response.success) {
         setPosts(prevPosts => 
@@ -100,7 +152,7 @@ export const usePosts = (): UsePostsReturn => {
 
   const sharePost = useCallback(async (postId: string) => {
     try {
-      const response = await api.posts.share(postId);
+      const response: any = await api.posts.share(postId);
       
       if (response.success) {
         setPosts(prevPosts => 
@@ -124,15 +176,17 @@ export const usePosts = (): UsePostsReturn => {
     }
   }, []);
 
+  // Initial fetch with default feed type
   useEffect(() => {
-    fetchPosts();
-  }, [fetchPosts]);
+    fetchPosts({ feedType: initialFeedType });
+  }, [fetchPosts, initialFeedType]);
 
   return {
     posts,
     loading,
     error,
     fetchPosts,
+    fetchBookmarkedPosts,
     likePost,
     bookmarkPost,
     sharePost

@@ -1,515 +1,374 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Card,
   CardContent,
-  CardMedia,
   Typography,
   Box,
-  Button,
-  Chip,
-  Avatar,
-  IconButton,
-  Rating,
-  Tooltip,
-  Badge,
-  Menu,
-  MenuItem,
-  ListItemIcon,
-  ListItemText,
-  Fade,
+  Skeleton,
+  useTheme,
+  alpha,
 } from '@mui/material';
 import {
-  ShoppingCart,
-  Heart,
-  Share2,
-  MoreVertical,
   Eye,
-  Verified,
-  Shield,
-  Truck,
-  Clock,
-  Star,
-  TrendingUp,
-  Zap,
-  Award,
-  MessageCircle,
+  AlertCircle,
 } from 'lucide-react';
-import { useRouter } from 'next/router';
-import FollowButton from '@/components/common/FollowButton';
-import AddToCartButton from '@/components/cart/AddToCartButton';
+import Image from 'next/image';
+import { convertUsdToCurrency, formatCurrencyAmount } from '@/utils/currencyConverter';
+import { getUserCurrency } from '@/utils/userCurrencyDetector';
 
-interface ProductCardProps {
-  product: MarketplaceProduct;
-  onAddToCart?: (productId: string) => void;
-  onToggleFavorite?: (productId: string) => void;
-  onShare?: (product: MarketplaceProduct) => void;
-  variant?: 'default' | 'compact' | 'featured';
-}
-
-export interface MarketplaceProduct {
+interface Product {
   id: string;
-  title: string;
+  name: string;
   description: string;
   price: number;
   currency: string;
-  images: string[];
+  images: Array<{
+    secure_url?: string;
+    url: string;
+    public_id: string;
+  } | string>;
   category: string;
-  condition: string;
-  seller: {
+  vendor: {
     id: string;
     username: string;
     displayName: string;
-    avatar?: string;
+    avatar: string;
     isVerified: boolean;
-    rating: number;
-    totalSales: number;
   };
+  isNFT: boolean;
+  featured?: boolean;
+  tags: string[];
+  stock: number;
   rating: number;
   reviewCount: number;
-  isNFT: boolean;
-  isFeatured: boolean;
-  isTrending: boolean;
-  isNew: boolean;
-  freeShipping: boolean;
-  fastDelivery: boolean;
-  inStock: boolean;
-  quantity: number;
-  tags: string[];
-  createdAt: string;
-  updatedAt: string;
+  sales: number;
   views: number;
-  favorites: number;
-  isFavorited: boolean;
-  discount?: {
-    percentage: number;
-    originalPrice: number;
-    endsAt: string;
-  };
-  auction?: {
-    isAuction: boolean;
-    currentBid: number;
-    minBid: number;
-    endsAt: string;
-    bidCount: number;
-  };
+  availability: string;
+  createdAt: string;
+  discount?: number;
+  freeShipping?: boolean;
+  fastDelivery?: boolean;
+  prime?: boolean;
+}
+
+interface ProductCardProps {
+  product?: Product;
+  loading?: boolean;
+  userCurrency?: string; // Add user's preferred currency
+  onCurrencyConverted?: (convertedPrice: number) => void; // Callback for converted price
 }
 
 const ProductCard: React.FC<ProductCardProps> = ({
   product,
-  onAddToCart,
-  onToggleFavorite,
-  onShare,
-  variant = 'default',
+  loading = false,
+  userCurrency, // Accept userCurrency as prop
+  onCurrencyConverted,
 }) => {
-  const router = useRouter();
-  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
-  const [imageLoaded, setImageLoaded] = useState(false);
-  const [isHovered, setIsHovered] = useState(false);
+  const theme = useTheme();
+  const [imageError, setImageError] = useState(false);
+  const [convertedPrice, setConvertedPrice] = useState<number | null>(null);
+  const [isConverting, setIsConverting] = useState(false);
+  const [detectedCurrency, setDetectedCurrency] = useState<string>('USD');
 
-  const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
-    event.stopPropagation();
-    setAnchorEl(event.currentTarget);
-  };
+  // Detect user's currency when component mounts
+  useEffect(() => {
+    let isMounted = true;
+    
+    const detectCurrency = async () => {
+      try {
+        console.log('Starting currency detection in ProductCard');
+        const currency = await getUserCurrency();
+        console.log('Detected currency:', currency);
+        // Validate currency before setting state
+        if (isMounted && currency && typeof currency === 'string' && currency.length === 3) {
+          console.log('Setting detected currency:', currency.toUpperCase());
+          setDetectedCurrency(currency.toUpperCase());
+        } else if (isMounted) {
+          // Fallback to USD if currency detection returns invalid data
+          console.log('Invalid currency detected, using USD');
+          setDetectedCurrency('USD');
+        }
+      } catch (error) {
+        console.error('Error detecting currency:', error);
+        // Use default currency if detection fails
+        if (isMounted) {
+          console.log('Error in currency detection, using USD');
+          setDetectedCurrency('USD');
+        }
+      }
+    };
 
-  const handleMenuClose = () => {
-    setAnchorEl(null);
-  };
+    // Add a small delay to prevent blocking the main thread
+    const timer = setTimeout(() => {
+      console.log('Starting currency detection');
+      detectCurrency();
+    }, 100);
 
-  const handleCardClick = () => {
-    router.push(`/marketplace/product/${product.id}`);
-  };
+    return () => {
+      console.log('Cleaning up currency detection useEffect');
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, []);
 
-  const handleAddToCart = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onAddToCart?.(product.id);
-  };
+  // Use detected currency if no userCurrency prop is provided
+  const effectiveUserCurrency = userCurrency || detectedCurrency;
+  console.log('ProductCard: effectiveUserCurrency', effectiveUserCurrency);
+  console.log('ProductCard: product.currency', product?.currency);
+  console.log('ProductCard: currencies different', product?.currency !== effectiveUserCurrency);
 
-  const handleToggleFavorite = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onToggleFavorite?.(product.id);
-  };
+  // Convert price to user's currency when product or userCurrency changes
+  useEffect(() => {
+    const convertPrice = async () => {
+      if (!product) {
+        setConvertedPrice(null);
+        return;
+      }
 
-  const handleShare = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onShare?.(product);
-  };
+      // Debug logging
+      console.log('Currency conversion debug:', {
+        productCurrency: product.currency,
+        userCurrency: effectiveUserCurrency,
+        areCurrenciesDifferent: product.currency !== effectiveUserCurrency
+      });
 
-  const formatPrice = (price: number, currency: string) => {
-    if (currency === 'ETH') {
-      return `${price} ETH`;
+      // Convert price if currencies are different
+      if (product.currency !== effectiveUserCurrency) {
+        setIsConverting(true);
+        try {
+          // If product is already in USD, convert to user's currency
+          if (product.currency === 'USD') {
+            const converted = await convertUsdToCurrency(product.price, effectiveUserCurrency);
+            console.log('Converted from USD to user currency:', { original: product.price, converted, currency: effectiveUserCurrency });
+            setConvertedPrice(converted);
+            onCurrencyConverted?.(converted);
+          } 
+          // If user wants USD but product is in another currency, convert to USD
+          else if (effectiveUserCurrency === 'USD') {
+            const converted = await convertCurrencyToUsd(product.price, product.currency);
+            console.log('Converted to USD from product currency:', { original: product.price, converted, currency: product.currency });
+            setConvertedPrice(converted);
+            onCurrencyConverted?.(converted);
+          }
+          // If both product and user currency are non-USD, convert through USD
+          else {
+            // First convert product currency to USD
+            const inUsd = await convertCurrencyToUsd(product.price, product.currency);
+            // Then convert USD to user's currency
+            const converted = await convertUsdToCurrency(inUsd, effectiveUserCurrency);
+            console.log('Converted through USD:', { 
+              original: product.price, 
+              inUsd: inUsd,
+              converted: converted, 
+              fromCurrency: product.currency,
+              toCurrency: effectiveUserCurrency 
+            });
+            setConvertedPrice(converted);
+            onCurrencyConverted?.(converted);
+          }
+        } catch (error) {
+          console.error('Error converting currency:', error);
+          setConvertedPrice(null);
+        } finally {
+          setIsConverting(false);
+        }
+      } else {
+        // Currencies are the same, set converted price to null to indicate no conversion needed
+        console.log('Currencies are the same, setting converted price to null');
+        setConvertedPrice(null);
+      }
+    };
+
+    convertPrice();
+  }, [product, effectiveUserCurrency, onCurrencyConverted]);
+
+  // Loading skeleton
+  if (loading || !product) {
+    return (
+      <Card
+        sx={{
+          height: 220,
+          display: 'flex',
+          flexDirection: 'column',
+          borderRadius: 1,
+          border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+          boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+          position: 'relative',
+          overflow: 'hidden',
+        }}
+      >
+        <Skeleton variant="rectangular" height={120} />
+        <CardContent sx={{ flexGrow: 1, p: 1 }}>
+          <Skeleton variant="text" width="60%" height={20} sx={{ mb: 1 }} />
+          <Skeleton variant="rectangular" width="100%" height={28} />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const getImageSrc = () => {
+    if (!product.images || product.images.length === 0) {
+      return 'https://via.placeholder.com/120x120?text=No+Image';
     }
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: currency || 'USD',
-    }).format(price);
-  };
-
-  const getCardHeight = () => {
-    switch (variant) {
-      case 'compact':
-        return 300;
-      case 'featured':
-        return 450;
-      default:
-        return 380;
+    
+    const firstImage = product.images[0];
+    if (typeof firstImage === 'string') {
+      return firstImage;
     }
-  };
-
-  const getImageHeight = () => {
-    switch (variant) {
-      case 'compact':
-        return 150;
-      case 'featured':
-        return 250;
-      default:
-        return 200;
-    }
+    return firstImage.secure_url || firstImage.url;
   };
 
   return (
     <Card
       sx={{
-        height: getCardHeight(),
-        cursor: 'pointer',
-        transition: 'all 0.3s ease',
+        height: 220,
+        display: 'flex',
+        flexDirection: 'column',
+        borderRadius: 1,
+        transition: 'all 0.2s ease-in-out',
+        border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+        boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
         position: 'relative',
-        '&:hover': {
-          transform: 'translateY(-4px)',
-          boxShadow: 6,
-        },
+        overflow: 'hidden',
+        backgroundColor: '#ffffff',
       }}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      onClick={handleCardClick}
     >
-      {/* Image Container */}
-      <Box sx={{ position: 'relative' }}>
-        <CardMedia
-          component="img"
-          height={getImageHeight()}
-          image={product.images?.[0] || '/images/default-avatar.png'}
-          alt={product.title}
-          onLoad={() => setImageLoaded(true)}
-          sx={{
-            objectFit: 'cover',
-            transition: 'transform 0.3s ease',
-            transform: isHovered ? 'scale(1.05)' : 'scale(1)',
-          }}
-        />
-
-        {/* Overlay Badges */}
-        <Box
-          sx={{
-            position: 'absolute',
-            top: 8,
-            left: 8,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 0.5,
-          }}
-        >
-          {product.isNew && (
-            <Chip
-              label="NEW"
-              size="small"
-              color="success"
-              sx={{ fontWeight: 600, fontSize: '0.7rem' }}
-            />
-          )}
-          {product.isFeatured && (
-            <Chip
-              label="FEATURED"
-              size="small"
-              color="primary"
-              sx={{ fontWeight: 600, fontSize: '0.7rem' }}
-            />
-          )}
-          {product.isTrending && (
-            <Chip
-              icon={<TrendingUp size={12} />}
-              label="TRENDING"
-              size="small"
-              color="warning"
-              sx={{ fontWeight: 600, fontSize: '0.7rem' }}
-            />
-          )}
-          {product.isNFT && (
-            <Chip
-              label="NFT"
-              size="small"
-              sx={{
-                background: 'linear-gradient(45deg, #FF6B6B, #4ECDC4)',
-                color: 'white',
-                fontWeight: 600,
-                fontSize: '0.7rem',
-              }}
-            />
-          )}
-        </Box>
-
-        {/* Top Right Actions */}
-        <Box
-          sx={{
-            position: 'absolute',
-            top: 8,
-            right: 8,
-            display: 'flex',
-            gap: 0.5,
-          }}
-        >
-          <Fade in={isHovered}>
-            <IconButton
-              size="small"
-              onClick={handleToggleFavorite}
-              sx={{
-                bgcolor: 'rgba(255, 255, 255, 0.9)',
-                '&:hover': { bgcolor: 'rgba(255, 255, 255, 1)' },
-              }}
-            >
-              <Heart
-                size={16}
-                fill={product.isFavorited ? '#f44336' : 'none'}
-                color={product.isFavorited ? '#f44336' : '#666'}
-              />
-            </IconButton>
-          </Fade>
-          <Fade in={isHovered}>
-            <IconButton
-              size="small"
-              onClick={handleMenuOpen}
-              sx={{
-                bgcolor: 'rgba(255, 255, 255, 0.9)',
-                '&:hover': { bgcolor: 'rgba(255, 255, 255, 1)' },
-              }}
-            >
-              <MoreVertical size={16} />
-            </IconButton>
-          </Fade>
-        </Box>
-
-        {/* Discount Badge */}
-        {product.discount && (
+      {/* Product Image - Fixed size container with exact dimensions */}
+      <Box sx={{ 
+        position: 'relative', 
+        height: 160, 
+        backgroundColor: '#f8f8f8',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden'
+      }}>
+        {!imageError ? (
+          <Image
+            src={getImageSrc()}
+            alt={product.name}
+            fill
+            style={{ 
+              objectFit: 'cover',
+              width: '100%',
+              height: '100%',
+            }}
+            onError={() => setImageError(true)}
+          />
+        ) : (
           <Box
             sx={{
-              position: 'absolute',
-              bottom: 8,
-              left: 8,
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: alpha(theme.palette.grey[300], 0.3),
             }}
           >
-            <Chip
-              label={`-${product.discount.percentage}%`}
-              size="small"
-              color="error"
-              sx={{ fontWeight: 600 }}
-            />
+            <AlertCircle size={24} color={theme.palette.text.secondary} />
           </Box>
         )}
 
-        {/* Quick Stats */}
-        <Fade in={isHovered}>
-          <Box
-            sx={{
-              position: 'absolute',
-              bottom: 8,
-              right: 8,
-              display: 'flex',
-              gap: 1,
-            }}
-          >
-            <Chip
-              icon={<Eye size={12} />}
-              label={product.views}
-              size="small"
-              sx={{
-                bgcolor: 'rgba(0, 0, 0, 0.7)',
-                color: 'white',
-                fontSize: '0.7rem',
-              }}
-            />
-            <Chip
-              icon={<Heart size={12} />}
-              label={product.favorites}
-              size="small"
-              sx={{
-                bgcolor: 'rgba(0, 0, 0, 0.7)',
-                color: 'white',
-                fontSize: '0.7rem',
-              }}
-            />
-          </Box>
-        </Fade>
+        {/* View Count */}
+        <Box
+          sx={{
+            position: 'absolute',
+            bottom: 4,
+            right: 4,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 0.25,
+            backgroundColor: alpha(theme.palette.common.black, 0.7),
+            color: 'white',
+            px: 0.5,
+            py: 0.25,
+            borderRadius: 0.5,
+            fontSize: '0.6rem',
+          }}
+        >
+          <Eye size={10} />
+          <Typography variant="caption" sx={{ color: 'white', fontSize: '0.6rem' }} component="span">
+            {product.views || 0}
+          </Typography>
+        </Box>
       </Box>
 
-      <CardContent sx={{ p: 2, height: 'calc(100% - 200px)', display: 'flex', flexDirection: 'column' }}>
-        {/* Seller Info */}
-        <Box display="flex" alignItems="center" gap={1} mb={1}>
-          <Avatar src={product.seller.avatar} sx={{ width: 24, height: 24 }}>
-            {product.seller.displayName[0]}
-          </Avatar>
-          <Typography variant="caption" color="text.secondary">
-            {product.seller.displayName}
-          </Typography>
-          {product.seller.isVerified && (
-            <Verified size={12} color="#1976d2" />
-          )}
-          <Box display="flex" alignItems="center" gap={0.5} ml="auto">
-            <FollowButton
-              user={product.seller}
-              variant="button"
-              size="small"
-              context="marketplace"
-            />
-            <Star size={12} fill="#ffc107" color="#ffc107" />
-            <Typography variant="caption" color="text.secondary">
-              {product.seller.rating.toFixed(1)}
-            </Typography>
+      {/* Price Only - Minimal display */}
+      <CardContent sx={{ flexGrow: 1, p: 1, pt: 0.5 }}>
+        <Box sx={{ mb: 0.5 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+            {/* For Rwanda users, show converted price as primary and original as secondary */}
+            {effectiveUserCurrency === 'RWF' && convertedPrice !== null ? (
+              <>
+                {/* Converted price in RWF as primary (more prominent) */}
+                <Typography 
+                  variant="subtitle2" 
+                  color="#B12704"
+                  sx={{ 
+                    fontWeight: 700,
+                    fontSize: '0.85rem',
+                  }}
+                  component="p"
+                >
+                  {isConverting 
+                    ? `Converting...` 
+                    : `${formatCurrencyAmount(convertedPrice, effectiveUserCurrency)}`}
+                </Typography>
+              </>
+            ) : (
+              <>
+                {/* Converted price in user's currency - Make it more visible */}
+                {convertedPrice !== null ? (
+                  <Typography 
+                    variant="subtitle2" 
+                    color="#B12704"
+                    sx={{ 
+                      fontWeight: 700,
+                      fontSize: '0.85rem',
+                    }}
+                    component="p"
+                  >
+                    {isConverting 
+                      ? `Converting...` 
+                      : `${formatCurrencyAmount(convertedPrice, effectiveUserCurrency)}`}
+                  </Typography>
+                ) : product.currency !== effectiveUserCurrency ? (
+                  <Typography 
+                    variant="subtitle2" 
+                    color="#B12704"
+                    sx={{ 
+                      fontWeight: 700,
+                      fontSize: '0.85rem',
+                      fontStyle: 'italic',
+                    }}
+                    component="p"
+                  >
+                    (Conversion failed)
+                  </Typography>
+                ) : (
+                  // Show original price when currencies are the same
+                  <Typography 
+                    variant="subtitle2" 
+                    color="#B12704"
+                    sx={{ 
+                      fontWeight: 700,
+                      fontSize: '0.85rem',
+                    }}
+                    component="p"
+                  >
+                    {product.currency === 'ETH' 
+                      ? `${product.price} ETH` 
+                      : product.currency === 'USD' 
+                        ? `$${product.price.toFixed(2)}` 
+                        : `${product.price} ${product.currency}`}
+                  </Typography>
+                )}
+              </>
+            )}
           </Box>
         </Box>
-
-        {/* Title */}
-        <Typography
-          variant="subtitle2"
-          fontWeight={600}
-          gutterBottom
-          sx={{
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            display: '-webkit-box',
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: 'vertical',
-            lineHeight: 1.2,
-            minHeight: '2.4em',
-          }}
-        >
-          {product.title}
-        </Typography>
-
-        {/* Rating and Reviews */}
-        <Box display="flex" alignItems="center" gap={1} mb={1}>
-          <Rating value={product.rating} precision={0.1} size="small" readOnly />
-          <Typography variant="caption" color="text.secondary">
-            ({product.reviewCount})
-          </Typography>
-        </Box>
-
-        {/* Features */}
-        <Box display="flex" flexWrap="wrap" gap={0.5} mb={1}>
-          {product.freeShipping && (
-            <Chip
-              icon={<Truck size={10} />}
-              label="Free Ship"
-              size="small"
-              variant="outlined"
-              sx={{ fontSize: '0.6rem', height: 20 }}
-            />
-          )}
-          {product.fastDelivery && (
-            <Chip
-              icon={<Zap size={10} />}
-              label="Fast"
-              size="small"
-              variant="outlined"
-              sx={{ fontSize: '0.6rem', height: 20 }}
-            />
-          )}
-          {product.auction?.isAuction && (
-            <Chip
-              icon={<Clock size={10} />}
-              label="Auction"
-              size="small"
-              variant="outlined"
-              color="warning"
-              sx={{ fontSize: '0.6rem', height: 20 }}
-            />
-          )}
-        </Box>
-
-        {/* Price */}
-        <Box display="flex" alignItems="center" gap={1} mb={2} mt="auto">
-          <Typography variant="h6" color="primary" fontWeight={700}>
-            {formatPrice(product.price, product.currency)}
-          </Typography>
-          {product.discount && (
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              sx={{ textDecoration: 'line-through' }}
-            >
-              {formatPrice(product.discount.originalPrice, product.currency)}
-            </Typography>
-          )}
-        </Box>
-
-        {/* Action Button */}
-        {product.auction?.isAuction ? (
-          <Button
-            fullWidth
-            variant="contained"
-            startIcon={<Clock size={16} />}
-            onClick={handleAddToCart}
-            disabled={!product.inStock}
-            sx={{ mt: 'auto' }}
-            color="warning"
-          >
-            Bid {formatPrice(product.auction.minBid, product.currency)}
-          </Button>
-        ) : (
-          <AddToCartButton
-            product={{
-              _id: product.id,
-              name: product.title,
-              price: product.price,
-              currency: product.currency,
-              isNFT: product.isNFT,
-              availability: product.inStock ? 'available' : 'unavailable'
-            }}
-            variant="contained"
-            size="medium"
-            fullWidth
-            showQuantityControls={false}
-            onAddToCart={() => onAddToCart?.(product.id)}
-            onViewCart={() => {
-              // Fire a DOM event that TopBar listens for to open the cart
-              if (typeof window !== 'undefined') {
-                window.dispatchEvent(new CustomEvent('cart:open'));
-              }
-            }}
-          />
-        )}
       </CardContent>
-
-      {/* Context Menu */}
-      <Menu
-        anchorEl={anchorEl}
-        open={Boolean(anchorEl)}
-        onClose={handleMenuClose}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <MenuItem onClick={handleShare}>
-          <ListItemIcon>
-            <Share2 size={16} />
-          </ListItemIcon>
-          <ListItemText>Share</ListItemText>
-        </MenuItem>
-        <MenuItem onClick={() => router.push(`/marketplace/seller/${product.seller.id}`)}>
-          <ListItemIcon>
-            <Eye size={16} />
-          </ListItemIcon>
-          <ListItemText>View Seller</ListItemText>
-        </MenuItem>
-        <MenuItem onClick={() => router.push(`/marketplace/category/${product.category}`)}>
-          <ListItemIcon>
-            <Award size={16} />
-          </ListItemIcon>
-          <ListItemText>Browse Category</ListItemText>
-        </MenuItem>
-        <MenuItem onClick={() => router.push(`/messages/new?seller=${product.seller.id}`)}>
-          <ListItemIcon>
-            <MessageCircle size={16} />
-          </ListItemIcon>
-          <ListItemText>Message Seller</ListItemText>
-        </MenuItem>
-      </Menu>
     </Card>
   );
 };

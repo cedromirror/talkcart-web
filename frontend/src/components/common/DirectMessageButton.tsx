@@ -40,16 +40,12 @@ export const DirectMessageButton: React.FC<DirectMessageButtonProps> = ({
   // Create conversation mutation
   const createConversationMutation = useMutation({
     mutationFn: async () => {
-      const response = await api.messages.createConversation({
-        participantIds: [targetUserId],
-        isGroup: false
-      });
-      return response.data;
+      return await api.messages.createConversation([targetUserId]);
     },
-    onSuccess: (data) => {
-      if (data.success) {
+    onSuccess: (data: any) => {
+      if (data?.success) {
         // Navigate to the conversation
-        router.push(`/messages?conversation=${data.data.id}`);
+        router.push(`/messages?conversation=${data.data?.id}`);
         toast.success('Conversation started!');
       }
     },
@@ -119,7 +115,12 @@ export const DirectMessageButton: React.FC<DirectMessageButtonProps> = ({
         </Tooltip>
 
         {/* Privacy Dialog */}
-        <Dialog open={showPrivacyDialog} onClose={() => setShowPrivacyDialog(false)}>
+        <Dialog 
+          open={showPrivacyDialog} 
+          onClose={() => setShowPrivacyDialog(false)}
+          disableEnforceFocus  // Prevents focus trapping issues
+          hideBackdrop={false}  // Ensure backdrop is properly handled
+        >
           <DialogTitle>
             <Box display="flex" alignItems="center" gap={1}>
               <MessageSquareOff size={24} />
@@ -179,7 +180,12 @@ export const DirectMessageButton: React.FC<DirectMessageButtonProps> = ({
       </Tooltip>
 
       {/* Privacy Dialog */}
-      <Dialog open={showPrivacyDialog} onClose={() => setShowPrivacyDialog(false)}>
+      <Dialog 
+        open={showPrivacyDialog} 
+        onClose={() => setShowPrivacyDialog(false)}
+        disableEnforceFocus  // Prevents focus trapping issues
+        hideBackdrop={false}  // Ensure backdrop is properly handled
+      >
         <DialogTitle>
           <Box display="flex" alignItems="center" gap={1}>
             <MessageSquareOff size={24} />

@@ -27,22 +27,19 @@ import {
     Copy,
     MoreVertical,
     Check,
-    CheckCheck,
-    Play,
-    Pause,
-    Download,
-    FileText,
-    Image as ImageIcon,
-    Video as VideoIcon,
-    Music,
-    File as FileIcon,
-    Volume2,
-    VolumeX
+    CheckCheck
 } from 'lucide-react';
 import { Message } from '@/types/message';
 import { formatDistanceToNow, format } from 'date-fns';
 import { useAuth } from '@/contexts/AuthContext';
 import VoiceMessageBubble from './VoiceMessageBubble';
+
+// Placeholder VoiceMessageBubble component if not exists
+const VoiceMessageBubblePlaceholder: React.FC<any> = (props) => (
+    <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 2 }}>
+        <Typography variant="body2">Voice Message: {props.filename}</Typography>
+    </Box>
+);
 
 interface EnhancedMessageBubbleV2Props {
     message: Message;
@@ -218,17 +215,11 @@ const EnhancedMessageBubbleV2: React.FC<EnhancedMessageBubbleV2Props> = ({
         }));
     };
 
-    const getMediaIcon = (type: string) => {
-        switch (type) {
-            case 'image': return <ImageIcon size={16} />;
-            case 'video': return <VideoIcon size={16} />;
-            case 'audio': return <Music size={16} />;
-            default: return <FileIcon size={16} />;
-        }
-    };
-
     const renderMediaContent = () => {
-        if (!message.media || message.media.length === 0) return null;
+        // Only render media content if message has media and is not a pure text message
+        if (!message.media || message.media.length === 0 || message.type === 'text') {
+            return null;
+        }
 
         return (
             <Box sx={{ mt: message.content ? 1 : 0 }}>
@@ -315,11 +306,9 @@ const EnhancedMessageBubbleV2: React.FC<EnhancedMessageBubbleV2Props> = ({
                                         onClick={() => window.open(media.url, '_blank')}
                                     >
                                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                            {getMediaIcon(media.type)}
                                             <Typography variant="body2" sx={{ flex: 1 }}>
                                                 {media.filename}
                                             </Typography>
-                                            <Download size={14} />
                                         </Box>
                                     </Paper>
                                 </Box>
@@ -331,6 +320,9 @@ const EnhancedMessageBubbleV2: React.FC<EnhancedMessageBubbleV2Props> = ({
     };
 
     const commonReactions = ['👍', '❤️', '😂', '😮', '😢', '😡'];
+
+    // If this is a pure text message, ensure no media content is rendered
+    const isTextOnlyMessage = message.type === 'text' || (!message.media || message.media.length === 0);
 
     // If this is a voice message (audio type), render it differently
     if (message.type === 'audio' && message.media && message.media.length > 0) {
@@ -348,7 +340,7 @@ const EnhancedMessageBubbleV2: React.FC<EnhancedMessageBubbleV2Props> = ({
                 {/* Avatar */}
                 {showAvatar && !message.isOwn && (
                     <Avatar
-                        src={message.sender.avatar}
+                        src={message.sender.avatar || undefined}
                         sx={{ width: 32, height: 32 }}
                     >
                         {message.sender.displayName.charAt(0).toUpperCase()}
@@ -424,19 +416,29 @@ const EnhancedMessageBubbleV2: React.FC<EnhancedMessageBubbleV2Props> = ({
             <Box
                 sx={{
                     display: 'flex',
-                    flexDirection: message.isOwn ? 'row' : 'row-reverse',
+                    flexDirection: message.isOwn ? 'row-reverse' : 'row',
                     alignItems: 'flex-end',
-                    gap: 1,
-                    mb: 0.5,
+                    gap: 2,
+                    mb: 2,
+                    px: 2,
+                    py: 1,
+                    position: 'relative',
                     '&:hover .message-actions': {
-                        opacity: 1
+                        opacity: 1,
+                        transform: 'translateX(0)'
+                    },
+                    '&:hover .message-bubble': {
+                        transform: 'translateY(-1px)',
+                        boxShadow: message.isOwn
+                            ? `0 12px 40px ${alpha(theme.palette.primary.main, 0.25)}, 0 0 0 1px ${alpha(theme.palette.primary.light, 0.3)}`
+                            : `0 8px 28px ${alpha(theme.palette.grey[500], 0.15)}, 0 0 0 1px ${alpha(theme.palette.divider, 0.25)}`
                     }
                 }}
             >
                 {/* Avatar */}
                 {showAvatar && !message.isOwn && (
                     <Avatar
-                        src={message.sender.avatar}
+                        src={message.sender.avatar || undefined}
                         sx={{ width: 32, height: 32 }}
                     >
                         {message.sender.displayName.charAt(0).toUpperCase()}
@@ -466,28 +468,53 @@ const EnhancedMessageBubbleV2: React.FC<EnhancedMessageBubbleV2Props> = ({
                         </Typography>
                     )}
 
-                    {/* Reply Preview */}
+                    {/* Enhanced Reply Preview */}
                     {message.replyTo && (
                         <Paper
                             elevation={0}
                             sx={{
-                                p: 1,
-                                mb: 0.5,
+                                p: 1.5,
+                                mb: 1,
                                 maxWidth: '100%',
-                                borderLeft: `3px solid ${theme.palette.primary.main}`,
-                                backgroundColor: alpha(theme.palette.background.paper, 0.5),
-                                borderRadius: 2
+                                borderLeft: `4px solid ${theme.palette.primary.main}`,
+                                background: `linear-gradient(90deg, ${alpha(theme.palette.primary.main, 0.08)} 0%, ${alpha(theme.palette.background.paper, 0.9)} 15%)`,
+                                borderRadius: '12px',
+                                backdropFilter: 'blur(8px)',
+                                border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                                position: 'relative',
+                                '&::before': {
+                                    content: '""',
+                                    position: 'absolute',
+                                    left: 0,
+                                    top: 0,
+                                    bottom: 0,
+                                    width: 4,
+                                    background: `linear-gradient(180deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
+                                    borderRadius: '0 4px 4px 0'
+                                }
                             }}
                         >
-                            <Typography variant="caption" color="primary" fontWeight="bold">
-                                {message.replyTo.sender?.displayName || 'Unknown'}
+                            <Typography
+                                variant="caption"
+                                sx={{
+                                    color: theme.palette.primary.main,
+                                    fontWeight: 700,
+                                    fontSize: '0.7rem',
+                                    display: 'block',
+                                    mb: 0.3
+                                }}
+                            >
+                                ↳ {message.replyTo.sender?.displayName || 'Unknown'}
                             </Typography>
                             <Typography
                                 variant="body2"
                                 sx={{
                                     overflow: 'hidden',
                                     textOverflow: 'ellipsis',
-                                    whiteSpace: 'nowrap'
+                                    whiteSpace: 'nowrap',
+                                    fontSize: '0.8rem',
+                                    color: theme.palette.text.secondary,
+                                    fontStyle: 'italic'
                                 }}
                             >
                                 {message.replyTo.content}
@@ -498,148 +525,367 @@ const EnhancedMessageBubbleV2: React.FC<EnhancedMessageBubbleV2Props> = ({
                     {/* Message Bubble */}
                     <Box sx={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 1 }}>
                         <Paper
+                            className="message-bubble"
                             elevation={0}
                             sx={{
-                                p: message.content ? 1.5 : 0,
-                                borderRadius: 3,
-                                backgroundColor: message.isOwn
-                                    ? theme.palette.primary.main
-                                    : theme.palette.background.paper,
+                                p: message.content ? { xs: 2, sm: 2.5 } : 1.5,
+                                borderRadius: message.isOwn 
+                                    ? '24px 24px 8px 24px' 
+                                    : '24px 24px 24px 8px',
+                                background: message.isOwn
+                                    ? `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 60%, ${alpha(theme.palette.primary.main, 0.9)} 100%)`
+                                    : theme.palette.mode === 'dark'
+                                        ? `linear-gradient(135deg, ${alpha(theme.palette.background.paper, 0.95)} 0%, ${alpha(theme.palette.grey[800], 0.9)} 70%, ${alpha(theme.palette.background.default, 0.8)} 100%)`
+                                        : `linear-gradient(135deg, ${theme.palette.common.white} 0%, ${alpha(theme.palette.grey[50], 0.8)} 70%, ${alpha(theme.palette.background.paper, 0.9)} 100%)`,
+                                backdropFilter: 'blur(24px)',
+                                border: message.isOwn
+                                    ? `1px solid ${alpha(theme.palette.primary.light, 0.5)}`
+                                    : `1px solid ${alpha(theme.palette.divider, 0.4)}`,
+                                boxShadow: message.isOwn
+                                    ? `0 8px 40px ${alpha(theme.palette.primary.main, 0.2)}, 0 2px 16px ${alpha(theme.palette.primary.dark, 0.15)}, inset 0 1px 0 ${alpha(theme.palette.primary.light, 0.2)}`
+                                    : `0 4px 24px ${alpha(theme.palette.grey[500], 0.12)}, 0 2px 8px ${alpha(theme.palette.common.black, 0.08)}, inset 0 1px 0 ${alpha(theme.palette.common.white, 0.5)}`,
                                 color: message.isOwn
                                     ? theme.palette.primary.contrastText
                                     : theme.palette.text.primary,
-                                border: message.isOwn
-                                    ? 'none'
-                                    : `1px solid ${theme.palette.divider}`,
                                 position: 'relative',
-                                minWidth: message.content ? 'auto' : 0
+                                minWidth: message.content ? { xs: 'auto', sm: 120 } : 0,
+                                maxWidth: { xs: '85%', sm: '75%', md: '70%' },
+                                transition: 'all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                                '&::after': message.isOwn ? {
+                                    content: '""',
+                                    position: 'absolute',
+                                    bottom: 8,
+                                    right: -8,
+                                    width: 0,
+                                    height: 0,
+                                    borderStyle: 'solid',
+                                    borderWidth: '8px 0 0 12px',
+                                    borderColor: `transparent transparent transparent ${theme.palette.primary.main}`,
+                                    filter: 'drop-shadow(2px 2px 4px rgba(0,0,0,0.1))'
+                                } : {
+                                    content: '""',
+                                    position: 'absolute',
+                                    bottom: 8,
+                                    left: -8,
+                                    width: 0,
+                                    height: 0,
+                                    borderStyle: 'solid',
+                                    borderWidth: '8px 12px 0 0',
+                                    borderColor: `transparent ${theme.palette.mode === 'dark' ? alpha(theme.palette.background.paper, 0.95) : theme.palette.common.white} transparent transparent`,
+                                    filter: 'drop-shadow(-2px 2px 4px rgba(0,0,0,0.1))'
+                                }
                             }}
                         >
-                            {/* Forwarded Message Indicator */}
+                            {/* Enhanced Forwarded Message Indicator */}
                             {message.isForwarded && (
-                                <Typography
-                                    variant="caption"
+                                <Box
                                     sx={{
-                                        display: 'block',
-                                        fontStyle: 'italic',
-                                        opacity: 0.7,
-                                        mb: 0.5
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 0.8,
+                                        mb: 1.2,
+                                        p: 1,
+                                        borderRadius: '8px',
+                                        background: alpha(theme.palette.info.main, 0.08),
+                                        border: `1px solid ${alpha(theme.palette.info.main, 0.2)}`,
+                                        backdropFilter: 'blur(4px)'
                                     }}
                                 >
-                                    Forwarded
-                                </Typography>
+                                    <Forward size={12} color={theme.palette.info.main} />
+                                    <Typography
+                                        variant="caption"
+                                        sx={{
+                                            fontStyle: 'italic',
+                                            fontSize: '0.7rem',
+                                            fontWeight: 600,
+                                            color: theme.palette.info.main,
+                                            letterSpacing: 0.2
+                                        }}
+                                    >
+                                        Forwarded Message
+                                    </Typography>
+                                </Box>
                             )}
 
-                            {/* Message Content */}
+                            {/* Enhanced Message Content */}
                             {message.isDeleted ? (
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, opacity: 0.6 }}>
+                                    <Typography
+                                        variant="body2"
+                                        sx={{
+                                            fontStyle: 'italic',
+                                            fontSize: '0.85rem',
+                                            color: message.isOwn
+                                                ? alpha(theme.palette.primary.contrastText, 0.7)
+                                                : theme.palette.text.secondary
+                                        }}
+                                    >
+                                        🚫 This message was deleted
+                                    </Typography>
+                                </Box>
+                            ) : isEditing ? (
+                                <Box sx={{ position: 'relative' }}>
+                                    <input
+                                        type="text"
+                                        value={editContent}
+                                        onChange={(e) => setEditContent(e.target.value)}
+                                        onKeyPress={(e) => {
+                                            if (e.key === 'Enter') {
+                                                handleEdit();
+                                            } else if (e.key === 'Escape') {
+                                                setIsEditing(false);
+                                                setEditContent(message.content);
+                                            }
+                                        }}
+                                        onBlur={handleEdit}
+                                        autoFocus
+                                        style={{
+                                            background: 'transparent',
+                                            border: `1px solid ${alpha(theme.palette.primary.main, 0.3)}`,
+                                            borderRadius: '8px',
+                                            padding: '8px 12px',
+                                            outline: 'none',
+                                            color: 'inherit',
+                                            font: 'inherit',
+                                            width: '100%',
+                                            fontSize: '14px'
+                                        }}
+                                    />
+                                    <Typography
+                                        variant="caption"
+                                        sx={{
+                                            position: 'absolute',
+                                            bottom: -20,
+                                            right: 0,
+                                            fontSize: '0.6rem',
+                                            opacity: 0.7,
+                                            color: message.isOwn
+                                                ? alpha(theme.palette.primary.contrastText, 0.6)
+                                                : theme.palette.text.secondary
+                                        }}
+                                    >
+                                        Press Enter to save, Esc to cancel
+                                    </Typography>
+                                </Box>
+                            ) : message.content ? (
                                 <Typography
                                     variant="body2"
-                                    sx={{ fontStyle: 'italic', opacity: 0.7 }}
+                                    sx={{
+                                        wordBreak: 'break-word',
+                                        lineHeight: 1.6,
+                                        fontSize: { xs: '14px', sm: '15px' },
+                                        fontWeight: 400,
+                                        letterSpacing: 0.3,
+                                        color: message.isOwn
+                                            ? theme.palette.primary.contrastText
+                                            : theme.palette.text.primary,
+                                        textShadow: message.isOwn
+                                            ? `0 1px 2px ${alpha(theme.palette.common.black, 0.1)}`
+                                            : 'none'
+                                    }}
                                 >
-                                    This message was deleted
-                                </Typography>
-                            ) : isEditing ? (
-                                <input
-                                    type="text"
-                                    value={editContent}
-                                    onChange={(e) => setEditContent(e.target.value)}
-                                    onKeyPress={(e) => {
-                                        if (e.key === 'Enter') {
-                                            handleEdit();
-                                        } else if (e.key === 'Escape') {
-                                            setIsEditing(false);
-                                            setEditContent(message.content);
-                                        }
-                                    }}
-                                    onBlur={handleEdit}
-                                    autoFocus
-                                    style={{
-                                        background: 'transparent',
-                                        border: 'none',
-                                        outline: 'none',
-                                        color: 'inherit',
-                                        font: 'inherit',
-                                        width: '100%'
-                                    }}
-                                />
-                            ) : message.content ? (
-                                <Typography variant="body2" sx={{ wordBreak: 'break-word' }}>
                                     {message.content}
                                 </Typography>
                             ) : null}
 
-                            {/* Media Content */}
-                            {renderMediaContent()}
+                            {/* Enhanced Media Content Section */}
+                            {!isTextOnlyMessage && message.type !== 'text' && (
+                                <Box
+                                    sx={{
+                                        mt: message.content ? 1.5 : 0,
+                                        borderRadius: '16px',
+                                        overflow: 'hidden',
+                                        background: alpha(theme.palette.background.paper, 0.3),
+                                        backdropFilter: 'blur(8px)',
+                                        border: `1px solid ${alpha(theme.palette.divider, 0.2)}`,
+                                        p: 0.5
+                                    }}
+                                >
+                                    {renderMediaContent()}
+                                </Box>
+                            )}
 
-                            {/* Message Info */}
+                            {/* Enhanced Message Info */}
                             {message.content && (
                                 <Stack
                                     direction="row"
                                     alignItems="center"
-                                    spacing={0.5}
-                                    sx={{ mt: 0.5, justifyContent: 'flex-end' }}
+                                    spacing={1}
+                                    sx={{
+                                        mt: 1.5,
+                                        justifyContent: message.isOwn ? 'flex-end' : 'flex-start',
+                                        opacity: 0.85
+                                    }}
                                 >
                                     {message.isEdited && (
+                                        <Chip
+                                            label="edited"
+                                            size="small"
+                                            variant="outlined"
+                                            sx={{
+                                                height: 18,
+                                                fontSize: '0.65rem',
+                                                fontStyle: 'italic',
+                                                borderColor: message.isOwn
+                                                    ? alpha(theme.palette.primary.contrastText, 0.3)
+                                                    : alpha(theme.palette.text.secondary, 0.3),
+                                                color: message.isOwn
+                                                    ? alpha(theme.palette.primary.contrastText, 0.7)
+                                                    : theme.palette.text.secondary,
+                                                backgroundColor: 'transparent'
+                                            }}
+                                        />
+                                    )}
+                                    {!message.isOwn && (
                                         <Typography
                                             variant="caption"
-                                            sx={{ opacity: 0.7, fontSize: '0.7rem' }}
+                                            sx={{
+                                                opacity: 0.9,
+                                                fontSize: '0.7rem',
+                                                fontWeight: 600,
+                                                color: theme.palette.text.secondary,
+                                                letterSpacing: 0.2
+                                            }}
                                         >
-                                            edited
+                                            {getMessageTime()}
                                         </Typography>
                                     )}
-                                    <Typography
-                                        variant="caption"
-                                        sx={{ opacity: 0.7, fontSize: '0.7rem' }}
-                                    >
-                                        {getMessageTime()}
-                                    </Typography>
-                                    {getReadStatus()}
+                                    {message.isOwn && (
+                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                            <Typography
+                                                variant="caption"
+                                                sx={{
+                                                    opacity: 0.9,
+                                                    fontSize: '0.7rem',
+                                                    fontWeight: 600,
+                                                    color: alpha(theme.palette.primary.contrastText, 0.8),
+                                                    letterSpacing: 0.2
+                                                }}
+                                            >
+                                                {getMessageTime()}
+                                            </Typography>
+                                            <Box sx={{ ml: 0.5 }}>
+                                                {getReadStatus()}
+                                            </Box>
+                                        </Box>
+                                    )}
                                 </Stack>
                             )}
                         </Paper>
 
-                        {/* Message Actions */}
+                        {/* Enhanced Message Actions */}
                         <Box
                             className="message-actions"
                             sx={{
                                 opacity: 0,
-                                transition: 'opacity 0.2s',
+                                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                                 display: 'flex',
-                                gap: 0.5
+                                flexDirection: 'column',
+                                gap: 0.5,
+                                position: 'absolute',
+                                [message.isOwn ? 'left' : 'right']: -50,
+                                top: '50%',
+                                transform: `translateY(-50%) ${message.isOwn ? 'translateX(10px)' : 'translateX(-10px)'}`,
+                                zIndex: 10
                             }}
                         >
-                            <IconButton
-                                size="small"
-                                onClick={() => onReply?.()}
-                                sx={{ bgcolor: 'background.paper', boxShadow: 1 }}
-                                title="Reply"
-                            >
-                                <Reply size={14} />
-                            </IconButton>
-                            <IconButton
-                                size="small"
-                                onClick={() => setShowReactions(!showReactions)}
-                                sx={{ bgcolor: 'background.paper', boxShadow: 1 }}
-                                title="React"
-                            >
-                                <Typography sx={{ fontSize: '0.8rem' }}>😊</Typography>
-                            </IconButton>
-                            <IconButton
-                                size="small"
-                                onClick={() => onForward?.()}
-                                sx={{ bgcolor: 'background.paper', boxShadow: 1 }}
-                                title="Forward"
-                            >
-                                <Forward size={14} />
-                            </IconButton>
-                            <IconButton
-                                size="small"
-                                onClick={handleMenuOpen}
-                                sx={{ bgcolor: 'background.paper', boxShadow: 1 }}
-                                title="More options"
-                            >
-                                <MoreVertical size={14} />
-                            </IconButton>
+                            <Tooltip title="Reply" placement="left">
+                                <IconButton
+                                    size="small"
+                                    onClick={() => onReply?.()}
+                                    sx={{
+                                        width: 36,
+                                        height: 36,
+                                        bgcolor: alpha(theme.palette.background.paper, 0.98),
+                                        backdropFilter: 'blur(20px)',
+                                        boxShadow: `0 4px 20px ${alpha(theme.palette.common.black, 0.12)}, 0 0 0 1px ${alpha(theme.palette.divider, 0.1)}`,
+                                        border: `1px solid ${alpha(theme.palette.primary.main, 0.1)}`,
+                                        color: theme.palette.primary.main,
+                                        '&:hover': {
+                                            bgcolor: alpha(theme.palette.primary.main, 0.08),
+                                            transform: 'scale(1.15) rotate(-5deg)',
+                                            boxShadow: `0 8px 25px ${alpha(theme.palette.primary.main, 0.2)}`,
+                                            border: `1px solid ${alpha(theme.palette.primary.main, 0.3)}`
+                                        },
+                                        transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
+                                    }}
+                                >
+                                    <Reply size={16} />
+                                </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Add Reaction" placement="left">
+                                <IconButton
+                                    size="small"
+                                    onClick={() => setShowReactions(!showReactions)}
+                                    sx={{
+                                        width: 36,
+                                        height: 36,
+                                        bgcolor: alpha(theme.palette.background.paper, 0.98),
+                                        backdropFilter: 'blur(20px)',
+                                        boxShadow: `0 4px 20px ${alpha(theme.palette.common.black, 0.12)}, 0 0 0 1px ${alpha(theme.palette.divider, 0.1)}`,
+                                        border: `1px solid ${alpha(theme.palette.secondary.main, 0.1)}`,
+                                        color: theme.palette.secondary.main,
+                                        '&:hover': {
+                                            bgcolor: alpha(theme.palette.secondary.main, 0.08),
+                                            transform: 'scale(1.15) rotate(5deg)',
+                                            boxShadow: `0 8px 25px ${alpha(theme.palette.secondary.main, 0.2)}`,
+                                            border: `1px solid ${alpha(theme.palette.secondary.main, 0.3)}`
+                                        },
+                                        transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
+                                    }}
+                                >
+                                    <Typography sx={{ fontSize: '1.1rem' }}>😊</Typography>
+                                </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Forward" placement="left">
+                                <IconButton
+                                    size="small"
+                                    onClick={() => onForward?.()}
+                                    sx={{
+                                        width: 36,
+                                        height: 36,
+                                        bgcolor: alpha(theme.palette.background.paper, 0.98),
+                                        backdropFilter: 'blur(20px)',
+                                        boxShadow: `0 4px 20px ${alpha(theme.palette.common.black, 0.12)}, 0 0 0 1px ${alpha(theme.palette.divider, 0.1)}`,
+                                        border: `1px solid ${alpha(theme.palette.info.main, 0.1)}`,
+                                        color: theme.palette.info.main,
+                                        '&:hover': {
+                                            bgcolor: alpha(theme.palette.info.main, 0.08),
+                                            transform: 'scale(1.15) rotate(-5deg)',
+                                            boxShadow: `0 8px 25px ${alpha(theme.palette.info.main, 0.2)}`,
+                                            border: `1px solid ${alpha(theme.palette.info.main, 0.3)}`
+                                        },
+                                        transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
+                                    }}
+                                >
+                                    <Forward size={16} />
+                                </IconButton>
+                            </Tooltip>
+                            <Tooltip title="More Options" placement="left">
+                                <IconButton
+                                    size="small"
+                                    onClick={handleMenuOpen}
+                                    sx={{
+                                        width: 36,
+                                        height: 36,
+                                        bgcolor: alpha(theme.palette.background.paper, 0.98),
+                                        backdropFilter: 'blur(20px)',
+                                        boxShadow: `0 4px 20px ${alpha(theme.palette.common.black, 0.12)}, 0 0 0 1px ${alpha(theme.palette.divider, 0.1)}`,
+                                        border: `1px solid ${alpha(theme.palette.text.secondary, 0.1)}`,
+                                        color: theme.palette.text.secondary,
+                                        '&:hover': {
+                                            bgcolor: alpha(theme.palette.text.secondary, 0.08),
+                                            transform: 'scale(1.15) rotate(5deg)',
+                                            boxShadow: `0 8px 25px ${alpha(theme.palette.text.secondary, 0.15)}`,
+                                            border: `1px solid ${alpha(theme.palette.text.secondary, 0.3)}`,
+                                            color: theme.palette.text.primary
+                                        },
+                                        transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
+                                    }}
+                                >
+                                    <MoreVertical size={16} />
+                                </IconButton>
+                            </Tooltip>
                         </Box>
                     </Box>
 
@@ -668,30 +914,101 @@ const EnhancedMessageBubbleV2: React.FC<EnhancedMessageBubbleV2Props> = ({
                         </Stack>
                     )}
 
-                    {/* Reaction Picker */}
+                    {/* Enhanced Reaction Picker */}
                     {showReactions && (
                         <Paper
-                            elevation={3}
+                            elevation={8}
                             sx={{
-                                p: 1,
-                                mt: 1,
+                                p: 2,
+                                mt: 1.5,
                                 display: 'flex',
-                                gap: 0.5,
-                                borderRadius: 2
+                                gap: 1,
+                                borderRadius: '20px',
+                                background: `linear-gradient(135deg, ${alpha(theme.palette.background.paper, 0.98)} 0%, ${alpha(theme.palette.background.default, 0.95)} 100%)`,
+                                backdropFilter: 'blur(24px)',
+                                border: `1px solid ${alpha(theme.palette.divider, 0.2)}`,
+                                boxShadow: `0 12px 32px ${alpha(theme.palette.common.black, 0.15)}, 0 0 0 1px ${alpha(theme.palette.primary.main, 0.1)}`,
+                                animation: 'slideInUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                                '@keyframes slideInUp': {
+                                    '0%': {
+                                        opacity: 0,
+                                        transform: 'translateY(20px) scale(0.9)'
+                                    },
+                                    '100%': {
+                                        opacity: 1,
+                                        transform: 'translateY(0) scale(1)'
+                                    }
+                                }
                             }}
                         >
-                            {commonReactions.map((emoji) => (
+                            {commonReactions.map((emoji, index) => (
                                 <IconButton
                                     key={emoji}
-                                    size="small"
+                                    size="medium"
                                     onClick={() => handleReaction(emoji)}
+                                    sx={{
+                                        width: 44,
+                                        height: 44,
+                                        borderRadius: '50%',
+                                        border: `2px solid transparent`,
+                                        background: `linear-gradient(135deg, ${alpha(theme.palette.background.paper, 0.8)}, ${alpha(theme.palette.grey[100], 0.6)})`,
+                                        transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                                        animation: `popIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) ${index * 0.05}s both`,
+                                        '&:hover': {
+                                            backgroundColor: alpha(theme.palette.primary.main, 0.1),
+                                            transform: 'scale(1.2) rotate(10deg)',
+                                            border: `2px solid ${alpha(theme.palette.primary.main, 0.3)}`,
+                                            boxShadow: `0 8px 20px ${alpha(theme.palette.primary.main, 0.25)}`
+                                        },
+                                        '@keyframes popIn': {
+                                            '0%': {
+                                                opacity: 0,
+                                                transform: 'scale(0.3) rotate(-10deg)'
+                                            },
+                                            '80%': {
+                                                transform: 'scale(1.1) rotate(5deg)'
+                                            },
+                                            '100%': {
+                                                opacity: 1,
+                                                transform: 'scale(1) rotate(0deg)'
+                                            }
+                                        }
+                                    }}
                                 >
-                                    <Typography sx={{ fontSize: '1rem' }}>{emoji}</Typography>
+                                    <Typography sx={{ fontSize: '1.3rem' }}>{emoji}</Typography>
                                 </IconButton>
                             ))}
                         </Paper>
                     )}
                 </Box>
+
+                {/* Sent message timestamp and status for own messages */}
+                {message.isOwn && (
+                    <Box
+                        sx={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'flex-end',
+                            gap: 0.5,
+                            ml: 1
+                        }}
+                    >
+                        <Typography
+                            variant="caption"
+                            sx={{
+                                fontSize: '0.65rem',
+                                fontWeight: 500,
+                                color: theme.palette.text.secondary,
+                                opacity: 0.8
+                            }}
+                        >
+                            {getMessageTime()}
+                        </Typography>
+                        <Box sx={{ color: theme.palette.text.secondary }}>
+                            {getReadStatus()}
+                        </Box>
+                    </Box>
+                )}
 
                 {/* Context Menu */}
                 <Menu

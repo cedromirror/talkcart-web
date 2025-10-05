@@ -37,6 +37,8 @@ const CallManager: React.FC<CallManagerProps> = ({ conversationId }) => {
         activeCalls,
         loading,
         error,
+        isModerator,
+        isLocked,
         initiateCall,
         acceptCall,
         declineCall,
@@ -51,7 +53,14 @@ const CallManager: React.FC<CallManagerProps> = ({ conversationId }) => {
         markMissedCallsAsSeen,
         reportCallQuality,
         clearIncomingCall,
-        clearError
+        clearError,
+        inviteParticipants,
+        removeParticipant,
+        muteAllParticipants,
+        promoteParticipant,
+        lockCall,
+        unlockCall,
+        endCallForAll
     } = useCall();
 
     const [showMissedCalls, setShowMissedCalls] = useState(false);
@@ -187,12 +196,21 @@ const CallManager: React.FC<CallManagerProps> = ({ conversationId }) => {
                 isAudioEnabled={isAudioEnabled}
                 isVideoEnabled={isVideoEnabled}
                 isRecording={isRecording}
+                isLocked={isLocked}
+                isModerator={isModerator}
                 onEndCall={handleEndCall}
                 onToggleAudio={toggleAudio}
                 onToggleVideo={toggleVideo}
                 onStartRecording={startRecording}
                 onStopRecording={stopRecording}
                 onReportQuality={handleReportCallQuality}
+                onInviteParticipants={inviteParticipants}
+                onRemoveParticipant={removeParticipant}
+                onMuteAllParticipants={muteAllParticipants}
+                onPromoteParticipant={promoteParticipant}
+                onLockCall={lockCall}
+                onUnlockCall={unlockCall}
+                onEndCallForAll={endCallForAll}
             />
 
             {/* Incoming Call Modal */}

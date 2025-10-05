@@ -1,23 +1,17 @@
 @echo off
-echo Fixing Next.js permissions...
+echo Fixing permissions for TalkCart frontend...
 
-REM Stop Node processes
-taskkill /f /im node.exe >nul 2>&1
-
-REM Remove .next directory
+echo Removing .next directory...
 if exist ".next" (
     rmdir /s /q ".next"
-    echo Removed .next directory
+    echo Successfully removed .next directory
+) else (
+    echo .next directory not found
 )
 
-REM Clear npm cache
-npm cache clean --force >nul 2>&1
-echo Cleared npm cache
+echo Cleaning npm cache...
+npm cache clean --force
 
-REM Set environment variables
-set NEXT_TELEMETRY_DISABLED=1
-set NODE_OPTIONS=--max-old-space-size=4096
-
-echo Environment variables set
-echo You can now run 'npm run dev' safely
+echo Permission fix complete!
+echo You can now run 'npm run dev' to start the development server
 pause

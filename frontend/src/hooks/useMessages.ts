@@ -8,6 +8,7 @@ import messageService, {
 import { getConversations } from '@/services/conversationApi';
 import { Message } from '@/types/message';
 import toast from 'react-hot-toast';
+import socketService from '@/services/socketService';
 
 export interface UseMessagesReturn {
   conversations: ConversationData[];
@@ -480,7 +481,7 @@ export const useMessages = (): UseMessagesReturn => {
 
   // Add reaction to message
   const addReaction = useCallback(async (messageId: string, emoji: string): Promise<boolean> => {
-    if (!isAuthenticated || !user) return false;
+    if (!isAuthenticated) return false;
 
     try {
       setError(null);
@@ -488,11 +489,17 @@ export const useMessages = (): UseMessagesReturn => {
       const response = await messageService.addReaction(messageId, { emoji });
       const { reactions } = response.data;
 
-      // Update message in list
+      // Update message in list (convert createdAt to timestamp to match MessageReaction type)
+      const formattedReactions = reactions.map((reaction: any) => ({
+        userId: reaction.userId,
+        emoji: reaction.emoji,
+        timestamp: reaction.createdAt
+      }));
+
       setMessages(prev =>
         (prev || []).map(msg =>
           msg.id === messageId
-            ? { ...msg, reactions }
+            ? { ...msg, reactions: formattedReactions }
             : msg
         )
       );
@@ -783,197 +790,200 @@ export const useMessages = (): UseMessagesReturn => {
     // Connect to socket
     const token = localStorage.getItem('token');
     if (token) {
-      import('@/services/socketService').then(({ default: socketService }) => {
-        socketService.connect(token, user.id).catch(err => {
-          console.error('Failed to connect to socket:', err);
-        });
+      socketService.connect(token, user.id).catch(err => {
+        console.error('Failed to connect to socket:', err);
+      });
 
-        // Listen for new messages
-        socketService.on('message:new', (data: any) => {
-          const { message, conversationId } = data;
+      // Listen for new messages
+      socketService.on('message:new', (data: any) => {
+        const { message, conversationId } = data;
 
-          // Update messages if active conversation, avoid duplicates by id
-          if (activeConversation && activeConversation.id === conversationId) {
-            const formattedMessage = {
-              ...message,
-              isOwn: message.senderId === user?.id,
-              isRead: message.readBy?.some(read => read.userId === user?.id) || message.senderId === user?.id
+        // Update messages if active conversation, avoid duplicates by id
+        if (activeConversation && activeConversation.id === conversationId) {
+          const formattedMessage = {
+            ...message,
+            isOwn: message.senderId === user?.id,
+            isRead: message.readBy?.some((read: any) => read.userId === user?.id) || message.senderId === user?.id
+          };
+          setMessages(prev => (prev.some(m => m.id === formattedMessage.id) ? prev : [...prev, formattedMessage]));
+        }
+
+        // Update conversation list
+        setConversations(prev => {
+          const updatedConversations = [...prev];
+          const index = updatedConversations.findIndex(c => c.id === conversationId);
+
+          if (index !== -1) {
+            const conversation = { ...updatedConversations[index] };
+            conversation.lastMessage = {
+              id: message.id,
+              content: message.content,
+              type: message.type,
+              senderId: message.senderId,
+              createdAt: message.createdAt
             };
-            setMessages(prev => (prev.some(m => m.id === formattedMessage.id) ? prev : [...prev, formattedMessage]));
-          }
+            conversation.lastActivity = message.createdAt;
 
-          // Update conversation list
-          setConversations(prev => {
-            const updatedConversations = [...prev];
-            const index = updatedConversations.findIndex(c => c.id === conversationId);
-
-            if (index !== -1) {
-              const conversation = { ...updatedConversations[index] };
-              conversation.lastMessage = {
-                id: message.id,
-                content: message.content,
-                type: message.type,
-                senderId: message.senderId,
-                createdAt: message.createdAt
-              };
-              conversation.lastActivity = message.createdAt;
-
-              // Increment unread count if not active conversation
-              if (!activeConversation || activeConversation.id !== conversationId) {
-                conversation.unreadCount = (conversation.unreadCount || 0) + 1;
-              }
-
-              // Move to top of list
-              updatedConversations.splice(index, 1);
-              updatedConversations.unshift(conversation);
+            // Increment unread count if not active conversation
+            if (!activeConversation || activeConversation.id !== conversationId) {
+              conversation.unreadCount = (conversation.unreadCount || 0) + 1;
             }
 
-            return updatedConversations;
-          });
-
-          // Play notification sound for incoming messages
-          if (typeof window !== 'undefined' && message.senderId !== user?.id) {
-            playMessageSound();
+            // Move to top of list
+            updatedConversations.splice(index, 1);
+            updatedConversations.unshift(conversation);
           }
+
+          return updatedConversations;
         });
 
-        // Listen for message updates
-        socketService.on('message:update', (data: any) => {
-          const { message } = data;
-
-          // Update message in list
-          setMessages(prev =>
-            (prev || []).map(msg =>
-              msg.id === message.id ? message : msg
-            )
-          );
-        });
-
-        // Listen for message deletions
-        socketService.on('message:delete', (data: any) => {
-          const { messageId } = data;
-
-          // Remove message from list
-          setMessages(prev =>
-            (prev || []).filter(msg => msg.id !== messageId)
-          );
-        });
-
-        // Listen for message reactions
-        socketService.on('message:reaction', (data: any) => {
-          const { messageId, reactions } = data;
-
-          // Update message reactions
-          setMessages(prev =>
-            (prev || []).map(msg =>
-              msg.id === messageId
-                ? { ...msg, reactions }
-                : msg
-            )
-          );
-        });
-
-        // Listen for message read receipts
-        socketService.on('message:read', (data: any) => {
-          const { messageId, userId, readAt } = data;
-
-          // Update message read receipts
-          setMessages(prev =>
-            (prev || []).map(msg => {
-              if (msg.id === messageId) {
-                const existingRead = msg.readBy?.find(read => read.userId === userId);
-                if (!existingRead) {
-                  return {
-                    ...msg,
-                    readBy: [...(msg.readBy || []), { userId, readAt }]
-                  };
-                }
-              }
-              return msg;
-            })
-          );
-        });
-
-        // Listen for typing indicators
-        socketService.on('typing', (data: any) => {
-          const { conversationId, userId, isTyping } = data;
-
-          setTypingUsers(prev => {
-            const conversationTypers = [...(prev[conversationId] || [])];
-
-            if (isTyping && !conversationTypers.includes(userId)) {
-              conversationTypers.push(userId);
-            } else if (!isTyping) {
-              const index = conversationTypers.indexOf(userId);
-              if (index !== -1) {
-                conversationTypers.splice(index, 1);
-              }
-            }
-
-            return {
-              ...prev,
-              [conversationId]: conversationTypers
-            };
-          });
-        });
-
-        // Listen for new conversations
-        socketService.on('conversation:new', (data: any) => {
-          const { conversation } = data;
-
-          // Add to conversations list
-          setConversations(prev => [conversation, ...(prev || [])]);
-        });
-
-        // Listen for conversation updates
-        socketService.on('conversation:update', (data: any) => {
-          const { conversation } = data;
-
-          // Update conversation in list
-          setConversations(prev =>
-            (prev || []).map(c =>
-              c.id === conversation.id ? conversation : c
-            )
-          );
-
-          // Update active conversation if needed
-          if (activeConversation && activeConversation.id === conversation.id) {
-            setActiveConversation(conversation);
-          }
-        });
-
-        // Listen for user online status
-        socketService.on('user:status', (data: any) => {
-          const { userId, isOnline, lastSeen } = data;
-
-          // Update user status in conversations
-          setConversations(prev =>
-            (prev || []).map(conv => ({
-              ...conv,
-              participants: (conv.participants || []).map(p =>
-                p.id === userId
-                  ? { ...p, isOnline, lastSeen }
-                  : p
-              )
-            }))
-          );
-        });
-
-        // Join conversation room if active conversation
-        if (activeConversation) {
-          socketService.joinConversation(activeConversation.id);
+        // Play notification sound for incoming messages
+        if (typeof window !== 'undefined' && message.senderId !== user?.id) {
+          playMessageSound();
         }
       });
+
+      // Listen for message updates
+      socketService.on('message:update', (data: any) => {
+        const { message } = data;
+
+        // Update message in list
+        setMessages(prev =>
+          (prev || []).map(msg =>
+            msg.id === message.id ? { ...msg, ...message } : msg
+          )
+        );
+      });
+
+      // Listen for message deletions
+      socketService.on('message:delete', (data: any) => {
+        const { messageId } = data;
+
+        // Remove message from list
+        setMessages(prev =>
+          (prev || []).filter(msg => msg.id !== messageId)
+        );
+      });
+
+      // Listen for message reactions
+      socketService.on('message:reaction', (data: any) => {
+        const { messageId, reactions } = data;
+
+        // Update message reactions (convert createdAt to timestamp to match MessageReaction type)
+        const formattedReactions = reactions.map((reaction: any) => ({
+          userId: reaction.userId,
+          emoji: reaction.emoji,
+          timestamp: reaction.createdAt
+        }));
+
+        // Update message reactions
+        setMessages(prev =>
+          (prev || []).map(msg =>
+            msg.id === messageId
+              ? { ...msg, reactions: formattedReactions }
+              : msg
+          )
+        );
+      });
+
+      // Listen for message read receipts
+      socketService.on('message:read', (data: any) => {
+        const { messageId, userId, readAt } = data;
+
+        // Update message read receipts
+        setMessages(prev =>
+          (prev || []).map(msg => {
+            if (msg.id === messageId) {
+              const existingRead = msg.readBy?.find((read: any) => read.userId === userId);
+              if (!existingRead) {
+                return {
+                  ...msg,
+                  readBy: [...(msg.readBy || []), { userId, readAt }]
+                };
+              }
+            }
+            return msg;
+          })
+        );
+      });
+
+      // Listen for typing indicators
+      socketService.on('typing', (data: any) => {
+        const { conversationId, userId, isTyping } = data;
+
+        setTypingUsers(prev => {
+          const conversationTypers = [...(prev[conversationId] || [])];
+
+          if (isTyping && !conversationTypers.includes(userId)) {
+            conversationTypers.push(userId);
+          } else if (!isTyping) {
+            const index = conversationTypers.indexOf(userId);
+            if (index !== -1) {
+              conversationTypers.splice(index, 1);
+            }
+          }
+
+          return {
+            ...prev,
+            [conversationId]: conversationTypers
+          };
+        });
+      });
+
+      // Listen for new conversations
+      socketService.on('conversation:new', (data: any) => {
+        const { conversation } = data;
+
+        // Add to conversations list
+        setConversations(prev => [conversation, ...(prev || [])]);
+      });
+
+      // Listen for conversation updates
+      socketService.on('conversation:update', (data: any) => {
+        const { conversation } = data;
+
+        // Update conversation in list
+        setConversations(prev =>
+          (prev || []).map(c =>
+            c.id === conversation.id ? conversation : c
+          )
+        );
+
+        // Update active conversation if needed
+        if (activeConversation && activeConversation.id === conversation.id) {
+          setActiveConversation(conversation);
+        }
+      });
+
+      // Listen for user online status
+      socketService.on('user:status', (data: any) => {
+        const { userId, isOnline, lastSeen } = data;
+
+        // Update user status in conversations
+        setConversations(prev =>
+          (prev || []).map(conv => ({
+            ...conv,
+            participants: (conv.participants || []).map(p =>
+              p.id === userId
+                ? { ...p, isOnline, lastSeen }
+                : p
+          )
+          }))
+        );
+      });
+
+      // Join conversation room if active conversation
+      if (activeConversation) {
+        socketService.joinConversation(activeConversation.id);
+      }
     }
 
     return () => {
       // Disconnect socket on cleanup
-      import('@/services/socketService').then(({ default: socketService }) => {
-        if (activeConversation) {
-          socketService.leaveConversation(activeConversation.id);
-        }
-        socketService.disconnect();
-      });
+      if (activeConversation) {
+        socketService.leaveConversation(activeConversation.id);
+      }
+      socketService.disconnect();
     };
   }, [isAuthenticated, activeConversation, user]);
 
@@ -1018,3 +1028,8 @@ export const useMessages = (): UseMessagesReturn => {
 };
 
 export default useMessages;
+
+
+
+
+

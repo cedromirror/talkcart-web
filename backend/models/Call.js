@@ -30,8 +30,13 @@ const callSchema = new mongoose.Schema({
     },
     status: {
       type: String,
-      enum: ['invited', 'joined', 'declined', 'missed', 'left', 'seen'],
+      enum: ['invited', 'joined', 'declined', 'missed', 'left', 'seen', 'removed'],
       default: 'invited'
+    },
+    role: {
+      type: String,
+      enum: ['participant', 'moderator'],
+      default: 'participant'
     },
     muted: {
       type: Boolean,
@@ -57,6 +62,10 @@ const callSchema = new mongoose.Schema({
     type: String,
     enum: ['initiated', 'ringing', 'active', 'ended', 'missed', 'declined'],
     default: 'initiated'
+  },
+  locked: {
+    type: Boolean,
+    default: false
   },
   startedAt: {
     type: Date,

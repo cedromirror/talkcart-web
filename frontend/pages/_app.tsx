@@ -4,6 +4,7 @@ import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from '@/contexts/AuthContext';
+import { ProfileProvider } from '@/contexts/ProfileContext';
 import { LanguageProvider } from '@/contexts/LanguageContext';
 import { PrivacyProvider } from '@/contexts/PrivacyContext';
 import { PresenceProvider } from '@/contexts/PresenceContext';
@@ -13,12 +14,12 @@ import { ThemeProvider as MuiThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { lightTheme } from '@/theme';
 import { ThemeProvider } from '@/contexts/ThemeContext';
+import { InteractionProvider } from '@/contexts/InteractionContext';
 import { Toaster, toast } from 'react-hot-toast';
 import '@/styles/globals.css';
 import 'react-image-crop/dist/ReactCrop.css'; // global import for cropper styles
 import { ProfileCacheProvider } from '@/contexts/ProfileCacheContext';
-import { CartProvider } from '@/contexts/CartContext';
-import { StripeProvider } from '@/contexts/StripeContext';
+// CartProvider and StripeProvider removed as part of cleanup
 import { SessionExpiredError } from '@/lib/api';
 import { isAuthError } from '@/lib/authErrors';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
@@ -81,17 +82,17 @@ function MyApp({ Component, pageProps }: AppProps) {
       </Head>
 
       <QueryClientProvider client={queryClient}>
-        <ThemeProvider>
-          <LanguageProvider>
-            <MuiThemeProvider theme={lightTheme}>
-              <CssBaseline />
-              <AuthProvider>
-                <Web3Provider>
-                  <PrivacyProvider>
-                    <PresenceProvider>
-                      <WebSocketProvider>
-                        <StripeProvider>
-                          <CartProvider>
+        <AuthProvider>
+          <ThemeProvider>
+            <LanguageProvider>
+              <MuiThemeProvider theme={lightTheme}>
+                <CssBaseline />
+                <ProfileProvider>
+                  <Web3Provider>
+                    <PrivacyProvider>
+                      <PresenceProvider>
+                        <WebSocketProvider>
+                          <InteractionProvider>
                             <ProfileCacheProvider>
                               <Component {...pageProps} />
                               <Toaster
@@ -105,16 +106,16 @@ function MyApp({ Component, pageProps }: AppProps) {
                                 }}
                               />
                             </ProfileCacheProvider>
-                          </CartProvider>
-                        </StripeProvider>
-                      </WebSocketProvider>
-                    </PresenceProvider>
-                  </PrivacyProvider>
-                </Web3Provider>
-              </AuthProvider>
-            </MuiThemeProvider>
-          </LanguageProvider>
-        </ThemeProvider>
+                          </InteractionProvider>
+                        </WebSocketProvider>
+                      </PresenceProvider>
+                    </PrivacyProvider>
+                  </Web3Provider>
+                </ProfileProvider>
+              </MuiThemeProvider>
+            </LanguageProvider>
+          </ThemeProvider>
+        </AuthProvider>
       </QueryClientProvider>
     </ErrorBoundary>
   );

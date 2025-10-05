@@ -40,6 +40,20 @@ a {
   text-decoration: none;
 }
 
+/* Light theme variables */
+body.light {
+  --foreground-rgb: 0, 0, 0;
+  --background-start-rgb: 214, 219, 220;
+  --background-end-rgb: 255, 255, 255;
+}
+
+/* Dark theme variables */
+body.dark {
+  --foreground-rgb: 255, 255, 255;
+  --background-start-rgb: 15, 23, 42;
+  --background-end-rgb: 30, 41, 59;
+}
+
 /* Animation for spinning refresh icon */
 @keyframes spin {
   from {
@@ -55,33 +69,33 @@ a {
 }
 
 /* Custom scrollbar - Light theme */
-::-webkit-scrollbar {
+body.light ::-webkit-scrollbar {
   width: 6px;
 }
 
-::-webkit-scrollbar-track {
+body.light ::-webkit-scrollbar-track {
   background: #f1f1f1;
 }
 
-::-webkit-scrollbar-thumb {
+body.light ::-webkit-scrollbar-thumb {
   background: #c1c1c1;
   border-radius: 3px;
 }
 
-::-webkit-scrollbar-thumb:hover {
+body.light ::-webkit-scrollbar-thumb:hover {
   background: #a8a8a8;
 }
 
 /* Custom scrollbar - Dark theme */
-[data-theme="dark"] ::-webkit-scrollbar-track {
+body.dark ::-webkit-scrollbar-track {
   background: #1e293b;
 }
 
-[data-theme="dark"] ::-webkit-scrollbar-thumb {
+body.dark ::-webkit-scrollbar-thumb {
   background: #475569;
 }
 
-[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+body.dark ::-webkit-scrollbar-thumb:hover {
   background: #64748b;
 }
 

@@ -65,7 +65,7 @@ const orderSchema = new mongoose.Schema({
   status: {
     type: String,
     required: true,
-    enum: ['pending', 'processing', 'completed', 'cancelled', 'refunded'],
+    enum: ['pending', 'processing', 'shipped', 'delivered', 'completed', 'cancelled', 'refunded'],
     default: 'pending'
   },
   shippingAddress: {
@@ -77,9 +77,14 @@ const orderSchema = new mongoose.Schema({
     country: String,
     zipCode: String
   },
+  trackingNumber: String,
+  estimatedDelivery: Date,
+  carrier: String,
   notes: String,
   completedAt: Date,
-  cancelledAt: Date
+  cancelledAt: Date,
+  shippedAt: Date,
+  deliveredAt: Date
 }, {
   timestamps: true,
   toJSON: { virtuals: true },
@@ -102,6 +107,6 @@ orderSchema.index({ userId: 1, createdAt: -1 });
 orderSchema.index({ status: 1 });
 orderSchema.index({ paymentMethod: 1 });
 orderSchema.index({ 'paymentDetails.paymentIntentId': 1 });
-orderSchema.index({ tx_ref: 1 });
+orderSchema.index({ trackingNumber: 1 });
 
 module.exports = mongoose.model('Order', orderSchema);

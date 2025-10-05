@@ -20,12 +20,14 @@ export interface Call {
     joinedAt?: Date;
     leftAt?: Date;
     status: 'invited' | 'joined' | 'declined' | 'missed' | 'left';
+    role: 'participant' | 'moderator';
   }>;
   type: 'audio' | 'video';
   status: 'initiated' | 'ringing' | 'active' | 'ended' | 'missed' | 'declined';
   startedAt: Date;
   endedAt?: Date;
   duration?: number;
+  isLocked?: boolean;
 }
 
 export interface CallOffer {
@@ -398,6 +400,131 @@ class CallService {
     }
   }
 
+  async inviteParticipants(callId: string, userIds: string[]): Promise<Call> {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.post(`${API_URL}/calls/${callId}/invite`, {
+        userIds
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (response.data.success) {
+        return response.data.data.call;
+      } else {
+        throw new Error(response.data.message);
+      }
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to invite participants');
+    }
+  }
+
+  async removeParticipant(callId: string, userId: string): Promise<Call> {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.post(`${API_URL}/calls/${callId}/remove`, {
+        userId
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (response.data.success) {
+        return response.data.data.call;
+      } else {
+        throw new Error(response.data.message);
+      }
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to remove participant');
+    }
+  }
+
+  async muteAllParticipants(callId: string): Promise<Call> {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.post(`${API_URL}/calls/${callId}/mute-all`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (response.data.success) {
+        return response.data.data.call;
+      } else {
+        throw new Error(response.data.message);
+      }
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to mute all participants');
+    }
+  }
+
+  async promoteParticipant(callId: string, userId: string): Promise<Call> {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.post(`${API_URL}/calls/${callId}/promote`, {
+        userId
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (response.data.success) {
+        return response.data.data.call;
+      } else {
+        throw new Error(response.data.message);
+      }
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to promote participant');
+    }
+  }
+
+  async lockCall(callId: string): Promise<Call> {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.post(`${API_URL}/calls/${callId}/lock`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (response.data.success) {
+        return response.data.data.call;
+      } else {
+        throw new Error(response.data.message);
+      }
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to lock call');
+    }
+  }
+
+  async unlockCall(callId: string): Promise<Call> {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.post(`${API_URL}/calls/${callId}/unlock`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (response.data.success) {
+        return response.data.data.call;
+      } else {
+        throw new Error(response.data.message);
+      }
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to unlock call');
+    }
+  }
+
+  async endCallForAll(callId: string): Promise<Call> {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.post(`${API_URL}/calls/${callId}/end-all`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (response.data.success) {
+        return response.data.data.call;
+      } else {
+        throw new Error(response.data.message);
+      }
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to end call for all');
+    }
+  }
+
   async getCallStats(period: string = '30d'): Promise<any> {
     try {
       const token = localStorage.getItem('token');
@@ -618,6 +745,31 @@ class CallService {
 
     socketService.on('call:declined', (data: any) => {
       this.emit('callDeclined', data);
+    });
+
+    // Moderator events
+    socketService.on('call:locked', (data: any) => {
+      this.emit('callLocked', data);
+    });
+
+    socketService.on('call:unlocked', (data: any) => {
+      this.emit('callUnlocked', data);
+    });
+
+    socketService.on('participant:promoted', (data: any) => {
+      this.emit('participantPromoted', data);
+    });
+
+    socketService.on('participant:removed', (data: any) => {
+      this.emit('participantRemoved', data);
+    });
+
+    socketService.on('call:muted-all', (data: any) => {
+      this.emit('callMutedAll', data);
+    });
+
+    socketService.on('call:ended-all', (data: any) => {
+      this.emit('callEndedAll', data);
     });
   }
 

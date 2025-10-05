@@ -47,13 +47,13 @@ export class HttpError extends Error {
 }
 
 class ApiService {
-  private getAuthHeaders(includeJsonContentType: boolean = true) {
+  private getAuthHeaders(includeJsonContentType: boolean = true): HeadersInit {
     // Avoid accessing localStorage during SSR
     if (typeof window === 'undefined') {
       return includeJsonContentType ? { 'Content-Type': 'application/json' } : {};
     }
     const token = localStorage.getItem('token');
-    const base = includeJsonContentType ? { 'Content-Type': 'application/json' } : {} as Record<string, string>;
+    const base: HeadersInit = includeJsonContentType ? { 'Content-Type': 'application/json' } : {};
     return {
       ...base,
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -75,7 +75,11 @@ class ApiService {
     } catch (error) {
       clearTimeout(timeoutId);
       if ((error as any)?.name === 'AbortError') {
-        throw new Error('Request timeout');
+        throw new Error(`Request timeout after ${timeout}ms`);
+      }
+      // Provide more context about the error
+      if ((error as any)?.message?.includes('fetch')) {
+        throw new Error('Network error - please check your internet connection');
       }
       throw error;
     }
@@ -108,6 +112,7 @@ class ApiService {
 
   // Unified request method with auto-refresh on 401
   private async request<T>(url: string, init: RequestInit = {}, timeout: number = TIMEOUTS.API_REQUEST): Promise<T> {
+    console.log(`API Request: ${init.method || 'GET'} ${url}`);
     const response = await this.fetchWithTimeout(url, init, timeout);
 
     if (response.status === 401) {
@@ -139,18 +144,18 @@ class ApiService {
 
     const data = await this.safeJsonParse(response);
     if (!response.ok) {
+      console.error(`API Error: ${response.status} ${response.statusText}`, { url, status: response.status, data });
       throw new HttpError(response.status, (data && (data.message || data.error)) || `Request failed with status ${response.status}`, data);
     }
     return data as T;
   }
 
-  // Note: handleResponse removed in favor of unified request() with auto-refresh
-
-
-
   // Generic HTTP methods
   async get(endpoint: string, options: RequestInit = {}) {
-    return this.request(`${API_URL}${endpoint}`, {
+    const fullUrl = `${API_URL}${endpoint}`;
+    console.log(`API GET Request to: ${fullUrl}`);
+    console.log('Request options:', options);
+    return this.request(fullUrl, {
       method: 'GET',
       headers: this.getAuthHeaders(),
       ...options,
@@ -158,7 +163,11 @@ class ApiService {
   }
 
   async post(endpoint: string, data?: any, options: RequestInit = {}) {
-    return this.request(`${API_URL}${endpoint}`, {
+    const fullUrl = `${API_URL}${endpoint}`;
+    console.log(`API POST Request to: ${fullUrl}`);
+    console.log('Request data:', data);
+    console.log('Request options:', options);
+    return this.request(fullUrl, {
       method: 'POST',
       headers: this.getAuthHeaders(),
       body: data ? JSON.stringify(data) : undefined,
@@ -167,7 +176,11 @@ class ApiService {
   }
 
   async put(endpoint: string, data?: any, options: RequestInit = {}) {
-    return this.request(`${API_URL}${endpoint}`, {
+    const fullUrl = `${API_URL}${endpoint}`;
+    console.log(`API PUT Request to: ${fullUrl}`);
+    console.log('Request data:', data);
+    console.log('Request options:', options);
+    return this.request(fullUrl, {
       method: 'PUT',
       headers: this.getAuthHeaders(),
       body: data ? JSON.stringify(data) : undefined,
@@ -176,7 +189,10 @@ class ApiService {
   }
 
   async delete(endpoint: string, options: RequestInit = {}) {
-    return this.request(`${API_URL}${endpoint}`, {
+    const fullUrl = `${API_URL}${endpoint}`;
+    console.log(`API DELETE Request to: ${fullUrl}`);
+    console.log('Request options:', options);
+    return this.request(fullUrl, {
       method: 'DELETE',
       headers: this.getAuthHeaders(),
       ...options,
@@ -194,6 +210,7 @@ class ApiService {
 
     login: async (credentials: any) => {
       try {
+        console.log('Attempting login for:', credentials.email);
         const response = await this.fetchWithTimeout(`${API_URL}/auth/login`, {
           method: 'POST',
           headers: {
@@ -366,7 +383,7 @@ class ApiService {
       return this.request(`${API_URL}/auth/settings`, {
         method: 'PUT',
         headers: this.getAuthHeaders(),
-        body: JSON.stringify({ type: settingType, data: settingsData }),
+        body: JSON.stringify({ settingType, settings: settingsData }),
       });
     },
 
@@ -508,238 +525,186 @@ class ApiService {
 
   // Orders API
   orders = {
-    // Get user's order history
-    getOrders: async (page: number = 1, limit: number = 10, status?: string) => {
-      const params = new URLSearchParams({
+    // Get user's orders
+    getOrders: async (page: number = 1, limit: number = 10) => {
+      const queryParams = new URLSearchParams({
         page: page.toString(),
-        limit: limit.toString(),
-        ...(status && { status })
+        limit: limit.toString()
       });
-
-      return this.request(`${API_URL}/orders?${params.toString()}`, {
-        method: 'GET',
-        headers: this.getAuthHeaders(),
-      });
+      return this.get(`/orders?${queryParams}`);
     },
 
-    // Get specific order details
+    // Get a specific order by ID
     getOrder: async (orderId: string) => {
-      return this.request(`${API_URL}/orders/${orderId}`, {
-        method: 'GET',
-        headers: this.getAuthHeaders(),
-      });
+      return this.get(`/orders/${orderId}`);
     },
 
     // Cancel an order
     cancelOrder: async (orderId: string) => {
-      return this.request(`${API_URL}/orders/${orderId}/cancel`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
+      return this.post(`/orders/${orderId}/cancel`, {});
+    },
+
+    // Get tracking information for an order
+    getTrackingInfo: async (orderId: string) => {
+      return this.post(`/orders/${orderId}/track`, {});
+    },
+  };
+
+  // Payments API
+  payments = {
+    // Get user's payment history
+    getPaymentHistory: async (page: number = 1, limit: number = 10) => {
+      const queryParams = new URLSearchParams({
+        page: page.toString(),
+        limit: limit.toString()
       });
+      return this.get(`/payments/history?${queryParams}`);
+    },
+
+    // Get a specific payment by ID
+    getPayment: async (paymentId: string) => {
+      return this.get(`/payments/${paymentId}`);
     },
   };
 
   // Posts API
   posts = {
-    getAll: async (params?: any) => {
+    // Get all posts
+    getAll: async (params?: {
+      feedType?: string;
+      limit?: number;
+      page?: number;
+      contentType?: string;
+      authorId?: string;
+      hashtag?: string;
+      search?: string;
+    }) => {
       const queryParams = new URLSearchParams();
-      if (params) {
-        Object.entries(params).forEach(([key, value]) => {
-          if (value !== undefined) {
-            queryParams.append(key, value?.toString() ?? '');
-          }
-        });
-      }
-      const response = await fetch(`${API_URL}/posts?${queryParams}`, {
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
+      if (params?.feedType) queryParams.append('feedType', params.feedType);
+      if (params?.limit) queryParams.append('limit', params.limit.toString());
+      if (params?.page) queryParams.append('page', params.page.toString());
+      if (params?.contentType) queryParams.append('contentType', params.contentType);
+      if (params?.authorId) queryParams.append('authorId', params.authorId);
+      if (params?.hashtag) queryParams.append('hashtag', params.hashtag);
+      if (params?.search) queryParams.append('search', params.search);
+      
+      const queryString = queryParams.toString();
+      return this.get(`/posts${queryString ? `?${queryString}` : ''}`);
     },
 
-    create: async (postData: any) => {
-      const response = await fetch(`${API_URL}/posts`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify(postData),
-      });
-      return this.safeJsonParse(response);
+    // Test health endpoint
+    health: async () => {
+      return this.get('/posts/health');
     },
 
-    getById: async (postId: string) => {
-      const response = await fetch(`${API_URL}/posts/${postId}`, {
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    getUserPosts: async (username: string, params?: any) => {
-      // Avoid backend call for placeholder username
-      if (username && username.toLowerCase() === 'anonymous') {
-        const limit = Number(params?.limit ?? 10);
-        return Promise.resolve({
-          success: true,
-          data: {
-            posts: [],
-            pagination: { page: 1, limit, total: 0, pages: 0 },
-          },
-        } as any);
-      }
-
+    // Get trending posts
+    getTrending: async (params?: {
+      limit?: number;
+      timeRange?: 'day' | 'week' | 'month';
+    }) => {
       const queryParams = new URLSearchParams();
-      if (params) {
-        Object.entries(params).forEach(([key, value]) => {
-          if (value !== undefined && value !== null && `${value}`.length > 0) {
-            queryParams.append(key, value?.toString() ?? '');
-          }
-        });
-      }
-      return this.request(`${API_URL}/posts/user/${encodeURIComponent(username)}?${queryParams}`, {
-        method: 'GET',
-        headers: this.getAuthHeaders(),
-      });
+      queryParams.append('feedType', 'trending');
+      if (params?.limit) queryParams.append('limit', params.limit.toString());
+      if (params?.timeRange) queryParams.append('timeRange', params.timeRange);
+      
+      const queryString = queryParams.toString();
+      console.log(`Calling trending endpoint with query: ${queryString}`);
+      return this.get(`/posts${queryString ? `?${queryString}` : ''}`);
     },
 
-    getUserLikedPosts: async (userId: string, params?: any) => {
+    // Get post by ID
+    getById: async (id: string) => {
+      return this.get(`/posts/${id}`);
+    },
+
+    // Create a new post
+    create: async (postData: {
+      content: string;
+      type?: string;
+      media?: any[];
+      hashtags?: string[];
+      mentions?: string[];
+      location?: string;
+      privacy?: string;
+    }) => {
+      return this.post('/posts', postData);
+    },
+
+    // Update a post
+    update: async (id: string, postData: {
+      content?: string;
+      media?: any[];
+      hashtags?: string[];
+      mentions?: string[];
+      location?: string;
+      privacy?: string;
+    }) => {
+      return this.put(`/posts/${id}`, postData);
+    },
+
+    // Delete a post
+    delete: async (id: string) => {
+      return this.delete(`/posts/${id}`);
+    },
+
+    // Like/unlike a post
+    like: async (id: string) => {
+      return this.post(`/posts/${id}/like`);
+    },
+
+    // Bookmark/unbookmark a post
+    bookmark: async (id: string) => {
+      return this.post(`/posts/${id}/bookmark`);
+    },
+
+    // Share a post
+    share: async (id: string, platform: string = 'internal') => {
+      return this.post(`/posts/${id}/share`, { platform });
+    },
+
+    // Get user's posts
+    getUserPosts: async (userId: string, params?: {
+      limit?: number;
+      page?: number;
+      contentType?: string;
+    }) => {
       const queryParams = new URLSearchParams();
-      if (params) {
-        Object.entries(params).forEach(([key, value]) => {
-          if (value !== undefined && value !== null && `${value}`.length > 0) {
-            queryParams.append(key, value?.toString() ?? '');
-          }
-        });
-      }
-      return this.request(`${API_URL}/posts/user/${encodeURIComponent(userId)}/liked?${queryParams}`, {
-        method: 'GET',
-        headers: this.getAuthHeaders(),
-      });
+      if (params?.limit) queryParams.append('limit', params.limit.toString());
+      if (params?.page) queryParams.append('page', params.page.toString());
+      if (params?.contentType) queryParams.append('contentType', params.contentType);
+      
+      const queryString = queryParams.toString();
+      return this.get(`/posts/user/${userId}${queryString ? `?${queryString}` : ''}`);
     },
 
-    like: async (postId: string) => {
-      return this.request(`${API_URL}/posts/${postId}/like`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-      });
-    },
-
-    // Note: Unlike is handled by the same like endpoint (toggle functionality)
-    unlike: async (postId: string) => {
-      // Use the same endpoint as like - it toggles the like status
-      return this.request(`${API_URL}/posts/${postId}/like`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-      });
-    },
-
-    bookmark: async (postId: string) => {
-      return this.request(`${API_URL}/posts/${postId}/bookmark`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-      });
-    },
-
-    share: async (postId: string, platform: string = 'internal') => {
-      return this.request(`${API_URL}/posts/${postId}/share`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify({ platform }),
-      });
-    },
-
-    shareWithFollowers: async (postId: string, message: string = '') => {
-      return this.request(`${API_URL}/posts/${postId}/share/followers`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify({ message }),
-      });
-    },
-
-    shareWithUsers: async (postId: string, userIds: string[], message: string = '') => {
-      return this.request(`${API_URL}/posts/${postId}/share/users`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify({ userIds, message }),
-      });
-    },
-
-    unbookmark: async (postId: string) => {
-      // Use the same endpoint as bookmark - it toggles the bookmark status
-      return this.request(`${API_URL}/posts/${postId}/bookmark`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-      });
-    },
-
-    getPublicPosts: async (params?: any) => {
+    // Get user's liked posts
+    getLikedPosts: async (userId: string, params?: {
+      limit?: number;
+      page?: number;
+      contentType?: string;
+    }) => {
       const queryParams = new URLSearchParams();
-      if (params) {
-        Object.entries(params).forEach(([key, value]) => {
-          if (value !== undefined && value !== null && `${value}`.length > 0) {
-            queryParams.append(key, value?.toString() ?? '');
-          }
-        });
-      }
-      const response = await fetch(`${API_URL}/posts/public?${queryParams}`, {
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
+      if (params?.limit) queryParams.append('limit', params.limit.toString());
+      if (params?.page) queryParams.append('page', params.page.toString());
+      if (params?.contentType) queryParams.append('contentType', params.contentType);
+      
+      const queryString = queryParams.toString();
+      return this.get(`/posts/user/${userId}/liked${queryString ? `?${queryString}` : ''}`);
     },
 
-    getUserPosts: async (userId: string, params?: any) => {
+    // Get user's bookmarked posts
+    getBookmarkedPosts: async (userId: string, params?: {
+      limit?: number;
+      page?: number;
+      contentType?: string;
+    }) => {
       const queryParams = new URLSearchParams();
-      if (params) {
-        Object.entries(params).forEach(([key, value]) => {
-          if (value !== undefined && value !== null && `${value}`.length > 0) {
-            queryParams.append(key, value?.toString() ?? '');
-          }
-        });
-      }
-      return this.request(`${API_URL}/posts/user/${userId}?${queryParams}`, {
-        method: 'GET',
-        headers: this.getAuthHeaders(),
-      });
-    },
-
-    getLikedPosts: async (page: number = 1) => {
-      return this.request(`${API_URL}/posts/liked?page=${page}`, {
-        method: 'GET',
-        headers: this.getAuthHeaders(),
-      });
-    },
-
-    getSavedPosts: async (page: number = 1) => {
-      return this.request(`${API_URL}/posts/saved?page=${page}`, {
-        method: 'GET',
-        headers: this.getAuthHeaders(),
-      });
-    },
-
-    likePost: async (postId: string) => {
-      return this.request(`${API_URL}/posts/${postId}/like`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-      });
-    },
-
-    unlikePost: async (postId: string) => {
-      return this.request(`${API_URL}/posts/${postId}/unlike`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-      });
-    },
-
-    getBookmarkedPosts: async (userId: string, params?: any) => {
-      const queryParams = new URLSearchParams();
-      if (params) {
-        Object.entries(params).forEach(([key, value]) => {
-          if (value !== undefined) {
-            queryParams.append(key, value?.toString() ?? '');
-          }
-        });
-      }
-      const response = await fetch(`${API_URL}/posts/user/${userId}/bookmarks?${queryParams}`, {
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
+      if (params?.limit) queryParams.append('limit', params.limit.toString());
+      if (params?.page) queryParams.append('page', params.page.toString());
+      if (params?.contentType) queryParams.append('contentType', params.contentType);
+      
+      const queryString = queryParams.toString();
+      return this.get(`/posts/user/${userId}/bookmarks${queryString ? `?${queryString}` : ''}`);
     },
   };
 
@@ -960,7 +925,7 @@ class ApiService {
 
         xhr.onload = () => {
           const status = xhr.status;
-          let data = null;
+          let data: { success?: boolean; message?: string; error?: string; details?: string; responseText?: string } | null = null;
 
           try {
             const responseText = xhr.responseText || '';
@@ -1110,14 +1075,14 @@ class ApiService {
           publicId,
           format: params?.format || 'mp4',
           quality: params?.quality || 'auto',
-          ...(params?.width && { width: params.width }),
-          ...(params?.height && { height: params.height })
+          width: params?.width,
+          height: params?.height
         };
 
         console.log('Request body:', requestBody);
 
         // Create cache key for this request
-        const cacheKey = `video_opt_${publicId}_${requestBody.format}_${requestBody.quality}_${requestBody.width || 'auto'}_${requestBody.height || 'auto'}`;
+        const cacheKey = `video_opt_${publicId}_${requestBody.format}_${requestBody.quality}_${requestBody.width || 'auto'}x${requestBody.height || 'auto'}`;
 
         // Check if we have a cached result (simple in-memory cache)
         if (typeof window !== 'undefined' && (window as any).__videoOptCache) {
@@ -1171,849 +1136,266 @@ class ApiService {
         throw new Error(`Video optimization failed: ${error.message || 'Unknown error'}`);
       }
     },
-
-    getUserMedia: async (userId: string, params?: any) => {
-      const queryParams = new URLSearchParams();
-      if (params) {
-        Object.entries(params).forEach(([key, value]) => {
-          if (value !== undefined && value !== null && `${value}`.length > 0) {
-            queryParams.append(key, value?.toString() ?? '');
-          }
-        });
-      }
-      return this.request(`${API_URL}/media/user/${userId}?${queryParams}`, {
-        method: 'GET',
-        headers: this.getAuthHeaders(),
-      });
-    },
-  };
-
-  // Streams API
-  streams = {
-    getAll: async (params?: any) => {
-      const queryParams = new URLSearchParams();
-      if (params) {
-        Object.entries(params).forEach(([key, value]) => {
-          if (value !== undefined) {
-            queryParams.append(key, value?.toString() ?? '');
-          }
-        });
-      }
-      const response = await fetch(`${API_URL}/streams?${queryParams}`, {
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    getLive: async (params?: any) => {
-      const queryParams = new URLSearchParams();
-      if (params) {
-        Object.entries(params).forEach(([key, value]) => {
-          if (value !== undefined) {
-            queryParams.append(key, value?.toString() ?? '');
-          }
-        });
-      }
-      const response = await fetch(`${API_URL}/streams/live?${queryParams}`, {
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    getById: async (id: string) => {
-      return this.request(`${API_URL}/streams/${id}`, {
-        headers: this.getAuthHeaders(),
-      });
-    },
-
-    create: async (data: any) => {
-      // Use unified request with timeout and 4xx/5xx handling
-      return this.request<import('../types').ApiResponse<import('../types').Stream>>(`${API_URL}/streams`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify(data),
-      });
-    },
-
-    update: async (id: string, data: any) => {
-      const response = await fetch(`${API_URL}/streams/${id}`, {
-        method: 'PUT',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify(data),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    start: async (id: string, data: any) => {
-      // Use unified request to surface non-OK as thrown errors
-      return this.request(`${API_URL}/streams/${id}/start`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify(data),
-      });
-    },
-
-    stop: async (id: string) => {
-      const response = await fetch(`${API_URL}/streams/${id}/stop`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    getCategories: async () => {
-      const response = await fetch(`${API_URL}/streams/categories`, {
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    getMetrics: async (id: string) => {
-      const response = await fetch(`${API_URL}/streams/${id}/metrics`, {
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    // Compatibility alias used by StreamAnalytics component
-    getStreamMetrics: async (id: string) => {
-      return this.request(`${API_URL}/streams/${id}/metrics`, {
-        headers: this.getAuthHeaders(),
-      });
-    },
-
-    // Export analytics data
-    exportAnalytics: async (id: string, format: string, timeRange: string) => {
-      const params = new URLSearchParams({ format, timeRange });
-      const response = await fetch(`${API_URL}/streams/${id}/analytics/export?${params.toString()}`, {
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    getHealth: async (id: string) => {
-      return this.request(`${API_URL}/streams/${id}/health`, {
-        headers: this.getAuthHeaders(),
-      });
-    },
-
-    // Real-time updates from deprecated service, added here to consolidate
-    updateViewerCount: async (id: string, viewerCount: number) => {
-      const response = await fetch(`${API_URL}/streams/${id}/update-viewers`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify({ viewerCount }),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    updateHealth: async (id: string, health: { bitrate: number; fps: number; quality: string; latency: number; droppedFrames: number; }) => {
-      const response = await fetch(`${API_URL}/streams/${id}/update-health`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify(health),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    broadcastMessage: async (id: string, message: string, type = 'announcement') => {
-      const response = await fetch(`${API_URL}/streams/${id}/broadcast-message`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify({ message, type }),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    // Settings API
-    getStreamSettings: async (id: string) => {
-      const response = await fetch(`${API_URL}/streams/${id}/settings`, {
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    updateStreamSettings: async (id: string, settings: any) => {
-      const response = await fetch(`${API_URL}/streams/${id}/settings`, {
-        method: 'PUT',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify({ settings }),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    // Chat API
-    getChatMessages: async (id: string, params?: any) => {
-      const queryParams = new URLSearchParams();
-      if (params) {
-        Object.entries(params).forEach(([key, value]) => {
-          if (value !== undefined) {
-            queryParams.append(key, value?.toString() ?? '');
-          }
-        });
-      }
-      const response = await fetch(`${API_URL}/streams/${id}/chat/messages?${queryParams}`, {
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    sendChatMessage: async (id: string, message: string) => {
-      const response = await fetch(`${API_URL}/streams/${id}/chat/messages`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify({ message }),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    deleteChatMessage: async (streamId: string, messageId: string) => {
-      const response = await fetch(`${API_URL}/streams/${streamId}/chat/messages/${messageId}`, {
-        method: 'DELETE',
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    pinChatMessage: async (streamId: string, messageId: string) => {
-      const response = await fetch(`${API_URL}/streams/${streamId}/chat/messages/${messageId}/pin`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    // Moderation API (backend implemented)
-    banUser: async (streamId: string, userId: string, reason: string, duration?: number) => {
-      const response = await fetch(`${API_URL}/streams/${streamId}/moderation/ban`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify({ userId, reason, duration }),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    unbanUser: async (streamId: string, userId: string) => {
-      const response = await fetch(`${API_URL}/streams/${streamId}/moderation/unban`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify({ userId }),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    timeoutUser: async (streamId: string, userId: string, duration: number, reason: string) => {
-      const response = await fetch(`${API_URL}/streams/${streamId}/moderation/timeout`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify({ userId, duration, reason }),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    // Moderation list endpoints
-    getModerationData: async (streamId: string) => {
-      const [bannedRes, timeoutsRes] = await Promise.all([
-        fetch(`${API_URL}/streams/${streamId}/moderation/banned`, { headers: this.getAuthHeaders() }),
-        fetch(`${API_URL}/streams/${streamId}/moderation/timeouts`, { headers: this.getAuthHeaders() }),
-      ]);
-      const banned = await bannedRes.json();
-      const timeouts = await timeoutsRes.json();
-      return { success: true, data: { banned: banned?.data?.banned || [], timeouts: timeouts?.data?.timeouts || [] } } as any;
-    },
-
-    getBannedUsers: async (streamId: string) => {
-      const response = await fetch(`${API_URL}/streams/${streamId}/moderation/banned`, { headers: this.getAuthHeaders() });
-      return this.safeJsonParse(response);
-    },
-
-    getChatSettings: async (streamId: string) => {
-      const response = await fetch(`${API_URL}/streams/${streamId}/chat/settings`, {
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    updateChatSettings: async (streamId: string, settings: any) => {
-      const response = await fetch(`${API_URL}/streams/${streamId}/chat/settings`, {
-        method: 'PUT',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify(settings),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    // Interaction API (align with available backend)
-    followStreamer: async (streamerId: string) => {
-      const response = await fetch(`${API_URL}/users/${streamerId}/follow`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    unfollowStreamer: async (streamerId: string) => {
-      const response = await fetch(`${API_URL}/users/${streamerId}/follow`, {
-        method: 'DELETE',
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    likeStream: async (streamId: string) => {
-      const response = await fetch(`${API_URL}/streams/${streamId}/like`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    unlikeStream: async (streamId: string) => {
-      const response = await fetch(`${API_URL}/streams/${streamId}/like`, {
-        method: 'DELETE',
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    bookmarkStream: async (_streamId: string) => {
-      // Not implemented on backend; return optimistic success
-      return { success: true } as any;
-    },
-
-    unbookmarkStream: async (_streamId: string) => {
-      // Not implemented on backend; return optimistic success
-      return { success: true } as any;
-    },
-
-    reportStream: async (streamId: string, reason: string, description?: string) => {
-      const response = await fetch(`${API_URL}/streams/${streamId}/report`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify({ reason, description }),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    shareStream: async (_streamId: string, _platform: string) => {
-      // Not implemented on backend; return optimistic success
-      return { success: true } as any;
-    },
-
-    // Subscription API
-    subscribeToStreamer: async (streamerId: string, tier: string = 'basic', paymentMethod: string = 'card') => {
-      const response = await fetch(`${API_URL}/streams/${streamerId}/subscribe`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify({ tier, paymentMethod }),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    unsubscribeFromStreamer: async (streamerId: string) => {
-      const response = await fetch(`${API_URL}/streams/${streamerId}/subscribe`, {
-        method: 'DELETE',
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    getSubscriptionStatus: async (streamerId: string) => {
-      const response = await fetch(`${API_URL}/streams/${streamerId}/subscription-status`, {
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    // Enhanced Gifts API
-    getGiftTypes: async () => {
-      const response = await fetch(`${API_URL}/streams/gift-types`, {
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    sendGift: async (
-      streamId: string,
-      giftType: string,
-      options?: { message?: string; isAnonymous?: boolean; targetUserId?: string }
-    ) => {
-      const response = await fetch(`${API_URL}/streams/${streamId}/send-gift`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify({ giftType, ...(options || {}) }),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    // Stream Scheduling API
-    scheduleStream: async (streamId: string, scheduledAt: string, title?: string, description?: string, category?: string, tags?: string[]) => {
-      const response = await fetch(`${API_URL}/streams/${streamId}/schedule`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify({ scheduledAt, title, description, category, tags }),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    cancelSchedule: async (streamId: string) => {
-      const response = await fetch(`${API_URL}/streams/${streamId}/schedule`, {
-        method: 'DELETE',
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
-    },
-
-    getScheduledStreams: async (params?: any) => {
-      const queryParams = new URLSearchParams();
-      if (params) {
-        Object.entries(params).forEach(([key, value]) => {
-          if (value !== undefined) {
-            queryParams.append(key, value?.toString() ?? '');
-          }
-        });
-      }
-      const response = await fetch(`${API_URL}/streams/scheduled?${queryParams}`, {
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
-    },
-
-
-    sendDonation: async (streamId: string, data: { amount: number; message?: string; currency?: string }) => {
-      const response = await fetch(`${API_URL}/streams/${streamId}/donations`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify(data),
-      });
-      return this.safeJsonParse(response);
-    },
-  };
-
-  // Analytics API
-  analytics = {
-    getPublicCreatorSummary: async (identifier: string) => {
-      const url = `${API_URL}/analytics/public/${encodeURIComponent(identifier)}/summary`;
-      const response = await fetch(url, {
-        headers: this.getAuthHeaders(),
-      });
-      return this.safeJsonParse(response);
-    },
   };
 
   // Marketplace API
   marketplace = {
-    // Get all products with filtering and pagination
-    getProducts: async (params: any = {}) => {
+    // Get products with various filters
+    getProducts: async (params?: {
+      vendorId?: string;
+      category?: string;
+      search?: string;
+      minPrice?: number;
+      maxPrice?: number;
+      sortBy?: string;
+      sortOrder?: 'asc' | 'desc';
+      page?: number;
+      limit?: number;
+    }) => {
       const queryParams = new URLSearchParams();
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined && value !== null && value !== '') {
-          queryParams.append(key, String(value));
-        }
-      });
-      return this.request(`${API_URL}/marketplace/products?${queryParams}`, {
-        method: 'GET',
-        headers: this.getAuthHeaders(),
-      });
+      if (params) {
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            queryParams.append(key, value.toString());
+          }
+        });
+      }
+      return this.get(`/marketplace/products?${queryParams}`);
     },
 
-    // Get single product by ID
+    // Get a specific product by ID
     getProduct: async (productId: string) => {
-      // Ensure ID is URL-safe to avoid path/parsing issues
-      const safeId = encodeURIComponent(String(productId));
-      return this.request(`${API_URL}/marketplace/products/${safeId}`, {
-        method: 'GET',
-        headers: this.getAuthHeaders(),
-      });
+      return this.get(`/marketplace/products/${productId}`);
     },
 
-    // Note: Product creation, updating, and deletion are now admin-only operations
-    // Use admin.createProduct, admin.updateProduct, and admin.toggleProduct instead
-
-    // Get single product
-    getProduct: async (productId: string) => {
-      return this.request(`${API_URL}/marketplace/products/${productId}`, {
-        method: 'GET',
-        headers: this.getAuthHeaders(),
-      });
+    // Create a new product
+    createProduct: async (productData: any) => {
+      return this.post('/marketplace/products', productData);
     },
 
-    // Buy product (supports payment details for real payments)
-    buyProduct: async (productId: string, body?: { paymentMethod?: 'stripe' | 'flutterwave' | 'crypto'; paymentDetails?: any }) => {
-      return this.request(`${API_URL}/marketplace/products/${productId}/buy`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: body ? JSON.stringify(body) : undefined,
-      });
+    // Update an existing product
+    updateProduct: async (productId: string, productData: any) => {
+      return this.put(`/marketplace/products/${productId}`, productData);
     },
 
-    // Get categories
+    // Delete a product
+    deleteProduct: async (productId: string) => {
+      return this.delete(`/marketplace/products/${productId}`);
+    },
+
+    // Get product reviews
+    getProductReviews: async (productId: string, page: number = 1, limit: number = 10) => {
+      const queryParams = new URLSearchParams({
+        page: page.toString(),
+        limit: limit.toString()
+      });
+      return this.get(`/marketplace/products/${productId}/reviews?${queryParams}`);
+    },
+
+    // Add a review to a product
+    addProductReview: async (productId: string, reviewData: { rating: number; comment: string }) => {
+      return this.post(`/marketplace/products/${productId}/reviews`, reviewData);
+    },
+
+    // Get vendor's products
+    getVendorProducts: async (vendorId: string, page: number = 1, limit: number = 20) => {
+      const queryParams = new URLSearchParams({
+        page: page.toString(),
+        limit: limit.toString()
+      });
+      return this.get(`/marketplace/vendors/${vendorId}/products?${queryParams}`);
+    },
+
+    // Get vendor information
+    getVendor: async (vendorId: string) => {
+      return this.get(`/marketplace/vendors/${vendorId}`);
+    },
+
+    // Search products
+    searchProducts: async (query: string, filters?: any) => {
+      const params: any = { q: query };
+      if (filters) {
+        Object.assign(params, filters);
+      }
+      const queryParams = new URLSearchParams(params);
+      return this.get(`/marketplace/search?${queryParams}`);
+    },
+
+    // Add product to wishlist
+    addToWishlist: async (productId: string) => {
+      return this.post(`/marketplace/wishlist/${productId}`, {});
+    },
+
+    // Remove product from wishlist
+    removeFromWishlist: async (productId: string) => {
+      return this.delete(`/marketplace/wishlist/${productId}`);
+    },
+
+    // Get user's wishlist
+    getWishlist: async (page: number = 1, limit: number = 20) => {
+      const queryParams = new URLSearchParams({
+        page: page.toString(),
+        limit: limit.toString()
+      });
+      return this.get(`/marketplace/wishlist?${queryParams}`);
+    },
+
+    // Get product categories
     getCategories: async () => {
-      return this.request(`${API_URL}/marketplace/categories`, {
-        method: 'GET',
-        headers: this.getAuthHeaders(),
+      return this.get('/marketplace/categories');
+    },
+
+    // Get featured products
+    getFeaturedProducts: async (limit: number = 10) => {
+      const queryParams = new URLSearchParams({
+        limit: limit.toString()
       });
+      return this.get(`/marketplace/products/featured?${queryParams}`);
     },
 
-    // Health check
-    getHealth: async () => {
-      return this.request(`${API_URL}/marketplace/health`, {
-        method: 'GET',
-        headers: this.getAuthHeaders(),
-      });
-    },
-
-    // Upload product images
-    uploadImages: async (files: FileList | File[]) => {
-      const formData = new FormData();
-      Array.from(files).forEach(file => {
-        formData.append('images', file);
-      });
-
-      return this.request(`${API_URL}/marketplace/products/upload-images`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(false), // Don't include Content-Type for FormData
-        body: formData,
-      });
-    },
-  };
-
-  // Payments API
-  payments = {
-    createIntent: async (args: { items?: { id?: string; name?: string; price?: number; quantity?: number; metadata?: Record<string, string> }[]; amount?: number; currency?: string; metadata?: Record<string, any>; idempotencyKey?: string; }) => {
-      return this.request(`${API_URL}/payments/intent`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify(args || {}),
-      });
-    },
-    createFlutterwaveIntent: async (args: { amount: number; currency: string; tx_ref: string; customer: { email: string; name: string; phone_number: string }; meta: Record<string, any> }) => {
-      return this.request(`${API_URL}/payments/flutterwave/init`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify(args),
-      });
-    },
-  } as const;
-
-  // Admin API
-  admin = {
-    // Get admin user info
-    getMe: async () => {
-      return this.request(`${API_URL}/admin/me`, {
-        method: 'GET',
-        headers: this.getAuthHeaders(),
-      });
-    },
-
-    // Product Management
-    products: {
-      // List all products with admin visibility
-      getProducts: async (params: any = {}) => {
-        const queryParams = new URLSearchParams();
-        Object.entries(params).forEach(([key, value]) => {
-          if (value !== undefined && value !== null && value !== '') {
-            queryParams.append(key, String(value));
-          }
-        });
-        return this.request(`${API_URL}/admin/products?${queryParams}`, {
-          method: 'GET',
-          headers: this.getAuthHeaders(),
-        });
-      },
-
-      // Create product as admin
-      createProduct: async (data: any) => {
-        return this.request(`${API_URL}/admin/products/create`, {
-          method: 'POST',
-          headers: this.getAuthHeaders(),
-          body: JSON.stringify(data),
-        });
-      },
-
-      // Toggle product active/featured status
-      toggleProduct: async (productId: string, data: { isActive?: boolean; featured?: boolean }) => {
-        return this.request(`${API_URL}/admin/products/${productId}/toggle`, {
-          method: 'PATCH',
-          headers: this.getAuthHeaders(),
-          body: JSON.stringify(data),
-        });
-      },
-
-      // Edit product price/stock
-      updateProduct: async (productId: string, data: { price?: number; stock?: number }) => {
-        return this.request(`${API_URL}/admin/products/${productId}`, {
-          method: 'PATCH',
-          headers: this.getAuthHeaders(),
-          body: JSON.stringify(data),
-        });
-      },
-
-      // Delete product
-      deleteProduct: async (productId: string) => {
-        return this.request(`${API_URL}/admin/products/${productId}`, {
-          method: 'DELETE',
-          headers: this.getAuthHeaders(),
-        });
-      },
-
-      // Approve vendor product
-      approveProduct: async (productId: string, data: { featured?: boolean } = {}) => {
-        return this.request(`${API_URL}/admin/products/${productId}/approve`, {
-          method: 'POST',
-          headers: this.getAuthHeaders(),
-          body: JSON.stringify(data),
-        });
-      },
-
-      // Bulk actions
-      bulkAction: async (data: { ids: string[]; action: string; payload?: any }) => {
-        return this.request(`${API_URL}/admin/products/bulk`, {
-          method: 'POST',
-          headers: this.getAuthHeaders(),
-          body: JSON.stringify(data),
-        });
-      },
-
-      // Export products CSV
-      exportCSV: async (params: any = {}) => {
-        const queryParams = new URLSearchParams();
-        Object.entries(params).forEach(([key, value]) => {
-          if (value !== undefined && value !== null && value !== '') {
-            queryParams.append(key, String(value));
-          }
-        });
-
-        const response = await fetch(`${API_URL}/admin/products/export.csv?${queryParams}`, {
-          method: 'GET',
-          headers: this.getAuthHeaders(),
-        });
-
-        if (!response.ok) {
-          throw new Error('Failed to export CSV');
-        }
-
-        return response.blob();
-      },
-    },
-
-    // User Management
-    users: {
-      // List all users
-      getUsers: async (params: any = {}) => {
-        const queryParams = new URLSearchParams();
-        Object.entries(params).forEach(([key, value]) => {
-          if (value !== undefined && value !== null && value !== '') {
-            queryParams.append(key, String(value));
-          }
-        });
-        return this.request(`${API_URL}/admin/users?${queryParams}`, {
-          method: 'GET',
-          headers: this.getAuthHeaders(),
-        });
-      },
-
-      // Get user details
-      getUser: async (userId: string) => {
-        return this.request(`${API_URL}/admin/users/${userId}`, {
-          method: 'GET',
-          headers: this.getAuthHeaders(),
-        });
-      },
-
-      // Update user
-      updateUser: async (userId: string, data: any) => {
-        return this.request(`${API_URL}/admin/users/${userId}`, {
-          method: 'PATCH',
-          headers: this.getAuthHeaders(),
-          body: JSON.stringify(data),
-        });
-      },
-
-      // Suspend/unsuspend user
-      toggleSuspension: async (userId: string, data: { isSuspended: boolean; reason?: string }) => {
-        return this.request(`${API_URL}/admin/users/${userId}/suspend`, {
-          method: 'POST',
-          headers: this.getAuthHeaders(),
-          body: JSON.stringify(data),
-        });
-      },
-
-      // Delete user
-      deleteUser: async (userId: string) => {
-        return this.request(`${API_URL}/admin/users/${userId}`, {
-          method: 'DELETE',
-          headers: this.getAuthHeaders(),
-        });
-      },
-    },
-
-    // Analytics
-    analytics: {
-      // Get dashboard stats
-      getDashboardStats: async () => {
-        return this.request(`${API_URL}/admin/analytics/dashboard`, {
-          method: 'GET',
-          headers: this.getAuthHeaders(),
-        });
-      },
-
-      // Get revenue analytics
-      getRevenue: async (params: any = {}) => {
-        const queryParams = new URLSearchParams();
-        Object.entries(params).forEach(([key, value]) => {
-          if (value !== undefined && value !== null && value !== '') {
-            queryParams.append(key, String(value));
-          }
-        });
-        return this.request(`${API_URL}/admin/analytics/revenue?${queryParams}`, {
-          method: 'GET',
-          headers: this.getAuthHeaders(),
-        });
-      },
-    },
-
-    // Settings
-    settings: {
-      // Get platform settings
-      getSettings: async () => {
-        return this.request(`${API_URL}/admin/settings`, {
-          method: 'GET',
-          headers: this.getAuthHeaders(),
-        });
-      },
-
-      // Update platform settings
-      updateSettings: async (data: any) => {
-        return this.request(`${API_URL}/admin/settings`, {
-          method: 'PUT',
-          headers: this.getAuthHeaders(),
-          body: JSON.stringify(data),
-        });
-      },
-    },
-  };
-
-  // Cart API
-  cart = {
-    // Get user's cart
-    getCart: async () => {
+    // Get random products
+    getRandomProducts: async (limit: number = 10) => {
       try {
-        return await this.request(`${API_URL}/cart`, {
-          method: 'GET',
-          headers: this.getAuthHeaders(),
+        const queryParams = new URLSearchParams({
+          limit: limit.toString()
         });
-      } catch (err) {
-        if (err instanceof SessionExpiredError) {
-          // Gracefully treat expired sessions as empty cart so UI doesn't crash
-          return {
-            success: true,
-            data: {
-              _id: undefined,
-              userId: undefined,
-              items: [],
-              summary: {
-                totalItems: 0,
-                totalPrice: 0,
-                currency: 'USD',
-                hasNFTs: false,
-                hasCryptoItems: false,
-              },
-              createdAt: undefined,
-              updatedAt: undefined,
-            },
-          } as any;
+        return this.get(`/marketplace/products/random?${queryParams}`);
+      } catch (error) {
+        console.error('Error fetching random products:', error);
+        // Fallback to trending products if random endpoint fails
+        try {
+          const queryParams = new URLSearchParams({
+            limit: limit.toString()
+          });
+          return this.get(`/marketplace/products/trending?${queryParams}`);
+        } catch (fallbackError) {
+          console.error('Fallback to trending products also failed:', fallbackError);
+          throw error; // Throw the original error
         }
-        throw err;
       }
     },
 
-    // Add item to cart
-    addToCart: async (productId: string, quantity: number = 1) => {
-      return this.request(`${API_URL}/cart/add`, {
+    // Get trending products
+    getTrendingProducts: async (limit: number = 10) => {
+      const queryParams = new URLSearchParams({
+        limit: limit.toString()
+      });
+      return this.get(`/marketplace/products/trending?${queryParams}`);
+    },
+
+    // Get product recommendations
+    getRecommendations: async (productId: string, limit: number = 5) => {
+      const queryParams = new URLSearchParams({
+        limit: limit.toString()
+      });
+      return this.get(`/marketplace/products/${productId}/recommendations?${queryParams}`);
+    },
+
+    // Upload product images
+    uploadImages: async (imageFiles: File[]) => {
+      const formData = new FormData();
+      imageFiles.forEach((file, index) => {
+        formData.append(`images`, file);
+      });
+      
+      // Use the existing media upload endpoint but with marketplace context
+      return this.request(`${API_URL}/marketplace/products/images`, {
         method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify({ productId, quantity }),
+        headers: this.getAuthHeaders(false), // Don't include JSON content type for FormData
+        body: formData,
       });
     },
 
-    // Update cart item quantity
-    updateCartItem: async (itemId: string, quantity: number) => {
-      return this.request(`${API_URL}/cart/item/${itemId}`, {
-        method: 'PUT',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify({ quantity }),
-      });
+    // Buy a product
+    buyProduct: async (productId: string, purchaseData: any) => {
+      return this.post(`/marketplace/products/${productId}/buy`, purchaseData);
     },
 
-    // Remove item from cart
-    removeFromCart: async (itemId: string) => {
-      return this.request(`${API_URL}/cart/item/${itemId}`, {
-        method: 'DELETE',
-        headers: this.getAuthHeaders(),
-      });
+    // Get product by ID (alias for getProduct)
+    getProductById: async (productId: string) => {
+      return this.get(`/marketplace/products/${productId}`);
+    }
+  };
+
+  // Admin API
+  admin = {
+
+    getProducts: async () => {
+      return this.get('/admin/products');
     },
 
-    // Clear cart
-    clearCart: async () => {
-      return this.request(`${API_URL}/cart/clear`, {
-        method: 'DELETE',
-        headers: this.getAuthHeaders(),
-      });
+    getProduct: async (productId: string) => {
+      return this.get(`/admin/products/${productId}`);
     },
 
-    // Create PaymentIntent for regular items subtotal (legacy)
-    createCartPaymentIntent: async () => {
-      return this.request(`${API_URL}/cart/create-payment-intent`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-      });
+    updateProduct: async (productId: string, productData: any) => {
+      return this.put(`/admin/products/${productId}`, productData);
     },
 
-    // Create PaymentIntent for a specific currency group with server-side price verification
-    createCartCurrencyIntent: async (currency: string) => {
-      return this.request(`${API_URL}/cart/create-intent/${encodeURIComponent(currency)}`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-      });
+    deleteProduct: async (productId: string) => {
+      return this.delete(`/admin/products/${productId}`);
     },
 
-    // Initialize Flutterwave for a specific cart currency group
-    initFlutterwaveForCurrency: async (currency: string, args: { tx_ref: string; customer: { email: string; name?: string; phonenumber?: string }; redirect_url?: string; meta?: Record<string, any> }) => {
-      const cur = String(currency).toUpperCase();
-      return this.request(`${API_URL}/cart/flutterwave/init/${encodeURIComponent(cur)}`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify(args),
-      });
+    getOrders: async () => {
+      return this.get('/admin/orders');
     },
 
-    // Refresh Flutterwave payment status and persist in cart
-    refreshFlutterwavePaymentStatus: async (args: { tx_ref: string; flw_tx_id: string | number; currency?: string }) => {
-      return this.request(`${API_URL}/cart/payment/flutterwave/status`, {
-        method: 'PATCH',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify(args),
-      });
+    getOrder: async (orderId: string) => {
+      return this.get(`/admin/orders/${orderId}`);
     },
 
-    // Refresh Stripe payment record status for a PaymentIntent ID
-    refreshStripePaymentStatus: async (paymentIntentId: string) => {
-      return this.request(`${API_URL}/cart/payment/stripe/status`, {
-        method: 'PATCH',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify({ paymentIntentId }),
-      });
+    updateOrder: async (orderId: string, orderData: any) => {
+      return this.put(`/admin/orders/${orderId}`, orderData);
     },
 
-    // Checkout cart
-    checkout: async (paymentMethod: string, paymentDetails?: any) => {
-      return this.request(`${API_URL}/cart/checkout`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify({ paymentMethod, paymentDetails }),
-      });
+    deleteOrder: async (orderId: string) => {
+      return this.delete(`/admin/orders/${orderId}`);
     },
+
+    getUsers: async () => {
+      return this.get('/admin/users');
+    },
+
+    getUser: async (userId: string) => {
+      return this.get(`/admin/users/${userId}`);
+    },
+
+    updateUser: async (userId: string, userData: any) => {
+      return this.put(`/admin/users/${userId}`, userData);
+    },
+
+    deleteUser: async (userId: string) => {
+      return this.delete(`/admin/users/${userId}`);
+    },
+
+    getPayments: async () => {
+      return this.get('/admin/payments');
+    },
+
+    getPayment: async (paymentId: string) => {
+      return this.get(`/admin/payments/${paymentId}`);
+    },
+
+    getLogs: async () => {
+      return this.get('/admin/logs');
+    },
+
+    getSettings: async () => {
+      return this.get('/admin/settings');
+    },
+
+    updateSettings: async (settingsData: any) => {
+      return this.put('/admin/settings', settingsData);
+    },
+
+    getStats: async () => {
+      return this.get('/admin/stats');
+    },
+  };
+
+  // Help and support
+  help = {
+
   };
 }
 

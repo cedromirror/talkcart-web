@@ -173,10 +173,10 @@ const OrdersPage: NextPage = () => {
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 4 }}>
           <Button
             startIcon={<ArrowLeft size={20} />}
-            onClick={() => router.push('/cart')}
+            onClick={() => router.push('/marketplace')}
             variant="outlined"
           >
-            Back to Cart
+            Back to Marketplace
           </Button>
           <Typography variant="h4" sx={{ flex: 1 }}>
             Order History

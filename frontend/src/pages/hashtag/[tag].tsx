@@ -1,280 +1,287 @@
-import React, { useEffect, useState } from 'react';
-import { useRouter } from 'next/router';
+import React, { useState } from 'react';
 import {
   Box,
   Container,
   Typography,
-  Tabs,
-  Tab,
   Card,
   CardContent,
-  Avatar,
-  Divider,
+  Button,
   Chip,
-  CircularProgress,
-  Grid,
-  Paper,
   useTheme,
   alpha,
+  Grid,
+  CircularProgress,
+  IconButton,
 } from '@mui/material';
-import { Hash as HashtagIcon } from 'lucide-react';
+import { 
+  Hash, 
+  TrendingUp, 
+  Users, 
+  BarChart,
+} from 'lucide-react';
 import Layout from '@/components/layout/Layout';
-
-interface TabPanelProps {
-  children?: React.ReactNode;
-  index: number;
-  value: number;
-}
-
-function TabPanel(props: TabPanelProps) {
-  const { children, value, index, ...other } = props;
-
-  return (
-    <div
-      role="tabpanel"
-      hidden={value !== index}
-      id={`hashtag-tabpanel-${index}`}
-      aria-labelledby={`hashtag-tab-${index}`}
-      {...other}
-    >
-      {value === index && <Box sx={{ py: 3 }}>{children}</Box>}
-    </div>
-  );
-}
-
-function a11yProps(index: number) {
-  return {
-    id: `hashtag-tab-${index}`,
-    'aria-controls': `hashtag-tabpanel-${index}`,
-  };
-}
+import { PostCardEnhanced as PostCard } from '@/components/social/new/PostCardEnhanced';
+import { Post } from '@/types/social';
+import { useRouter } from 'next/router';
 
 const HashtagPage: React.FC = () => {
-  const router = useRouter();
   const theme = useTheme();
+  const router = useRouter();
   const { tag } = router.query;
-  const [activeTab, setActiveTab] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [posts, setPosts] = useState<any[]>([]);
   
-  // Handle tab change
-  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
-    setActiveTab(newValue);
+  // Mock posts for hashtag
+  const hashtagPosts: Post[] = [
+    {
+      id: '1',
+      type: 'image',
+      content: `Exploring the amazing world of #${tag}! This technology is revolutionizing everything. #Web3 #Blockchain`,
+      author: {
+        username: 'digital_creator',
+        displayName: 'Digital Creator',
+        avatar: '',
+        isVerified: true,
+        id: '1',
+      },
+      media: [
+        {
+          resource_type: 'image',
+          secure_url: '',
+        }
+      ],
+      createdAt: new Date().toISOString(),
+      likes: 2450,
+      comments: 320,
+      shares: 180,
+      views: 12000,
+      isLiked: false,
+      isBookmarked: false,
+    },
+    {
+      id: '2',
+      type: 'video',
+      content: `Just discovered a new #${tag} project that's absolutely incredible! The future is bright. #NFT #Crypto`,
+      author: {
+        username: 'web3_pioneer',
+        displayName: 'Web3 Pioneer',
+        avatar: '',
+        isVerified: true,
+        id: '2',
+      },
+      media: [
+        {
+          resource_type: 'video',
+          secure_url: '',
+          thumbnail_url: '',
+        }
+      ],
+      createdAt: new Date(Date.now() - 3600000).toISOString(),
+      likes: 1890,
+      comments: 240,
+      shares: 120,
+      views: 8900,
+      isLiked: true,
+      isBookmarked: false,
+    },
+    {
+      id: '3',
+      type: 'image',
+      content: `Behind the scenes of my latest #${tag} collection creation process. #DigitalArt #NFT`,
+      author: {
+        username: 'artistic_vision',
+        displayName: 'Artistic Vision',
+        avatar: '',
+        isVerified: false,
+        id: '3',
+      },
+      media: [
+        {
+          resource_type: 'image',
+          secure_url: '',
+        }
+      ],
+      createdAt: new Date(Date.now() - 7200000).toISOString(),
+      likes: 3560,
+      comments: 420,
+      shares: 280,
+      views: 21000,
+      isLiked: false,
+      isBookmarked: true,
+    },
+  ];
+
+  const handleBookmarkPost = (postId: string) => {
+    console.log('Bookmark post:', postId);
   };
-  
-  // Fetch hashtag data
-  useEffect(() => {
-    if (tag) {
-      setLoading(true);
-      
-      // Mock data - in a real app, you would fetch from API
-      setTimeout(() => {
-        setPosts([
-          {
-            id: '1',
-            content: 'This is a post about #' + tag + ' with some interesting content',
-            author: {
-              id: 'user1',
-              username: 'johndoe',
-              displayName: 'John Doe',
-              avatar: 'https://randomuser.me/api/portraits/men/1.jpg'
-            },
-            createdAt: new Date().toISOString(),
-            likeCount: 24,
-            commentCount: 5
-          },
-          {
-            id: '2',
-            content: 'Another post discussing #' + tag + ' from a different perspective',
-            author: {
-              id: 'user2',
-              username: 'janedoe',
-              displayName: 'Jane Doe',
-              avatar: 'https://randomuser.me/api/portraits/women/1.jpg'
-            },
-            createdAt: new Date(Date.now() - 3600000).toISOString(),
-            likeCount: 15,
-            commentCount: 2
-          },
-          {
-            id: '3',
-            content: `Check out this amazing #${tag} project I've been working on!`,
-            author: {
-              id: 'user3',
-              username: 'alexsmith',
-              displayName: 'Alex Smith',
-              avatar: 'https://randomuser.me/api/portraits/men/2.jpg'
-            },
-            createdAt: new Date(Date.now() - 7200000).toISOString(),
-            likeCount: 42,
-            commentCount: 8
-          }
-        ]);
-        setLoading(false);
-      }, 1000);
+
+  // Format large numbers (e.g., 1.2K, 3.4M)
+  const formatNumber = (num: number): string => {
+    if (num >= 1000000) {
+      return (num / 1000000).toFixed(1) + 'M';
     }
-  }, [tag]);
-  
+    if (num >= 1000) {
+      return (num / 1000).toFixed(1) + 'K';
+    }
+    return num.toString();
+  };
+
   if (!tag) {
     return (
       <Layout>
-        <Container maxWidth="lg" sx={{ py: 4 }}>
-          <Box sx={{ textAlign: 'center', py: 8 }}>
-            <Typography variant="h6">Hashtag not found</Typography>
-          </Box>
+        <Container maxWidth="md" sx={{ py: 8, textAlign: 'center' }}>
+          <CircularProgress size={40} />
+          <Typography variant="h6" sx={{ mt: 2 }}>
+            Loading hashtag...
+          </Typography>
         </Container>
       </Layout>
     );
   }
-  
+
   return (
     <Layout>
-      <Container maxWidth="lg" sx={{ py: 4 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 4 }}>
-          <Avatar
-            sx={{
-              bgcolor: theme.palette.primary.main,
-              width: 64,
-              height: 64,
-              mr: 2
-            }}
-          >
-            <HashtagIcon size={32} />
-          </Avatar>
-          <Box>
-            <Typography variant="h4" fontWeight={600}>
-              #{tag}
-            </Typography>
-            <Typography variant="body1" color="text.secondary">
-              {posts.length} posts
-            </Typography>
-          </Box>
-        </Box>
-        
-        <Divider sx={{ mb: 3 }} />
-        
-        <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-          <Tabs 
-            value={activeTab} 
-            onChange={handleTabChange} 
-            aria-label="hashtag tabs"
-            variant="scrollable"
-            scrollButtons="auto"
-          >
-            <Tab label="Top" {...a11yProps(0)} />
-            <Tab label="Latest" {...a11yProps(1)} />
-            <Tab label="People" {...a11yProps(2)} />
-            <Tab label="Media" {...a11yProps(3)} />
-          </Tabs>
-        </Box>
-        
-        {loading ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
-            <CircularProgress />
-          </Box>
-        ) : (
-          <>
-            <TabPanel value={activeTab} index={0}>
-              {posts.map(post => (
-                <Card key={post.id} sx={{ mb: 3, borderRadius: 2 }}>
-                  <CardContent>
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                      <Avatar src={post.author.avatar} sx={{ mr: 1.5 }} />
-                      <Box>
-                        <Typography variant="subtitle1">
-                          {post.author.displayName}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          @{post.author.username}
-                        </Typography>
-                      </Box>
-                    </Box>
-                    <Typography variant="body1" paragraph>
-                      {post.content}
+      <Container maxWidth="md" sx={{ py: 3 }}>
+        {/* Header */}
+        <Card sx={{ borderRadius: 3, boxShadow: '0 4px 16px rgba(0,0,0,0.08)', mb: 3 }}>
+          <CardContent sx={{ p: 3 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+              <Box 
+                sx={{ 
+                  width: 64, 
+                  height: 64, 
+                  borderRadius: '50%',
+                  bgcolor: alpha(theme.palette.primary.main, 0.1),
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <Hash size={32} color={theme.palette.primary.main} />
+              </Box>
+              <Box>
+                <Typography variant="h3" fontWeight={700} sx={{ mb: 1 }}>
+                  #{tag}
+                </Typography>
+                <Typography variant="body1" color="text.secondary">
+                  Trending hashtag
+                </Typography>
+              </Box>
+            </Box>
+            
+            <Grid container spacing={3}>
+              <Grid item xs={12} sm={4}>
+                <Card 
+                  variant="outlined" 
+                  sx={{ 
+                    borderRadius: 2, 
+                    height: '100%',
+                    border: `1px solid ${alpha(theme.palette.primary.main, 0.2)}`,
+                    bgcolor: alpha(theme.palette.primary.main, 0.05)
+                  }}
+                >
+                  <CardContent sx={{ p: 2, textAlign: 'center' }}>
+                    <TrendingUp size={24} color={theme.palette.primary.main} style={{ marginBottom: 8 }} />
+                    <Typography variant="h4" fontWeight={700}>
+                      125K
                     </Typography>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <Typography variant="caption" color="text.secondary">
-                        {new Date(post.createdAt).toLocaleString()}
-                      </Typography>
-                      <Box>
-                        <Chip 
-                          label={`${post.likeCount} likes`} 
-                          size="small" 
-                          variant="outlined"
-                          sx={{ mr: 1 }}
-                        />
-                        <Chip 
-                          label={`${post.commentCount} comments`} 
-                          size="small" 
-                          variant="outlined"
-                        />
-                      </Box>
-                    </Box>
+                    <Typography variant="body2" color="text.secondary">
+                      Posts
+                    </Typography>
                   </CardContent>
                 </Card>
-              ))}
-            </TabPanel>
+              </Grid>
+              
+              <Grid item xs={12} sm={4}>
+                <Card 
+                  variant="outlined" 
+                  sx={{ 
+                    borderRadius: 2, 
+                    height: '100%',
+                    border: `1px solid ${alpha(theme.palette.info.main, 0.2)}`,
+                    bgcolor: alpha(theme.palette.info.main, 0.05)
+                  }}
+                >
+                  <CardContent sx={{ p: 2, textAlign: 'center' }}>
+                    <Users size={24} color={theme.palette.info.main} style={{ marginBottom: 8 }} />
+                    <Typography variant="h4" fontWeight={700}>
+                      8.9K
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      People
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+              
+              <Grid item xs={12} sm={4}>
+                <Card 
+                  variant="outlined" 
+                  sx={{ 
+                    borderRadius: 2, 
+                    height: '100%',
+                    border: `1px solid ${alpha(theme.palette.success.main, 0.2)}`,
+                    bgcolor: alpha(theme.palette.success.main, 0.05)
+                  }}
+                >
+                  <CardContent sx={{ p: 2, textAlign: 'center' }}>
+                    <BarChart size={24} color={theme.palette.success.main} style={{ marginBottom: 8 }} />
+                    <Typography variant="h4" fontWeight={700}>
+                      #12
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Trending
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
             
-            <TabPanel value={activeTab} index={1}>
-              {posts
-                .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-                .map(post => (
-                  <Card key={post.id} sx={{ mb: 3, borderRadius: 2 }}>
-                    <CardContent>
-                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                        <Avatar src={post.author.avatar} sx={{ mr: 1.5 }} />
-                        <Box>
-                          <Typography variant="subtitle1">
-                            {post.author.displayName}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            @{post.author.username}
-                          </Typography>
-                        </Box>
-                      </Box>
-                      <Typography variant="body1" paragraph>
-                        {post.content}
-                      </Typography>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography variant="caption" color="text.secondary">
-                          {new Date(post.createdAt).toLocaleString()}
-                        </Typography>
-                        <Box>
-                          <Chip 
-                            label={`${post.likeCount} likes`} 
-                            size="small" 
-                            variant="outlined"
-                            sx={{ mr: 1 }}
-                          />
-                          <Chip 
-                            label={`${post.commentCount} comments`} 
-                            size="small" 
-                            variant="outlined"
-                          />
-                        </Box>
-                      </Box>
-                    </CardContent>
-                  </Card>
-                ))}
-            </TabPanel>
-            
-            <TabPanel value={activeTab} index={2}>
-              <Paper variant="outlined" sx={{ borderRadius: 2 }}>
-                <Typography variant="body2" color="text.secondary" sx={{ p: 3, textAlign: 'center' }}>
-                  People who frequently post about #{tag} will appear here
-                </Typography>
-              </Paper>
-            </TabPanel>
-            
-            <TabPanel value={activeTab} index={3}>
-              <Paper variant="outlined" sx={{ borderRadius: 2 }}>
-                <Typography variant="body2" color="text.secondary" sx={{ p: 3, textAlign: 'center' }}>
-                  Media posts with #{tag} will appear here
-                </Typography>
-              </Paper>
-            </TabPanel>
-          </>
-        )}
+            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
+              <Button 
+                variant="contained" 
+                size="large"
+                sx={{ 
+                  borderRadius: 3, 
+                  px: 4, 
+                  py: 1.5,
+                  textTransform: 'none',
+                  fontWeight: 600,
+                  boxShadow: `0 4px 12px ${alpha(theme.palette.primary.main, 0.2)}`,
+                  '&:hover': {
+                    boxShadow: `0 6px 16px ${alpha(theme.palette.primary.main, 0.3)}`
+                  }
+                }}
+              >
+                Follow #{tag}
+              </Button>
+            </Box>
+          </CardContent>
+        </Card>
+        
+        {/* Posts */}
+        <Box sx={{ mb: 3 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="h5" fontWeight={700}>
+              Recent Posts
+            </Typography>
+            <Chip 
+              label="Most Recent" 
+              size="small" 
+              sx={{ 
+                bgcolor: alpha(theme.palette.primary.main, 0.1),
+                color: 'primary.main',
+                fontWeight: 600
+              }} 
+            />
+          </Box>
+          
+          {hashtagPosts.map((post) => (
+            <PostCard 
+              key={post.id} 
+              post={post} 
+              onBookmark={handleBookmarkPost}
+            />
+          ))}
+        </Box>
       </Container>
     </Layout>
   );

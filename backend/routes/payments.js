@@ -1,12 +1,11 @@
 const express = require('express');
 const router = express.Router();
-const Stripe = require('stripe');
+// Stripe require removed as part of Stripe cleanup
 const Joi = require('joi');
 const { authenticateToken } = require('./auth');
+const Order = require('../models/Order');
 
-// Initialize Stripe if key provided
-const stripeSecret = process.env.STRIPE_SECRET_KEY;
-const stripe = stripeSecret ? new Stripe(stripeSecret, { apiVersion: '2024-06-20' }) : null;
+// Stripe initialization removed as part of Stripe cleanup
 
 // Flutterwave config
 const FLW_PUBLIC_KEY = process.env.NEXT_PUBLIC_FLW_PUBLIC_KEY || process.env.FLW_PUBLIC_KEY; // for reference
@@ -25,20 +24,7 @@ const flwInitSchema = Joi.object({
   meta: Joi.object().unknown(true).default({}),
 }).required();
 
-// Validation schema for custom intent creation (Stripe legacy)
-const createIntentSchema = Joi.object({
-  items: Joi.array().items(Joi.object({
-    id: Joi.string().optional(),
-    name: Joi.string().optional(),
-    price: Joi.number().min(0).optional(),
-    quantity: Joi.number().integer().min(1).default(1),
-    metadata: Joi.object().unknown(true).optional(),
-  })).default([]),
-  amount: Joi.number().min(0).optional(),
-  currency: Joi.string().lowercase().default('usd'),
-  metadata: Joi.object().unknown(true).default({}),
-  idempotencyKey: Joi.string().optional(),
-}).required();
+// Stripe schema removed as part of Stripe cleanup
 
 // @route   POST /api/payments/flutterwave/init
 // @desc    Initialize Flutterwave payment (Inline/Standard)
@@ -53,8 +39,17 @@ router.post('/flutterwave/init', authenticateToken, async (req, res) => {
       return res.status(400).json({ success: false, error: 'Validation failed', details: error.details.map(d => d.message) });
     }
 
+    // Add user's currency information to meta for tracking
+    const enhancedMeta = {
+      ...value.meta,
+      user_currency: req.user?.currency || 'USD',
+      original_amount: value.amount,
+      original_currency: value.currency,
+    };
+
     const payload = {
       ...value,
+      meta: enhancedMeta,
       // Set redirect_url for Standard; Inline can ignore
       redirect_url: value.redirect_url || undefined,
     };
@@ -81,54 +76,108 @@ router.post('/flutterwave/init', authenticateToken, async (req, res) => {
   }
 });
 
-// @route   POST /api/payments/intent
-// @desc    Create Stripe PaymentIntent (legacy)
+// @route   GET /api/payments/history
+// @desc    Get user's payment history (based on completed orders)
 // @access  Private
-router.post('/intent', authenticateToken, async (req, res) => {
+router.get('/history', authenticateToken, async (req, res) => {
   try {
-    if (!stripe) {
-      return res.status(400).json({ success: false, error: 'Stripe not configured' });
-    }
-
-    const { error, value } = createIntentSchema.validate(req.body || {}, { abortEarly: false });
-    if (error) {
-      return res.status(400).json({ success: false, error: 'Validation failed', details: error.details.map(d => d.message) });
-    }
-
-    const { items, amount, currency, metadata, idempotencyKey } = value;
-
-    // Compute amount from items if not specified
-    let totalMajor = amount;
-    if (totalMajor == null) {
-      totalMajor = items.reduce((sum, it) => sum + ((it.price || 0) * (it.quantity || 1)), 0);
-    }
-
-    if (!totalMajor || totalMajor <= 0) {
-      return res.status(400).json({ success: false, error: 'Invalid amount (computed or provided is 0)' });
-    }
-
-    // Build a concise metadata object (Stripe has size limits on metadata)
-    const safeMetadata = { ...metadata };
-    if (Array.isArray(items) && items.length > 0) {
-      const summary = items.slice(0, 10).map((it) => ({ id: it.id, name: it.name, q: it.quantity, p: it.price }));
-      safeMetadata.items_summary = JSON.stringify(summary);
-      if (items.length > 10) safeMetadata.items_truncated = 'true';
-    }
-
-    const createArgs = {
-      amount: Math.floor(totalMajor * 100), // convert to cents
-      currency,
-      automatic_payment_methods: { enabled: true },
-      metadata: safeMetadata,
+    const userId = req.user.userId;
+    const { page = 1, limit = 10 } = req.query;
+    
+    const query = { 
+      userId,
+      status: 'completed'  // Only show completed payments
     };
 
-    const intent = await stripe.paymentIntents.create(createArgs, idempotencyKey ? { idempotencyKey } : undefined);
+    // Find completed orders for this user
+    const orders = await Order.find(query)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit));
 
-    return res.json({ success: true, data: { clientSecret: intent.client_secret, id: intent.id, amountCents: intent.amount, currency: intent.currency } });
+    // Transform orders into payment history format
+    const payments = orders.map(order => ({
+      id: order._id,
+      orderId: order._id,
+      amount: order.totalAmount,
+      currency: order.currency,
+      status: order.status,
+      method: order.paymentMethod,
+      createdAt: order.createdAt,
+      completedAt: order.completedAt
+    }));
+
+    const total = await Order.countDocuments(query);
+
+    res.json({
+      success: true,
+      data: payments,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+
   } catch (error) {
-    console.error('Stripe intent error:', error);
-    return res.status(500).json({ success: false, error: 'Failed to create PaymentIntent', message: error.message });
+    console.error('Error fetching payment history:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch payment history'
+    });
   }
 });
+
+// @route   GET /api/payments/:id
+// @desc    Get specific payment details
+// @access  Private
+router.get('/:id', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const paymentId = req.params.id;
+
+    // Find the order that matches this payment
+    const order = await Order.findOne({ 
+      _id: paymentId, 
+      userId,
+      status: 'completed'
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payment not found'
+      });
+    }
+
+    const payment = {
+      id: order._id,
+      orderId: order._id,
+      amount: order.totalAmount,
+      currency: order.currency,
+      status: order.status,
+      method: order.paymentMethod,
+      createdAt: order.createdAt,
+      completedAt: order.completedAt,
+      items: order.items,
+      shippingAddress: order.shippingAddress
+    };
+
+    res.json({
+      success: true,
+      data: payment
+    });
+
+  } catch (error) {
+    console.error('Error fetching payment:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch payment'
+    });
+  }
+});
+
+// Stripe intent route removed as part of Stripe cleanup
 
 module.exports = router;

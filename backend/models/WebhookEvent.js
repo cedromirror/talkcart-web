@@ -11,7 +11,7 @@ const webhookEventSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Only use schema-level indexes to avoid duplicates
 webhookEventSchema.index({ source: 1, eventId: 1 }, { unique: true });
-webhookEventSchema.index({ tx_ref: 1 });
 
 module.exports = mongoose.model('WebhookEvent', webhookEventSchema);

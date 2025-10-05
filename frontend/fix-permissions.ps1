@@ -1,28 +1,38 @@
-# Fix Next.js permissions script
-# Run this if you encounter EPERM errors with .next directory
+# Fix permissions script for TalkCart frontend
+# This script helps resolve EPERM issues on Windows by resetting file permissions
 
-Write-Host "Fixing Next.js permissions..." -ForegroundColor Yellow
+Write-Host "Fixing permissions for TalkCart frontend..." -ForegroundColor Green
 
-# Stop any running Node processes
-Get-Process -Name "node" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-Write-Host "Stopped Node processes" -ForegroundColor Green
-
-# Remove .next directory
+# Remove .next directory if it exists
 if (Test-Path ".next") {
-    Remove-Item ".next" -Recurse -Force -ErrorAction SilentlyContinue
-    Write-Host "Removed .next directory" -ForegroundColor Green
+    Write-Host "Removing .next directory..." -ForegroundColor Yellow
+    try {
+        Remove-Item ".next" -Recurse -Force -ErrorAction Stop
+        Write-Host "Successfully removed .next directory" -ForegroundColor Green
+    } catch {
+        Write-Host "Failed to remove .next directory: $($_.Exception.Message)" -ForegroundColor Red
+    }
 }
 
-# Clear npm cache
-npm cache clean --force 2>$null
-Write-Host "Cleared npm cache" -ForegroundColor Green
+# Remove node_modules if needed (optional, uncomment if needed)
+# if (Test-Path "node_modules") {
+#     Write-Host "Removing node_modules directory..." -ForegroundColor Yellow
+#     try {
+#         Remove-Item "node_modules" -Recurse -Force -ErrorAction Stop
+#         Write-Host "Successfully removed node_modules directory" -ForegroundColor Green
+#     } catch {
+#         Write-Host "Failed to remove node_modules directory: $($_.Exception.Message)" -ForegroundColor Red
+#     }
+# }
 
-# Set environment variables to reduce file system stress
-$env:NEXT_TELEMETRY_DISABLED = "1"
-$env:NODE_OPTIONS = "--max-old-space-size=4096"
+# Reset npm cache
+Write-Host "Cleaning npm cache..." -ForegroundColor Yellow
+try {
+    npm cache clean --force
+    Write-Host "Successfully cleaned npm cache" -ForegroundColor Green
+} catch {
+    Write-Host "Failed to clean npm cache: $($_.Exception.Message)" -ForegroundColor Red
+}
 
-Write-Host "Environment variables set" -ForegroundColor Green
-Write-Host "You can now run 'npm run dev' safely" -ForegroundColor Cyan
-
-# Optional: Set folder permissions (uncomment if needed)
-# icacls ".\" /grant Everyone:F /T /C /Q 2>$null
+Write-Host "Permission fix complete!" -ForegroundColor Green
+Write-Host "You can now run 'npm run dev' to start the development server" -ForegroundColor Cyan

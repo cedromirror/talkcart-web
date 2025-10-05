@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { Post, User, Comment, Follow, Share } = require('../models');
+const { Post, User, Comment, Follow, Share, Notification } = require('../models');
 const { authenticateToken } = require('./auth');
 const { getVideoThumbnail } = require('../config/cloudinary');
 
@@ -203,16 +203,6 @@ router.get('/', async (req, res) => {
       data: {
         posts: await Promise.all(posts.map(async post => {
           // Handle anonymous author case
-          if (post.author === 'anonymous-user' || !post.author) {
-            post.author = {
-              _id: 'anonymous-user',
-              username: 'anonymous',
-              displayName: 'TalkCart User',
-              avatar: '',
-              isVerified: false
-            };
-          }
-          
           // Transform arrays to counts and add computed properties
           const userId = req.user ? (req.user.userId || req.user.id) : null;
           
@@ -367,17 +357,6 @@ router.get('/public', async (req, res) => {
       success: true,
       data: {
         posts: await Promise.all(posts.map(async post => {
-          // Handle anonymous author case
-          if (post.author === 'anonymous-user' || !post.author) {
-            post.author = {
-              _id: 'anonymous-user',
-              username: 'anonymous',
-              displayName: 'TalkCart User',
-              avatar: '',
-              isVerified: false
-            };
-          }
-          
           // Count comments for this post
           const commentCount = await Comment.countDocuments({ 
             post: post._id, 
@@ -965,42 +944,17 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 
     // Handle both authenticated and anonymous users
-    let user;
-    let userId = req.user.id || req.user.userId;
+    const userId = req.user.id || req.user.userId;
     
     console.log('Processing user authentication - userId:', userId, 'isAnonymous:', req.user.isAnonymous);
     
-    if (userId === 'anonymous-user' || req.user.isAnonymous) {
-      console.log('Handling anonymous user...');
-      // Find or create anonymous user in database
-      user = await User.findOne({ username: 'anonymous' });
-      if (!user) {
-        console.log('Anonymous user not found, creating...');
-        // Create anonymous user if it doesn't exist
-        user = new User({
-          username: 'anonymous',
-          displayName: 'TalkCart User',
-          email: 'anonymous@talkcart.app',
-          password: 'anonymous-password-not-used',
-          avatar: '',
-          bio: 'Anonymous TalkCart User',
-          isVerified: false,
-          isAnonymous: true
-        });
-        await user.save();
-        console.log('Created anonymous user:', user._id);
-      } else {
-        console.log('Found existing anonymous user:', user._id);
-      }
-    } else {
-      // Get authenticated user from database
-      user = await User.findById(userId);
-      if (!user) {
-        return res.status(404).json({
-          success: false,
-          error: 'User not found',
-        });
-      }
+    // Get authenticated user from database
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      });
     }
 
     // Note: Mentions validation can be added later as an async process
@@ -1022,14 +976,8 @@ router.post('/', authenticateToken, async (req, res) => {
     // Save post to MongoDB
     await newPost.save();
 
-    // Handle author data for response
-    if (user._id === 'anonymous-user') {
-      // For anonymous posts, manually set author data
-      newPost.author = user;
-    } else {
-      // Populate author data for registered users
-      await newPost.populate('author', 'username displayName avatar isVerified');
-    }
+    // Populate author data for registered users
+    await newPost.populate('author', 'username displayName avatar isVerified');
 
     console.log(`Post created successfully:`, {
       postId: newPost._id,
@@ -1038,6 +986,79 @@ router.post('/', authenticateToken, async (req, res) => {
       hasMedia: newPost.media && newPost.media.length > 0,
       mediaCount: newPost.media ? newPost.media.length : 0,
       mediaTypes: newPost.media ? newPost.media.map(m => m.resource_type) : []
+    });
+
+    // Notify all followers about the new post
+    setImmediate(async () => {
+      try {
+        // Only notify followers for non-anonymous users
+        if (user._id !== 'anonymous-user' && !req.user.isAnonymous) {
+          // Get all followers of the post author
+          const followers = await Follow.getFollowers(user._id, { limit: 1000, populate: false });
+          const followerIds = followers.map(follow => follow.follower.toString());
+          
+          console.log(`Notifying ${followerIds.length} followers about new post`);
+          
+          // Create notifications for each follower
+          const notificationPromises = followerIds.map(followerId => {
+            // Skip notifying the post author
+            if (followerId === user._id.toString()) {
+              return Promise.resolve();
+            }
+            
+            const notificationData = {
+              recipient: followerId,
+              sender: user._id,
+              type: 'post',
+              title: `${user.displayName || user.username} just posted`,
+              message: newPost.content.length > 100 
+                ? newPost.content.substring(0, 100) + '...' 
+                : newPost.content,
+              data: {
+                postId: newPost._id,
+                postType: newPost.type,
+                authorId: user._id
+              },
+              relatedId: newPost._id,
+              relatedModel: 'Post',
+              actionUrl: `/post/${newPost._id}`
+            };
+            
+            return Notification.createNotification(notificationData)
+              .then(notification => {
+                // Send real-time notification
+                // Instead of using getIo(req), let's try to access io directly
+                // This is a more reliable approach for background processes
+                const io = req.app.get('io');
+                if (io) {
+                  io.to(`user_${followerId}`).emit('notification:new', notification);
+                  
+                  // Update unread count for the follower
+                  return Notification.getUnreadCount(followerId)
+                    .then(unreadCount => {
+                      io.to(`user_${followerId}`).emit('notification:unread-count', {
+                        unreadCount
+                      });
+                    })
+                    .catch(err => {
+                      console.error('Error getting unread count:', err);
+                    });
+                } else {
+                  console.log('Socket.IO instance not available for real-time notifications');
+                }
+              })
+              .catch(err => {
+                console.error(`Error creating notification for follower ${followerId}:`, err);
+              });
+          });
+          
+          // Wait for all notifications to be created
+          await Promise.all(notificationPromises);
+          console.log(`Notifications sent to ${followerIds.length} followers`);
+        }
+      } catch (error) {
+        console.error('Error notifying followers about new post:', error);
+      }
     });
 
     // Broadcast new post to all connected clients (non-blocking)

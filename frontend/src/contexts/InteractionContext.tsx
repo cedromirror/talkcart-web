@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 import { syncSettings } from '@/services/settingsSync';
 import { useSafeAuth } from '@/hooks/useSafeAuth';
 
@@ -123,7 +123,7 @@ export const useInteraction = () => {
 };
 
 interface InteractionProviderProps {
-  children: ReactNode;
+  children: React.ReactNode;
 }
 
 const INTERACTION_STORAGE_KEY = 'talkcart-interaction-settings';

@@ -469,7 +469,14 @@ export default function EnhancedWalletPage() {
         />
 
         {/* Receive Dialog */}
-        <Dialog open={receiveDialogOpen} onClose={() => setReceiveDialogOpen(false)} maxWidth="sm" fullWidth>
+        <Dialog 
+          open={receiveDialogOpen} 
+          onClose={() => setReceiveDialogOpen(false)} 
+          maxWidth="sm" 
+          fullWidth
+          disableEnforceFocus  // Prevents focus trapping issues
+          hideBackdrop={false}  // Ensure backdrop is properly handled
+        >
           <DialogTitle>Receive Crypto</DialogTitle>
           <DialogContent>
             <Box textAlign="center" py={3}>

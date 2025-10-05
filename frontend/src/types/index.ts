@@ -20,7 +20,7 @@ export interface User {
   updatedAt?: string;
   walletAddress?: string;
   isActive?: boolean;
-  role?: 'user' | 'moderator' | 'admin';
+  role?: 'user' | 'moderator' | 'admin' | 'vendor';
   lastSeenAt?: string;
   emailVerifiedAt?: string;
   socialLinks?: {
@@ -241,7 +241,7 @@ export interface Stream {
   }>;
 }
 
-// Product and Cart Types
+// Product Types (Cart types have been removed)
 export interface ProductImage {
   public_id?: string;
   secure_url: string;
@@ -272,45 +272,6 @@ export interface Product {
   availability: 'available' | 'sold' | 'unavailable' | 'limited';
   createdAt: string;
   updatedAt: string;
-}
-
-export interface CartItem {
-  _id: string;
-  productId: Product;
-  quantity: number;
-  price: number;
-  currency: string;
-  addedAt: string;
-}
-
-export interface CartSummary {
-  totalItems: number;
-  totalPrice: number;
-  currency: string;
-  hasNFTs: boolean;
-  hasCryptoItems: boolean;
-}
-
-export interface CartPaymentRecord {
-  provider: 'stripe';
-  currency: string; // Uppercase
-  paymentIntentId: string;
-  amountCents: number;
-  status: 'requires_payment_method' | 'requires_confirmation' | 'processing' | 'requires_action' | 'succeeded' | 'canceled';
-  updatedAt: string;
-}
-
-export interface Cart {
-  _id: string;
-  userId: string;
-  items: CartItem[];
-  payments?: CartPaymentRecord[];
-  summary: CartSummary;
-  createdAt: string;
-  updatedAt: string;
-  loading?: boolean;
-  error?: string | null;
-  totalItems?: number;
 }
 
 // Re-export from other type files

@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { api } from '@/lib/api';
+import api from '@/lib/api';
 import { toast } from 'react-hot-toast';
 import { SessionExpiredError } from '@/lib/api';
 
@@ -68,13 +68,22 @@ const useMarketplace = () => {
       setLoading(true);
       setError(null);
 
+      // Add a check to ensure api and api.marketplace are defined
+      if (!api) {
+        throw new Error('API service is not initialized');
+      }
+      
+      if (!api.marketplace) {
+        throw new Error('Marketplace API is not available');
+      }
+
       const params = {
         page: filters.page || 1,
         limit: 12,
         search: filters.search,
         category: filters.category,
-        minPrice: filters.minPrice,
-        maxPrice: filters.maxPrice,
+        minPrice: filters.minPrice ? Number(filters.minPrice) : undefined,
+        maxPrice: filters.maxPrice ? Number(filters.maxPrice) : undefined,
         isNFT: filters.isNFT,
         featured: filters.featured,
         sortBy: filters.sortBy || 'newest',
@@ -87,7 +96,7 @@ const useMarketplace = () => {
         }
       });
 
-      const response = await api.marketplace.getProducts(params);
+      const response: any = await api.marketplace.getProducts(params);
 
       if (response.success) {
         const productsData = response.data.products.map((product: any) => ({
@@ -139,15 +148,45 @@ const useMarketplace = () => {
     }
   }, []);
 
+  // Fetch categories
+  const fetchCategories = useCallback(async () => {
+    try {
+      // Add a check to ensure api and api.marketplace are defined
+      if (!api || !api.marketplace) {
+        console.warn('Marketplace API not available');
+        setCategories([]);
+        return;
+      }
+      
+      const response: any = await api.marketplace.getCategories();
+      if (response.success) {
+        setCategories(response.data.categories || []);
+      }
+    } catch (err: any) {
+      console.error('Error fetching categories:', err);
+      // On error, do not use hardcoded categories; leave empty so UI reflects real API state
+      setCategories([]);
+    }
+  }, []);
+
   // Fetch single product
   const fetchProduct = useCallback(async (productId: string) => {
     try {
       setLoading(true);
       setError(null);
 
+      // Add a check to ensure api and api.marketplace are defined
+      if (!api) {
+        throw new Error('API service is not initialized');
+      }
+      
+      if (!api.marketplace) {
+        throw new Error('Marketplace API is not available');
+      }
+
       // Normalize the id to a string early to avoid invalid ObjectId issues
       const normalizedId = String(productId);
-      const response = await api.marketplace.getProduct(normalizedId);
+      const response: any = await api.marketplace.getProduct(normalizedId);
 
       if (response.success) {
         const product = response.data.product || response.data;
@@ -196,30 +235,34 @@ const useMarketplace = () => {
     }
   }, []);
 
-  // Fetch categories
-  const fetchCategories = useCallback(async () => {
-    try {
-      const response = await api.marketplace.getCategories();
-      if (response.success) {
-        setCategories(response.data.categories || []);
-      }
-    } catch (err: any) {
-      console.error('Error fetching categories:', err);
-      // On error, do not use hardcoded categories; leave empty so UI reflects real API state
-      setCategories([]);
-    }
-  }, []);
-
   // Buy product
-  const buyProduct = useCallback(async (productId: string, opts?: { paymentMethod?: 'stripe' | 'crypto' | 'nft'; paymentDetails?: any }) => {
+  const buyProduct = useCallback(async (productId: string, opts?: { paymentMethod?: 'crypto' | 'nft' | 'flutterwave'; paymentDetails?: any; product?: any }) => {
     try {
       setLoading(true);
       setError(null);
 
+      // Add a check to ensure api and api.marketplace are defined
+      if (!api) {
+        throw new Error('API service is not initialized');
+      }
+      
+      if (!api.marketplace) {
+        throw new Error('Marketplace API is not available');
+      }
+
+      // For NFTs, no payment method is required
+      // For regular products, use the provided payment method
       const method = opts?.paymentMethod;
       const details = opts?.paymentDetails;
 
-      const response = await api.marketplace.buyProduct(productId, method ? { paymentMethod: method, paymentDetails: details } : undefined);
+      let requestData: any = undefined;
+      
+      // Handle different payment methods
+      if (method) {
+        requestData = { paymentMethod: method, paymentDetails: details };
+      }
+
+      const response: any = await api.marketplace.buyProduct(productId, requestData);
 
       if (response.success) {
         const { product, payment } = response.data;
@@ -249,13 +292,24 @@ const useMarketplace = () => {
     }
   }, []);
 
+// Stripe payment completion removed as part of Stripe cleanup
+
   // Create product
   const createProduct = useCallback(async (productData: any) => {
     try {
       setLoading(true);
       setError(null);
 
-      const response = await api.marketplace.createProduct(productData);
+      // Add a check to ensure api and api.marketplace are defined
+      if (!api) {
+        throw new Error('API service is not initialized');
+      }
+      
+      if (!api.marketplace) {
+        throw new Error('Marketplace API is not available');
+      }
+
+      const response: any = await api.marketplace.createProduct(productData);
 
       if (response.success) {
         toast.success('Product created successfully!');

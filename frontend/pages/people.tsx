@@ -18,7 +18,7 @@ import {
 } from '@mui/material';
 import { Search, Users, TrendingUp, UserPlus } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
-import WhoToFollow from '@/components/social/WhoToFollow';
+import WhoToFollow from '@/components/social/new/WhoToFollow';
 import useDebounce from '@/hooks/useDebounce';
 import { useRouter } from 'next/router';
 

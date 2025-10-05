@@ -137,7 +137,6 @@ export const ROUTES = {
     HOME: '/marketplace',
     PRODUCT: (id: string) => `/marketplace/product/${id}`,
     CATEGORY: (category: string) => `/marketplace/category/${category}`,
-    CART: '/marketplace/cart',
     ORDERS: '/marketplace/orders',
   },
   STREAMS: {

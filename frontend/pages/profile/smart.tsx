@@ -43,12 +43,15 @@ import {
   GridOn,
   PlayArrow,
   Image as ImageIcon,
+  Store,
+  Logout as LogoutIcon,
 } from '@mui/icons-material';
 import { api } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { useProfile } from '@/contexts/ProfileContext'; // Add this import
 import { ProfileUser, Post } from '@/types';
 import UserCard from '@/components/profile/UserCard';
-import { PostCard } from '@/components/social/PostCard';
+import { PostCardEnhanced as PostCard } from '@/components/social/new/PostCardEnhanced';
 import { useProfileCache } from '@/contexts/ProfileCacheContext';
 
 // Modern Stats Card Component
@@ -60,27 +63,38 @@ const StatsCard: React.FC<{ label: string; value: number; icon: React.ReactNode;
 }) => {
   const theme = useTheme();
 
+  // Safely get color from theme palette
+  const getColor = (colorName: string) => {
+    const palette: any = theme.palette;
+    if (palette[colorName] && palette[colorName].main) {
+      return palette[colorName].main;
+    }
+    return palette.primary.main; // fallback to primary
+  };
+
+  const mainColor = getColor(color);
+
   return (
     <Paper
       elevation={0}
       sx={{
         p: 2.5,
         textAlign: 'center',
-        background: `linear-gradient(135deg, ${alpha(theme.palette[color as keyof typeof theme.palette].main, 0.1)}, ${alpha(theme.palette[color as keyof typeof theme.palette].main, 0.05)})`,
-        border: `1px solid ${alpha(theme.palette[color as keyof typeof theme.palette].main, 0.2)}`,
+        background: `linear-gradient(135deg, ${alpha(mainColor, 0.1)}, ${alpha(mainColor, 0.05)})`,
+        border: `1px solid ${alpha(mainColor, 0.2)}`,
         borderRadius: 2,
         transition: 'all 0.3s ease',
         cursor: 'pointer',
         '&:hover': {
           transform: 'translateY(-2px)',
-          boxShadow: `0 8px 25px ${alpha(theme.palette[color as keyof typeof theme.palette].main, 0.15)}`,
-          border: `1px solid ${alpha(theme.palette[color as keyof typeof theme.palette].main, 0.3)}`,
+          boxShadow: `0 8px 25px ${alpha(mainColor, 0.15)}`,
+          border: `1px solid ${alpha(mainColor, 0.3)}`,
         }
       }}
     >
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-        <Box sx={{ color: `${color}.main`, mr: 1 }}>{icon}</Box>
-        <Typography variant="h4" fontWeight="bold" color={`${color}.main`}>
+        <Box sx={{ color: mainColor, mr: 1 }}>{icon}</Box>
+        <Typography variant="h4" fontWeight="bold" sx={{ color: mainColor }}>
           {value.toLocaleString()}
         </Typography>
       </Box>
@@ -98,8 +112,29 @@ const ProfileHeader: React.FC<{
   onEditProfile?: () => void;
   onFollow?: () => void;
   onMessage?: () => void;
-}> = ({ profile, isOwnProfile, onEditProfile, onFollow, onMessage }) => {
+  router?: any; // Make router prop optional
+}> = ({ profile, isOwnProfile, onEditProfile, onFollow, onMessage, router }) => {
   const theme = useTheme();
+  const { updateProfile } = useProfile(); // Add this line
+
+  // Handle follow/unfollow with ProfileContext
+  const handleFollow = async () => {
+    try {
+      if (profile.isFollowing) {
+        await api.users.unfollow(profile.id);
+        // Update profile context
+        // In a real implementation, you might want to refresh the profile data
+      } else {
+        await api.users.follow(profile.id);
+        // Update profile context
+        // In a real implementation, you might want to refresh the profile data
+      }
+      // Call the passed onFollow handler if provided
+      onFollow?.();
+    } catch (error) {
+      console.error('Follow/unfollow error:', error);
+    }
+  };
 
   return (
     <Paper
@@ -116,8 +151,8 @@ const ProfileHeader: React.FC<{
       <Box
         sx={{
           height: 200,
-          background: profile.coverPhoto
-            ? `url(${profile.coverPhoto})`
+          background: profile.cover
+            ? `url(${profile.cover})`
             : `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
           backgroundSize: 'cover',
           backgroundPosition: 'center',
@@ -222,8 +257,34 @@ const ProfileHeader: React.FC<{
                   >
                     Edit Profile
                   </Button>
+                  {/* Vendor Dashboard Button - Only show for users with vendor role */}
+                  {profile.role === 'vendor' && router && (
+                    <Button
+                      variant="contained"
+                      color="secondary"
+                      startIcon={<Store />}
+                      onClick={() => router.push('/vendor/dashboard')}
+                      sx={{ borderRadius: 2 }}
+                    >
+                      Vendor Dashboard
+                    </Button>
+                  )}
                   <IconButton sx={{ bgcolor: alpha(theme.palette.primary.main, 0.1) }}>
                     <Settings />
+                  </IconButton>
+                  <IconButton 
+                    sx={{ bgcolor: alpha(theme.palette.error.main, 0.1) }}
+                    onClick={async () => {
+                      try {
+                        await fetch('/api/auth/logout', { method: 'POST' });
+                        router.push('/auth/login');
+                      } catch (error) {
+                        console.error('Logout failed:', error);
+                        router.push('/auth/login');
+                      }
+                    }}
+                  >
+                    <LogoutIcon />
                   </IconButton>
                 </>
               ) : (
@@ -231,7 +292,7 @@ const ProfileHeader: React.FC<{
                   <Button
                     variant="contained"
                     startIcon={profile.isFollowing ? <PersonRemove /> : <PersonAdd />}
-                    onClick={onFollow}
+                    onClick={handleFollow} // Use the new handleFollow function
                     color={profile.isFollowing ? "secondary" : "primary"}
                     sx={{ borderRadius: 2 }}
                   >
@@ -331,7 +392,7 @@ const ProfileHeader: React.FC<{
           <Grid item xs={6} sm={3}>
             <StatsCard
               label="Likes"
-              value={profile.totalLikes || 0}
+              value={0}
               icon={<Favorite />}
               color="error"
             />
@@ -351,16 +412,22 @@ const EditAboutSection: React.FC<{ profile: ProfileUser; onProfileUpdated: (u: P
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const { updateProfile } = useProfile(); // Add this line
 
   const handleSave = async () => {
     setSaving(true);
     setError(null);
     setSuccess(null);
     try {
-      const res = await api.users.updateProfile({ displayName, bio, location, website });
-      const updated = (res as any)?.data || res;
-      onProfileUpdated(updated as ProfileUser);
-      setSuccess('Profile updated');
+      // Use ProfileContext to update profile
+      const success = await updateProfile({ displayName, bio, location, website });
+      if (success) {
+        setSuccess('Profile updated');
+        // Refresh the profile to get the updated data
+        // In a real implementation, you might want to pass a callback to refresh the profile
+      } else {
+        setError('Failed to update profile');
+      }
     } catch (e: any) {
       setError(e?.message || 'Failed to update profile');
     } finally {
@@ -421,6 +488,7 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
   const routeUsername = (router.query.username as string) || undefined;
   const effectiveUsername = username || routeUsername;
   const { user: currentUser } = useAuth();
+  const { profile: contextProfile, loading: profileLoading, loadProfile, updateProfile } = useProfile(); // Add this line
   const theme = useTheme();
 
   const isOwnProfile = useMemo(() => {
@@ -437,33 +505,42 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
   const [tab, setTab] = useState(0);
   const [isReady, setIsReady] = useState(false);
 
-  // Ensure tab value is always valid
-  // Handle different tab indices based on profile ownership
-  const getValidTab = (tabValue: any): number => {
-    const numTab = typeof tabValue === 'number' ? tabValue : parseInt(String(tabValue), 10) || 0;
-
-    if (isOwnProfile) {
-      // Own profile: tabs 0-6 (Posts, Media, Liked, Saved, About, Followers, Following)
-      return Math.max(0, Math.min(6, numTab));
-    } else {
-      // Other's profile: tabs 0,1,2,3,4 (Posts, Media, About, Followers, Following)
-      // Map original indices: 0->0, 1->1, 4->2, 5->3, 6->4
-      const maxTab = 4;
-      const clampedTab = Math.max(0, Math.min(6, numTab));
-
-      if (clampedTab <= 1) return clampedTab; // Posts, Media
-      if (clampedTab === 2 || clampedTab === 3) return 0; // Liked/Saved -> Posts
-      if (clampedTab === 4) return 2; // About
-      if (clampedTab === 5) return 3; // Followers
-      if (clampedTab === 6) return 4; // Following
-
-      return 0; // Default to Posts
-    }
+  // Simplified tab management
+  const handleTabChange = (_: any, newValue: number) => {
+    setTab(newValue);
   };
 
-  const validTab = getValidTab(tab);
+  // For display, just use the tab value directly for own profile
+  // For other profiles, map the tab value to available tabs
+  const displayTabIndex = isOwnProfile ? tab : 
+    // Map actual indices to display indices for other profiles:
+    // 0->0, 1->1, 4->2, 5->3, 6->4
+    tab === 0 ? 0 : 
+    tab === 1 ? 1 : 
+    tab === 4 ? 2 : 
+    tab === 5 ? 3 : 
+    tab === 6 ? 4 : 0; // Default to 0 if invalid
 
+  // Ensure tab value is always valid
+  useEffect(() => {
+    if (isOwnProfile) {
+      // For own profile, ensure tab is between 0-6
+      if (tab < 0 || tab > 6) {
+        setTab(0);
+      }
+    } else {
+      // For other profiles, ensure tab is one of the available tabs
+      const availableTabs = [0, 1, 4, 5, 6];
+      if (!availableTabs.includes(tab)) {
+        setTab(0);
+      }
+    }
+  }, [isOwnProfile, tab]);
 
+  // Reset tab to 0 when profile changes
+  useEffect(() => {
+    setTab(0);
+  }, [profile?.id, isOwnProfile]);
 
   // Stabilize rendering to prevent hooks order changes
   const renderKey = `${effectiveUsername}-${profile?.id || 'loading'}-${tab}`;
@@ -473,8 +550,6 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
     const timer = setTimeout(() => setIsReady(true), 100);
     return () => clearTimeout(timer);
   }, []);
-
-
 
   // Posts state
   const [posts, setPosts] = useState<Post[]>([]);
@@ -509,91 +584,46 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
   const [followersHasMore, setFollowersHasMore] = useState(true);
   const [followingHasMore, setFollowingHasMore] = useState(true);
 
+  // Use profile from ProfileContext if available, otherwise use local state
+  const displayProfile = contextProfile || profile;
+
   useEffect(() => {
     let isMounted = true;
     async function load() {
       setLoading(true);
       setError(null);
       try {
-        // Try cached profile first (only for other users)
-        if (!isOwnProfile && effectiveUsername) {
-          const cached = getProfileFromCache?.(effectiveUsername);
-          if (cached) {
-            setProfile(cached);
-          }
+        // Use ProfileContext to load profile
+        if (effectiveUsername) {
+          await loadProfile(effectiveUsername);
+        } else if (isOwnProfile && currentUser?.username) {
+          await loadProfile(); // Load current user's profile
         }
+      } catch (e: any) {
+        setError(e?.message || 'Failed to load profile');
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+    load();
+    return () => {
+      isMounted = false;
+    };
+  }, [effectiveUsername, isOwnProfile, currentUser?.username, loadProfile]);
 
-        if (isOwnProfile) {
-          // Fetch current user via /auth/me
-          const me = await api.auth.getProfile();
-          if (me?.success && me.data) {
-            setProfile(me.data as any);
-            setProfileInCache?.(me.data.username, me.data as any);
-          } else {
-            throw new Error(me?.message || me?.error || 'Failed to load profile');
-          }
-        } else if (effectiveUsername) {
-          console.log('Loading profile for username:', effectiveUsername);
-
-          // Try multiple approaches to ensure profile loading works
-          let res: any = null;
-
-          try {
-            // First try the API wrapper
-            res = await api.users.getProfile(effectiveUsername);
-            console.log('API wrapper response:', res);
-          } catch (apiError: any) {
-            console.log('API wrapper failed, trying direct fetch:', apiError.message);
-
-            // Fallback to direct fetch
-            try {
-              const response = await fetch(`/api/users/profile/${encodeURIComponent(effectiveUsername)}`, {
-                method: 'GET',
-                headers: {
-                  'Content-Type': 'application/json',
-                  // Include auth header if available, but don't require it for public profiles
-                  ...(localStorage.getItem('token') ? {
-                    'Authorization': `Bearer ${localStorage.getItem('token')}`
-                  } : {})
-                }
-              });
-
-              res = await response.json();
-              console.log('Direct fetch response:', res);
-            } catch (fetchError: any) {
-              console.error('Direct fetch also failed:', fetchError);
-              throw new Error('Unable to load profile. Please try again.');
-            }
-          }
-
-          if (res?.success && res.data) {
-            setProfile(res.data as ProfileUser);
-            setProfileInCache?.(effectiveUsername, res.data as ProfileUser);
-            console.log('Profile loaded successfully:', res.data.username);
-          } else {
-            // Provide more helpful error messages
-            let errorMessage = 'Failed to load profile';
-
-            if (res?.error === 'User not found') {
-              errorMessage = `User "${effectiveUsername}" not found. They may have deactivated their account or the username may be incorrect.`;
-            } else if (res?.error === 'This profile is private') {
-              errorMessage = `This profile is private. You need to follow ${effectiveUsername} to view their profile.`;
-            } else if (res?.message) {
-              errorMessage = res.message;
-            } else if (res?.error) {
-              errorMessage = res.error;
-            }
-
-            throw new Error(errorMessage);
-          }
-        }
-
+  // Load posts when profile is available
+  useEffect(() => {
+    let isMounted = true;
+    async function loadPosts() {
+      if (!displayProfile?.id) return;
+      
+      try {
         // Load posts for profile user when available
         const usernameForPosts = isOwnProfile ? currentUser?.username : effectiveUsername;
         if (usernameForPosts) {
           // Default Posts
           setPostsPage(1);
-          const postsRes = await api.posts.getUserPosts(usernameForPosts, { limit: 10, page: 1 });
+          const postsRes = await api.posts.getUserPosts(displayProfile.id, { limit: 10, page: 1 });
           const fetched = (postsRes as any)?.data?.posts || (postsRes as any)?.posts || (Array.isArray(postsRes) ? postsRes : []);
           setPosts(Array.isArray(fetched) ? fetched : []);
           const total = (postsRes as any)?.data?.pagination?.total || (postsRes as any)?.pagination?.total || (Array.isArray(fetched) ? fetched.length : 0);
@@ -601,7 +631,7 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
 
           // Media tab initial load
           setMediaPage(1);
-          const mediaRes = await api.posts.getUserPosts(usernameForPosts, { limit: 10, page: 1, contentType: 'media' });
+          const mediaRes = await api.posts.getUserPosts(displayProfile.id, { limit: 10, page: 1, contentType: 'media' });
           const mediaFetched = (mediaRes as any)?.data?.posts || (mediaRes as any)?.posts || [];
           setMediaPosts(Array.isArray(mediaFetched) ? mediaFetched : []);
           const mediaTotal = (mediaRes as any)?.data?.pagination?.total || (mediaRes as any)?.pagination?.total || 0;
@@ -610,7 +640,7 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
           // Liked + Bookmarked initial load only for own profile
           if (isOwnProfile && currentUser?.id) {
             setLikedPage(1);
-            const likedRes = await api.posts.getUserLikedPosts(currentUser.id, { limit: 10, page: 1 });
+            const likedRes = await api.posts.getLikedPosts(currentUser.id, { limit: 10, page: 1 });
             const likedFetched = (likedRes as any)?.data?.posts || (likedRes as any)?.posts || [];
             setLikedPosts(Array.isArray(likedFetched) ? likedFetched : []);
             const likedTotal = (likedRes as any)?.data?.pagination?.total || (likedRes as any)?.pagination?.total || 0;
@@ -625,42 +655,17 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
           }
         }
       } catch (e: any) {
-        setError(e?.message || 'Failed to load profile');
-      } finally {
-        if (isMounted) setLoading(false);
+        console.error('Failed to load posts:', e);
       }
     }
-    load();
+    
+    loadPosts();
     return () => {
       isMounted = false;
     };
-  }, [effectiveUsername, isOwnProfile, currentUser?.username, currentUser?.id, getProfileFromCache, setProfileInCache]);
+  }, [displayProfile?.id, isOwnProfile, currentUser?.username, currentUser?.id, effectiveUsername]);
 
-  const handleTabChange = (_: any, newValue: number) => {
-    // Ensure newValue is a valid number and within range
-    if (typeof newValue === 'number' && newValue >= 0) {
-      if (isOwnProfile) {
-        // Own profile: direct mapping, max 6
-        if (newValue <= 6) {
-          setTab(newValue);
-        }
-      } else {
-        // Other's profile: reverse map the tab indices
-        // Tabs are: 0=Posts, 1=Media, 2=About, 3=Followers, 4=Following
-        // Map to original indices: 0->0, 1->1, 2->4, 3->5, 4->6
-        let mappedTab = newValue;
-        if (newValue === 2) mappedTab = 4; // About
-        else if (newValue === 3) mappedTab = 5; // Followers
-        else if (newValue === 4) mappedTab = 6; // Following
-
-        if (mappedTab <= 6) {
-          setTab(mappedTab);
-        }
-      }
-    }
-  };
-
-  if (loading) {
+  if (loading || profileLoading) {
     return (
       <Container maxWidth="lg" sx={{ py: 4 }}>
         <Skeleton variant="rectangular" height={300} sx={{ borderRadius: 3, mb: 3 }} />
@@ -705,7 +710,7 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
     );
   }
 
-  if (!profile) {
+  if (!displayProfile) {
     return (
       <Container maxWidth="lg" sx={{ py: 4 }}>
         <Zoom in={true} timeout={500}>
@@ -765,23 +770,17 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
 
   // Handle follow/unfollow
   const handleFollow = async () => {
-    if (!profile) return;
+    if (!displayProfile) return;
 
     try {
-      if (profile.isFollowing) {
-        await api.users.unfollowUser(profile.id);
-        setProfile(prev => prev ? {
-          ...prev,
-          isFollowing: false,
-          followerCount: (prev.followerCount || 0) - 1
-        } : null);
+      if (displayProfile.isFollowing) {
+        await api.users.unfollow(displayProfile.id);
+        // Update through ProfileContext
+        // Note: In a real implementation, you might want to refresh the profile data
       } else {
-        await api.users.followUser(profile.id);
-        setProfile(prev => prev ? {
-          ...prev,
-          isFollowing: true,
-          followerCount: (prev.followerCount || 0) + 1
-        } : null);
+        await api.users.follow(displayProfile.id);
+        // Update through ProfileContext
+        // Note: In a real implementation, you might want to refresh the profile data
       }
     } catch (error) {
       console.error('Follow/unfollow error:', error);
@@ -794,15 +793,26 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
         <Box>
           {/* Modern Profile Header */}
           <ProfileHeader
-            profile={profile}
+            profile={displayProfile}
             isOwnProfile={isOwnProfile}
             onEditProfile={() => setTab(4)} // Switch to About tab for editing
             onFollow={handleFollow}
-            onMessage={() => router.push(`/messages?user=${profile.username}`)}
+            onMessage={() => router.push(`/messages?user=${displayProfile.username}`)}
+            router={router}
           />
+          {/* Temporary debugging - remove after testing */}
+          {process.env.NODE_ENV === 'development' && (
+            <Box sx={{ p: 2, bgcolor: 'info.light', mt: 1, borderRadius: 1 }}>
+              <Typography variant="body2">
+                Profile Role: {displayProfile?.role || 'Not set'} | 
+                Is Vendor: {displayProfile?.role === 'vendor' ? 'Yes' : 'No'} |
+                Has Router: {router ? 'Yes' : 'No'}
+              </Typography>
+            </Box>
+          )}
 
           {/* Content Tabs */}
-          {profile && profile.id && isReady ? (
+          {profile && profile.id ? (
             <Box sx={{ mt: 4 }}>
               <Paper
                 elevation={0}
@@ -813,15 +823,7 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                 }}
               >
                 <Tabs
-                  value={isOwnProfile ? Number(validTab) : (
-                    // Map actual tab indices to displayed indices for non-own profiles
-                    validTab === 0 ? 0 : // Posts -> 0
-                      validTab === 1 ? 1 : // Media -> 1
-                        validTab === 4 ? 2 : // About -> 2
-                          validTab === 5 ? 3 : // Followers -> 3
-                            validTab === 6 ? 4 : // Following -> 4
-                              0 // Default to Posts
-                  )}
+                  value={displayTabIndex !== undefined && displayTabIndex !== null ? displayTabIndex : 0}
                   onChange={handleTabChange}
                   variant="scrollable"
                   scrollButtons="auto"
@@ -866,7 +868,7 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                 key={renderKey}
               >
 
-                <TabPanel value={validTab} index={0}>
+                <TabPanel value={tab} index={0}>
                   <Box sx={{ mb: 3 }}>
                     <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <GridOn /> Posts
@@ -913,12 +915,11 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                         variant="outlined"
                         disabled={!postsHasMore || postsLoading}
                         onClick={async () => {
-                          const usernameForPosts = isOwnProfile ? currentUser?.username : effectiveUsername;
-                          if (!usernameForPosts) return;
+                          if (!displayProfile?.id) return;
                           setPostsLoading(true);
                           try {
                             const nextPage = postsPage + 1;
-                            const res = await api.posts.getUserPosts(usernameForPosts, { limit: 10, page: nextPage });
+                            const res = await api.posts.getUserPosts(displayProfile.id, { limit: 10, page: nextPage });
                             const newPosts = (res as any)?.data?.posts || (res as any)?.posts || [];
                             setPosts((prev) => [...prev, ...newPosts]);
                             const total = (res as any)?.data?.pagination?.total || (res as any)?.pagination?.total || 0;
@@ -938,7 +939,7 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                 </TabPanel>
 
                 {/* Media Tab */}
-                <TabPanel value={validTab} index={1}>
+                <TabPanel value={tab} index={1}>
                   <Box sx={{ mb: 3 }}>
                     <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <ImageIcon /> Media
@@ -982,12 +983,11 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                         variant="outlined"
                         disabled={!mediaHasMore || mediaLoading}
                         onClick={async () => {
-                          const usernameForPosts = isOwnProfile ? currentUser?.username : effectiveUsername;
-                          if (!usernameForPosts) return;
+                          if (!displayProfile?.id) return;
                           setMediaLoading(true);
                           try {
                             const nextPage = mediaPage + 1;
-                            const res = await api.posts.getUserPosts(usernameForPosts, { limit: 10, page: nextPage, contentType: 'media' });
+                            const res = await api.posts.getUserPosts(displayProfile.id, { limit: 10, page: nextPage, contentType: 'media' });
                             const newPosts = (res as any)?.data?.posts || (res as any)?.posts || [];
                             setMediaPosts((prev) => [...prev, ...newPosts]);
                             const total = (res as any)?.data?.pagination?.total || (res as any)?.pagination?.total || 0;
@@ -1007,7 +1007,7 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                 </TabPanel>
 
                 {/* Liked Tab */}
-                <TabPanel value={validTab} index={2}>
+                <TabPanel value={tab} index={2}>
                   <Box sx={{ mb: 3 }}>
                     <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <Favorite /> Liked Posts
@@ -1058,7 +1058,7 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                           setLikedLoading(true);
                           try {
                             const nextPage = likedPage + 1;
-                            const res = await api.posts.getUserLikedPosts(currentUser.id, { limit: 10, page: nextPage });
+                            const res = await api.posts.getLikedPosts(currentUser.id, { limit: 10, page: nextPage });
                             const newPosts = (res as any)?.data?.posts || (res as any)?.posts || [];
                             setLikedPosts((prev) => [...prev, ...newPosts]);
                             const total = (res as any)?.data?.pagination?.total || (res as any)?.pagination?.total || 0;
@@ -1078,7 +1078,7 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                 </TabPanel>
 
                 {/* Bookmarked Tab */}
-                <TabPanel value={validTab} index={3}>
+                <TabPanel value={tab} index={3}>
                   <Box sx={{ mb: 3 }}>
                     <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <Bookmark /> Saved Posts
@@ -1148,7 +1148,7 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                   )}
                 </TabPanel>
 
-                <TabPanel value={validTab} index={4}>
+                <TabPanel value={tab} index={4}>
                   <Box sx={{ mb: 3 }}>
                     <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <Edit /> About
@@ -1202,7 +1202,7 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                           <Typography variant="subtitle2" color="text.secondary" gutterBottom>
                             Website
                           </Typography>
-                          {profile.website ? (
+                          {profile?.website ? (
                             <Typography
                               variant="body1"
                               color="primary"
@@ -1236,13 +1236,13 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                 </TabPanel>
 
                 {/* Followers Tab */}
-                <TabPanel value={validTab} index={5}>
+                <TabPanel value={tab} index={5}>
                   <Box sx={{ mb: 3 }}>
                     <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <PersonAdd /> Followers ({profile.followerCount || 0})
+                      <PersonAdd /> Followers ({profile?.followerCount || 0})
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      People who follow {isOwnProfile ? 'you' : profile.displayName || profile.username}
+                      People who follow {isOwnProfile ? 'you' : `${profile?.displayName || profile?.username}`}
                     </Typography>
                   </Box>
 
@@ -1262,7 +1262,7 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                         No followers yet
                       </Typography>
                       <Typography variant="body2" color="text.secondary">
-                        {isOwnProfile ? "Share great content to attract followers!" : `${profile.displayName || profile.username} doesn't have any followers yet.`}
+                        {isOwnProfile ? "Share great content to attract followers!" : `${profile?.displayName || profile?.username} doesn't have any followers yet.`}
                       </Typography>
                     </Paper>
                   ) : (
@@ -1304,13 +1304,13 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                 </TabPanel>
 
                 {/* Following Tab */}
-                <TabPanel value={validTab} index={6}>
+                <TabPanel value={tab} index={6}>
                   <Box sx={{ mb: 3 }}>
                     <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <PersonRemove /> Following ({profile.followingCount || 0})
+                      <PersonRemove /> Following ({profile?.followingCount || 0})
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      People {isOwnProfile ? 'you follow' : `${profile.displayName || profile.username} follows`}
+                      People {isOwnProfile ? 'you follow' : `${profile?.displayName || profile?.username} follows`}
                     </Typography>
                   </Box>
 
@@ -1330,7 +1330,7 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                         Not following anyone yet
                       </Typography>
                       <Typography variant="body2" color="text.secondary">
-                        {isOwnProfile ? "Discover and follow interesting people!" : `${profile.displayName || profile.username} isn't following anyone yet.`}
+                        {isOwnProfile ? "Discover and follow interesting people!" : `${profile?.displayName || profile?.username} isn't following anyone yet.`}
                       </Typography>
                     </Paper>
                   ) : (

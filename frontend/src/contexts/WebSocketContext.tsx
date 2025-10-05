@@ -4,6 +4,7 @@ import { io, Socket } from 'socket.io-client';
 import { API_URL, SOCKET_URL } from '@/config';
 import toast from 'react-hot-toast';
 import { normalizeAuthError } from '@/lib/authErrors';
+import { api } from '@/lib/api'; // API client for token refresh
 
 interface WebSocketContextType {
   socket: Socket | null;
@@ -191,35 +192,85 @@ interface WebSocketProviderProps {
 }
 
 export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }) => {
-  const { token, isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
   const reconnectAttemptsRef = useRef(0);
   const maxReconnectAttempts = 5;
   const joinedPostsRef = useRef<Set<string>>(new Set());
+  // Add state to track if we're refreshing token
+  const [isRefreshingToken, setIsRefreshingToken] = useState(false);
 
   const initializeSocket = useCallback(() => {
-    if (!isAuthenticated || !token) {
-      console.log('WebSocket initialization skipped: User not authenticated or no token.');
-      return;
+    if (!isAuthenticated) {
+      console.log('WebSocket initialization skipped: User not authenticated.');
+      return null;
     }
 
-    // Ensure consistent token format by removing Bearer prefix if present
+    // Get token from localStorage since it's not directly available in the auth context
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    if (!token) {
+      console.warn('No auth token available for WebSocket connection');
+      return null;
+    }
+
+    // Log token info for debugging (without exposing the actual token)
+    console.log('Token available for WebSocket auth, length:', token.length);
+
+    // Ensure consistent token format - send token without Bearer prefix in auth object
+    // Socket.IO will handle the Bearer prefix on the server side
     const authToken = token.startsWith('Bearer ') ? token.substring(7).trim() : token.trim();
-    if (!authToken) {
-      console.warn('Invalid auth token format');
-      return;
+    
+    // Validate token format
+    if (!authToken || authToken.length < 10) {
+      console.warn('Invalid auth token format or token too short');
+      return null;
     }
 
-    const newSocket = io(SOCKET_URL, {
-      path: '/socket.io',
+    // Validate and normalize the socket URL
+    let socketUrl = SOCKET_URL;
+    
+    // If SOCKET_URL is not provided or is empty, default to a reasonable value
+    if (!socketUrl || socketUrl.trim() === '') {
+      console.warn('SOCKET_URL not configured, defaulting to localhost');
+      socketUrl = typeof window !== 'undefined' ? 
+        `${window.location.protocol}//${window.location.hostname}:8000` : 
+        'http://localhost:8000';
+    }
+    
+    // Ensure the URL has a proper protocol
+    if (!socketUrl.startsWith('http://') && !socketUrl.startsWith('https://')) {
+      const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'https://' : 'http://';
+      socketUrl = `${protocol}${socketUrl}`;
+      console.warn('SOCKET_URL missing protocol, prepending default:', socketUrl);
+    }
+
+    // Validate URL format
+    try {
+      const url = new URL(socketUrl);
+      socketUrl = url.toString();
+    } catch (e) {
+      console.error('Invalid SOCKET_URL format:', socketUrl, e);
+      toast.error('Invalid WebSocket configuration. Please check your environment settings.');
+      return null;
+    }
+
+    console.log('Initializing WebSocket connection to:', socketUrl);
+
+    const newSocket = io(socketUrl, {
+      path: '/socket.io/',
       auth: {
-        token: authToken,
+        token: authToken,  // Send token without Bearer prefix
       },
       transports: ['websocket', 'polling'],
       timeout: 20000,
       forceNew: true,
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      randomizationFactor: 0.5,
     });
 
     newSocket.on('connect', () => {
@@ -240,11 +291,54 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
 
     // Server-side auth acknowledgement
     newSocket.on('authenticated', (payload: any) => {
-      if (!payload?.success) {
+      if (payload?.success) {
+        console.log('🔐 Socket authentication successful:', payload.userId);
+      } else {
         console.warn('🔐 Socket authentication failed:', payload);
         toast.error(normalizeAuthError(payload.error || 'Authentication failed'));
-        // Keep connection state consistent; optional: force reconnect or logout
+        // Keep connection state consistent
         setIsConnected(false);
+        
+        // If authentication failed due to token issues and we're not already refreshing, try to refresh
+        if (payload?.error && 
+            String(payload.error).toLowerCase().includes('token') && 
+            !isRefreshingToken) {
+          console.log('Attempting token refresh due to auth failure');
+          setIsRefreshingToken(true);
+          
+          // Try to refresh the token
+          api.auth.refreshToken()
+            .then(result => {
+              if (result?.success) {
+                console.log('Token refresh successful, reconnecting WebSocket');
+                // Disconnect and reconnect with new token
+                newSocket.disconnect();
+                // Reconnect after a short delay to allow token to be stored
+                setTimeout(() => {
+                  initializeSocket();
+                }, 100);
+              } else {
+                console.log('Token refresh failed, redirecting to login');
+                // Dispatch logout event to redirect to login
+                if (typeof window !== 'undefined') {
+                  window.dispatchEvent(new CustomEvent('auth:logout'));
+                }
+              }
+            })
+            .catch(err => {
+              console.error('Token refresh error:', err);
+              // Dispatch logout event to redirect to login
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('auth:logout'));
+              }
+            })
+            .finally(() => {
+              setIsRefreshingToken(false);
+            });
+        } else if (!payload?.success && payload?.userId) {
+          // Log more detailed information about the authentication failure
+          console.warn('Socket authentication failed for user:', payload.userId, 'with error:', payload.error);
+        }
       }
     });
 
@@ -252,8 +346,14 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
       console.log('WebSocket disconnected:', reason);
       setIsConnected(false);
 
-      if (reason === 'io server disconnect') {
-        // Server disconnected, try to reconnect
+      // Only attempt reconnection for client-side disconnections
+      if (reason === 'io client disconnect') {
+        console.log('Client initiated disconnection, not reconnecting');
+        return;
+      }
+      
+      // For server disconnections or transport errors, attempt reconnection
+      if (reason === 'io server disconnect' || reason === 'transport error') {
         handleReconnect();
       }
     });
@@ -263,6 +363,14 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
       const msg = String(error?.message || '');
       if (msg.toLowerCase().includes('auth')) {
         toast.error(normalizeAuthError(error));
+      } else if (msg.toLowerCase().includes('timeout')) {
+        toast.error('Connection timeout - server may be unreachable');
+      } else if (msg.toLowerCase().includes('websocket')) {
+        toast.error('WebSocket connection failed - check server status');
+      } else if (msg.toLowerCase().includes('cors')) {
+        toast.error('CORS error - server configuration issue');
+      } else {
+        toast.error('Connection error occurred');
       }
       setIsConnected(false);
       handleReconnect();
@@ -278,30 +386,40 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
       }
     });
 
-    setSocket(newSocket);
-
     return newSocket;
-  }, []);
+  }, [isAuthenticated]);
 
   const handleReconnect = useCallback(() => {
+    // Clear any existing timeout
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+    }
+    
     if (reconnectAttemptsRef.current >= maxReconnectAttempts) {
-      toast.error('Failed to connect to live updates');
+      console.warn('Max reconnection attempts reached');
+      toast.error('Failed to connect to live updates after multiple attempts');
       return;
     }
 
     const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 30000);
     reconnectAttemptsRef.current += 1;
 
+    console.log(`Attempting to reconnect in ${delay}ms... (${reconnectAttemptsRef.current}/${maxReconnectAttempts})`);
+    toast(`Reconnecting... (${reconnectAttemptsRef.current}/${maxReconnectAttempts})`, { 
+      duration: delay,
+      icon: '🔄' 
+    });
+
     reconnectTimeoutRef.current = setTimeout(() => {
       console.log(`Attempting to reconnect... (${reconnectAttemptsRef.current}/${maxReconnectAttempts})`);
       initializeSocket();
     }, delay);
-  }, [initializeSocket]);
+  }, [initializeSocket, maxReconnectAttempts]);
 
   useEffect(() => {
     let newSocket: Socket | null = null;
 
-    if (isAuthenticated && token) {
+    if (isAuthenticated) {
       newSocket = initializeSocket();
       if (newSocket) {
         setSocket(newSocket);
@@ -312,14 +430,16 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
-      if (socket) {
+      if (newSocket) {
         console.log('Disconnecting WebSocket on cleanup.');
-        socket.disconnect();
+        // Remove all event listeners before disconnecting
+        newSocket.removeAllListeners();
+        newSocket.disconnect();
         setSocket(null);
         setIsConnected(false);
       }
     };
-  }, [isAuthenticated, token, initializeSocket]);
+  }, [isAuthenticated, initializeSocket]);
 
   const joinStream = useCallback((streamId: string) => {
     if (socket && isConnected) {
@@ -493,7 +613,7 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
   }, [socket, isConnected]);
 
   const onPostLikeUpdate = useCallback((callback: (data: PostLikeUpdateData) => void) => {
-    if (!socket) return () => { };
+    if (!socket) return () => {};
 
     const handler = (data: PostLikeUpdateData) => {
       console.log('Received post like update:', data);

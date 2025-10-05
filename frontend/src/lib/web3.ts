@@ -41,21 +41,38 @@ export const connectWallet = async (): Promise<{ address: string; chainId: numbe
     const provider = getProvider();
     
     if (!provider) {
-      throw new Error('No Ethereum provider found. Please install MetaMask or another wallet.');
+      // Provide more helpful error message with guidance
+      const errorMessage = 'No Ethereum wallet detected. Please install MetaMask, Trust Wallet, or another Web3 wallet extension to make crypto payments.';
+      throw new Error(errorMessage);
     }
     
     // Request account access
     const accounts = await provider.request({ method: 'eth_requestAccounts' });
     const address = accounts[0];
     
+    if (!address) {
+      throw new Error('No wallet account found. Please connect your wallet and try again.');
+    }
+    
     // Get chain ID
     const chainIdHex = await provider.request({ method: 'eth_chainId' });
     const chainId = parseInt(chainIdHex, 16);
     
     return { address, chainId };
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error connecting to wallet:', error);
-    return null;
+    
+    // Handle specific error cases
+    if (error.code === 4001) {
+      throw new Error('Wallet connection was rejected. Please approve the connection to continue.');
+    }
+    
+    if (error.code === -32002) {
+      throw new Error('Wallet connection request is already pending. Please check your wallet extension.');
+    }
+    
+    // Re-throw with original message for other errors
+    throw error;
   }
 };
 

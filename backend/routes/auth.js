@@ -98,6 +98,26 @@ const authenticateTokenStrict = (req, res, next) => {
   });
 };
 
+// @route   POST /api/auth/logout
+// @desc    Logout user
+// @access  Private
+router.post('/logout', authenticateTokenStrict, (req, res) => {
+  try {
+    // For JWT-based auth, logout is primarily client-side
+    // We just return success since the client will clear the token
+    res.json({
+      success: true,
+      message: 'Logged out successfully'
+    });
+  } catch (error) {
+    console.error('Logout error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
 // @route   POST /api/auth/register
 // @desc    Register new user
 // @access  Public
@@ -1323,52 +1343,13 @@ router.post('/logout', authenticateTokenStrict, async (req, res) => {
 // @access  Private
 router.get('/me', authenticateToken, async (req, res) => {
   try {
-    // Special handling for anonymous user
-    if (req.user.userId === 'anonymous-user' || req.user.isAnonymous) {
-      const anonymousUser = {
-        _id: 'anonymous-user',
-        username: 'anonymous',
-        displayName: 'TalkCart User',
-        email: 'user@talkcart.app',
-        avatar: '',
-        bio: 'Welcome to TalkCart - exploring Web3 social platform',
-        isVerified: true,
-        followersCount: 0,
-        followingCount: 0,
-        postsCount: 0,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      return res.json({
-        success: true,
-        user: anonymousUser,
-      });
-    }
-
     // Find user by ID from token for registered users
     const user = await User.findById(req.user.userId);
 
     if (!user) {
-      // If user not found in database, return anonymous user instead of error
-      const anonymousUser = {
-        _id: 'anonymous-user',
-        username: 'anonymous',
-        displayName: 'TalkCart User',
-        email: 'user@talkcart.app',
-        avatar: '',
-        bio: 'Welcome to TalkCart - exploring Web3 social platform',
-        isVerified: true,
-        followersCount: 0,
-        followingCount: 0,
-        postsCount: 0,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      return res.json({
-        success: true,
-        user: anonymousUser,
+      return res.status(404).json({
+        success: false,
+        message: 'User not found',
       });
     }
 
@@ -1381,23 +1362,10 @@ router.get('/me', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     console.error('Get user error:', error);
-    // Even on error, return anonymous user for guaranteed access
-    res.json({
-      success: true,
-      user: {
-        _id: 'anonymous-user',
-        username: 'anonymous',
-        displayName: 'TalkCart User',
-        email: 'user@talkcart.app',
-        avatar: '',
-        bio: 'Welcome to TalkCart - exploring Web3 social platform',
-        isVerified: true,
-        followersCount: 0,
-        followingCount: 0,
-        postsCount: 0,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get user',
+      message: error.message,
     });
   }
 });
@@ -1509,7 +1477,9 @@ router.get('/settings', authenticateToken, async (req, res) => {
 // @access  Private
 router.put('/settings', authenticateToken, validateSettings, async (req, res) => {
   try {
-    const { settingType, settings } = req.body;
+    // Handle both possible request body structures
+    const settingType = req.body.settingType || req.body.type;
+    const settings = req.body.settings || req.body.data;
 
     if (!settingType || !settings) {
       return res.status(400).json({

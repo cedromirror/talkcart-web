@@ -1,6 +1,5 @@
 // Video Components
 export { ModernVideoContainer } from './ModernVideoContainer';
-export { EnhancedVideoUpload } from './EnhancedVideoUpload';
 export { VideoPostCard } from './VideoPostCard';
 export { VideoFeedProvider, useVideoFeed } from './VideoFeedManager';
 export { VideoSettings } from './VideoSettings';
@@ -14,8 +13,7 @@ export { useVideoAutoscroll } from '../../hooks/useVideoAutoscroll';
 
 // Utils
 export { 
-  getVideoMaintenanceManager, 
-  videoOptimizationUtils 
+  getVideoMaintenanceManager
 } from '../../utils/videoMaintenance';
 export { 
   getVideoQualityManager 

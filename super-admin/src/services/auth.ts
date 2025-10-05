@@ -71,8 +71,34 @@ export async function fetchWithAuth(input: RequestInfo | URL, init: RequestInit 
       }
     }
     return response;
-  } catch (err) {
-    notify({ message: 'Network error. Please check your connection.', severity: 'error' });
+  } catch (err: any) {
+    // Provide clearer toasts for CORS/preflight and timeout scenarios
+    try {
+      const reqUrl = typeof input === 'string' ? input : (input as any)?.url ?? String(input);
+      const baseHref = typeof window !== 'undefined' ? window.location.href : 'http://localhost';
+      const absoluteUrl = new URL(reqUrl, baseHref);
+      const isCrossOrigin = typeof window !== 'undefined' && absoluteUrl.origin !== window.location.origin;
+      const method = (init.method || 'GET').toString().toUpperCase();
+      const hdrs = new Headers(init.headers || {});
+      const hasAuth = hdrs.has('Authorization');
+      const isAbort = err && (err.name === 'AbortError');
+
+      if (isAbort) {
+        // Timeout or manual abort (actual throw/handling occurs in caller)
+        notify({ message: 'Request timed out. Please try again.', severity: 'warning' });
+      } else if (isCrossOrigin && err instanceof TypeError) {
+        // Browsers surface CORS/preflight failures as a TypeError("Failed to fetch")
+        const headerNote = hasAuth ? 'Authorization and Content-Type' : 'required headers';
+        notify({
+          message: `Request blocked by CORS/preflight. Verify backend allows ${method} and ${headerNote} for ${absoluteUrl.origin}.`,
+          severity: 'error',
+        });
+      } else {
+        notify({ message: 'Network error. Please check your connection.', severity: 'error' });
+      }
+    } catch {
+      notify({ message: 'Network error. Please check your connection.', severity: 'error' });
+    }
     throw err;
   }
 }

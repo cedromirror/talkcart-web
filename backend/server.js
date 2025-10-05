@@ -19,7 +19,7 @@ const io = new Server(server, {
   cors: {
     origin: process.env.NODE_ENV === 'production'
       ? ['https://talkcart.app', 'https://www.talkcart.app']
-      : ['http://localhost:3000', 'http://localhost:4000', 'http://localhost:4100'],
+      : ['http://localhost:3000', 'http://localhost:4000', 'http://localhost:4100', 'http://localhost:8000'],
     credentials: true,
   }
 });
@@ -27,7 +27,14 @@ const io = new Server(server, {
 // Socket.IO JWT Authentication Middleware
 io.use(async (socket, next) => {
   try {
-    const token = socket.handshake.auth.token;
+    // Support multiple token sources and normalize possible "Bearer" prefix
+    const rawToken =
+      (socket.handshake.auth && socket.handshake.auth.token) ||
+      (socket.handshake.query && socket.handshake.query.token) ||
+      (socket.handshake.headers && (socket.handshake.headers.authorization || socket.handshake.headers.Authorization));
+
+    let token = typeof rawToken === 'string' ? rawToken : '';
+    if (token.startsWith('Bearer ')) token = token.slice(7).trim();
 
     console.log('🔍 Socket connection attempt:', {
       socketId: socket.id,
@@ -43,9 +50,10 @@ io.use(async (socket, next) => {
       return next();
     }
 
-    // Verify JWT token
+    // Verify JWT token using the same fallback secret as auth routes
+    const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
     console.log('🔐 Verifying JWT token...');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET, { ignoreExpiration: true });
     console.log('✅ JWT token decoded:', { userId: decoded.userId, exp: decoded.exp });
 
     // Check if user exists and is active
@@ -71,8 +79,15 @@ io.use(async (socket, next) => {
     console.error('❌ Socket authentication error:', {
       message: error.message,
       name: error.name,
-      stack: error.stack.split('\n')[0]
+      stack: (error.stack || '').split('\n')[0]
     });
+    // Fall back to anonymous connection instead of hard failing in dev
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('🔓 Falling back to anonymous socket in development');
+      socket.userId = 'anonymous-user';
+      socket.user = { username: 'anonymous', isAnonymous: true };
+      return next();
+    }
     next(new Error('Authentication failed'));
   }
 });
@@ -98,9 +113,9 @@ app.use('/api/', limiter);
 app.use(cors({
   origin: process.env.NODE_ENV === 'production'
     ? ['https://talkcart.app', 'https://www.talkcart.app']
-    : ['http://localhost:3000', 'http://localhost:4000', 'http://localhost:4100'],
+    : ['http://localhost:3000', 'http://localhost:4000', 'http://localhost:4100', 'http://localhost:8000'],
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
   allowedHeaders: [
     'Content-Type',
     'Authorization',
@@ -291,7 +306,7 @@ app.use('/api/users', require('./routes/users'));
 app.use('/api/posts', require('./routes/posts'));
 app.use('/api/comments', require('./routes/comments'));
 app.use('/api/marketplace', require('./routes/marketplace'));
-app.use('/api/cart', require('./routes/cart'));
+// Cart routes removed as part of cart functionality removal
 app.use('/api/orders', require('./routes/orders'));
 app.use('/api/messages', require('./routes/messages'));
 app.use('/api/calls', require('./routes/calls'));
@@ -303,6 +318,9 @@ app.use('/api/nfts', require('./routes/nfts'));
 app.use('/api/wallet', require('./routes/wallet'));
 app.use('/api/defi', require('./routes/defi'));
 app.use('/api/payments', require('./routes/payments'));
+app.use('/api/search', require('./routes/search'));
+app.use('/api/products', require('./routes/productComparison'));
+app.use('/api/notifications', require('./routes/notifications'));
 // Admin routes
 const adminRouter = require('./routes/admin');
 const adminSignupRouter = require('./routes/adminSignup');
@@ -519,29 +537,38 @@ app.use('/api/*', (req, res) => {
       '/api/media',
       '/api/admin',
       '/api/payments',
-      '/api/webhooks'
+      '/api/webhooks',
+      '/api/search',
+      '/api/notifications'
     ]
   });
 });
 
 // ============================================================================
-// SOCKET.IO REAL-TIME FUNCTIONALITY
+// WEBSOCKET HANDLERS - CONSOLIDATED
 // ============================================================================
 
-// Stream functionality has been removed
-
-// Store connected users
+// Store connected clients and user presence
+const connectedClients = new Map();
 const connectedUsers = new Map();
+const userPresence = new Map();
 
-// Socket connection handling
+// SINGLE Socket connection handler - consolidated all functionality
 io.on('connection', (socket) => {
   console.log('🔌 User connected:', socket.id);
+  console.log(`🔌 Connection details:`, {
+    id: socket.id,
+    transport: socket.conn.transport.name,
+    remoteAddress: socket.conn.remoteAddress
+  });
+  
+  connectedClients.set(socket.id, socket);
 
   // User is already authenticated via JWT middleware
   if (socket.userId) {
     connectedUsers.set(socket.id, socket.userId);
     socket.join(`user_${socket.userId}`);
-    console.log(`🔐 Socket auto-authenticated for user: ${socket.user.username} (${socket.userId})`);
+    console.log(`🔐 Socket auto-authenticated for user: ${socket.user?.username} (${socket.userId})`);
 
     // Register socket with SocketService for messaging functionality
     if (global.socketServiceInstance) {
@@ -552,27 +579,33 @@ io.on('connection', (socket) => {
     socket.emit('authenticated', { userId: socket.userId });
   }
 
-  // Handle legacy socket authentication (for backward compatibility)
+  // Handle authentication (unified)
   socket.on('authenticate', (data) => {
-    const { userId } = data;
-    if (userId && socket.userId === userId) {
-      // Already authenticated via JWT, just confirm
-      socket.emit('authenticated', { userId: socket.userId });
-      console.log(`🔐 Legacy authenticate event confirmed for user: ${userId}`);
-    } else if (userId && socket.userId !== userId) {
-      // Mismatch between JWT user and requested user
-      socket.emit('error', { message: 'Authentication failed: User ID mismatch' });
-    } else {
-      socket.emit('error', { message: 'Authentication failed: No user ID provided' });
+    try {
+      const { token, userId } = data;
+      if (userId && socket.userId === userId) {
+        // Already authenticated via JWT, just confirm
+        socket.emit('authenticated', { userId: socket.userId, success: true });
+        console.log(`🔐 Legacy authenticate event confirmed for user: ${userId}`);
+      } else if (userId && socket.userId !== userId) {
+        // Mismatch between JWT user and requested user
+        socket.emit('error', { message: 'Authentication failed: User ID mismatch' });
+      } else {
+        socket.emit('error', { message: 'Authentication failed: No user ID provided' });
+      }
+    } catch (error) {
+      console.error('🔐 Authentication error:', error);
+      socket.emit('authenticated', { success: false, error: 'Authentication failed' });
     }
   });
 
-  // User joins their personal room (legacy support)
+  // User joins their personal room
   socket.on('join-user', (userId) => {
     if (userId) {
       socket.userId = userId;
       connectedUsers.set(socket.id, userId);
       socket.join(`user_${userId}`);
+      socket.join(`user-${userId}`);
       console.log(`👤 User ${userId} joined personal room`);
     }
   });
@@ -580,27 +613,28 @@ io.on('connection', (socket) => {
   // Join feed room for real-time updates
   socket.on('join-feed', (feedType) => {
     socket.join(`feed_${feedType}`);
+    socket.join(`feed-${feedType}`);
     console.log(`📡 Socket joined feed: ${feedType}`);
   });
 
-  // Leave feed room (added for cleanup)
+  // Leave feed room
   socket.on('leave-feed', (feedType) => {
     socket.leave(`feed_${feedType}`);
+    socket.leave(`feed-${feedType}`);
     console.log(`📡 Socket left feed: ${feedType}`);
   });
 
-  // Join specific post room for real-time updates (use post:${postId})
+  // Join/leave post rooms
   socket.on('join-post', (data) => {
-    const { postId } = data;
+    const postId = typeof data === 'string' ? data : data?.postId;
     if (postId) {
       socket.join(`post:${postId}`);
       console.log(`📝 Socket joined post room: ${postId}`);
     }
   });
 
-  // Leave specific post room
   socket.on('leave-post', (data) => {
-    const { postId } = data;
+    const postId = typeof data === 'string' ? data : data?.postId;
     if (postId) {
       socket.leave(`post:${postId}`);
       console.log(`📝 Socket left post room: ${postId}`);
@@ -609,20 +643,18 @@ io.on('connection', (socket) => {
 
   // Handle new post creation broadcast
   socket.on('new-post', (postData) => {
-    // Broadcast to all users in relevant feeds
     socket.broadcast.to('feed_for-you').emit('post-created', postData);
     socket.broadcast.to('feed_recent').emit('post-created', postData);
     socket.broadcast.to('feed_trending').emit('post-created', postData);
-    
-    // Trigger trending hashtags update after new post
     updateAndEmitTrendingHashtags();
   });
 
   // Handle post interaction updates
   socket.on('post-interaction', (data) => {
-    const { postId, type, count, userId } = data;
-
-    // Broadcast interaction to all users
+    const { postId, type, count, userId, feedType } = data;
+    console.log(`📡 Post interaction received:`, data);
+    
+    // Broadcast to all users
     io.emit('post-updated', {
       postId,
       type,
@@ -630,14 +662,80 @@ io.on('connection', (socket) => {
       userId,
       timestamp: new Date().toISOString()
     });
+    
+    // Broadcast to specific feed
+    socket.to(`feed-${feedType || 'for-you'}`).emit('post-updated', data);
   });
 
-  // Stream functionality has been removed
+  // Handle presence updates
+  socket.on('presence-update', async (data) => {
+    const { userId, isOnline, showOnlineStatus, showLastSeen } = data;
 
-  // Join trending topics room for updates
+    try {
+      if (userId) {
+        const User = require('./models/User');
+        const updateData = { lastSeenAt: new Date() };
+        if (isOnline) updateData.lastLoginAt = new Date();
+        await User.findByIdAndUpdate(userId, updateData);
+      }
+
+      const presenceData = {
+        userId, isOnline,
+        lastSeen: new Date(),
+        showOnlineStatus, showLastSeen,
+        socketId: socket.id
+      };
+
+      userPresence.set(userId, presenceData);
+
+      if (showOnlineStatus) {
+        socket.broadcast.emit('presence-update', {
+          userId, isOnline,
+          lastSeen: showLastSeen ? presenceData.lastSeen : undefined,
+          showOnlineStatus, showLastSeen
+        });
+      }
+
+      console.log(`👤 Presence updated for user ${userId}: ${isOnline ? 'online' : 'offline'}`);
+    } catch (error) {
+      console.error('Error updating presence:', error);
+    }
+  });
+
+  // Handle follow updates
+  socket.on('follow_update', async (data) => {
+    const { userId, targetUserId, action, followerCount } = data;
+    try {
+      console.log(`👥 Follow update: ${userId} ${action}ed ${targetUserId}`);
+      
+      io.emit('follow_update', {
+        userId, targetUserId, action, followerCount,
+        timestamp: new Date().toISOString()
+      });
+      
+      io.to(`user-${targetUserId}`).emit('follower_change', {
+        followerId: userId, action, followerCount,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error handling follow update:', error);
+    }
+  });
+
+  // Join trending topics room
   socket.on('join-trending', () => {
     socket.join('trending-topics');
     console.log(`📊 Socket ${socket.id} joined trending-topics room`);
+  });
+
+  // Test message handler
+  socket.on('test-message', (data) => {
+    console.log(`🧪 Test message received:`, data);
+    socket.emit('test-response', {
+      ...data,
+      echo: true,
+      serverTime: new Date().toISOString()
+    });
   });
 
   // Handle user disconnect
@@ -648,6 +746,8 @@ io.on('connection', (socket) => {
       console.log(`👤 User ${userId} disconnected`);
     }
 
+    connectedClients.delete(socket.id);
+
     // Clean up SocketService data
     if (global.socketServiceInstance) {
       await global.socketServiceInstance.handleSocketDisconnect(socket.id);
@@ -656,6 +756,26 @@ io.on('connection', (socket) => {
     console.log('❌ User disconnected:', socket.id);
   });
 });
+
+// Helper functions for broadcasting
+const broadcastToAll = (event, data) => {
+  io.emit(event, data);
+};
+
+const broadcastToFeed = (feedType, event, data) => {
+  io.to(`feed_${feedType}`).emit(event, data);
+  io.to(`feed-${feedType}`).emit(event, data);
+};
+
+const broadcastToUser = (userId, event, data) => {
+  io.to(`user-${userId}`).emit(event, data);
+  io.to(`user_${userId}`).emit(event, data);
+};
+
+// Make broadcast functions available globally
+global.broadcastToAll = broadcastToAll;
+global.broadcastToFeed = broadcastToFeed;
+global.broadcastToUser = broadcastToUser;
 
 // Initialize socket service
 const SocketService = require('./services/socketService');
@@ -684,483 +804,9 @@ app.use('*', (req, res) => {
   });
 });
 
-// ============================================================================
-// WEBSOCKET HANDLERS
-// ============================================================================
 
-// Store connected clients and user presence
-const connectedClients = new Map();
-const userPresence = new Map();
 
-io.on('connection', (socket) => {
-  console.log(`🔌 Client connected: ${socket.id}`);
-  console.log(`🔌 Connection details:`, {
-    id: socket.id,
-    transport: socket.conn.transport.name,
-    remoteAddress: socket.conn.remoteAddress,
-    userAgent: socket.handshake.headers['user-agent']
-  });
-  connectedClients.set(socket.id, socket);
 
-  // Handle authentication
-  socket.on('authenticate', (data) => {
-    try {
-      const { token, userId } = data;
-      if (token && userId) {
-        socket.userId = userId;
-        socket.authenticated = true;
-        console.log('🔐 User authenticated:', userId, 'on socket:', socket.id);
-        socket.emit('authenticated', { success: true });
-      }
-    } catch (error) {
-      console.error('🔐 Authentication error:', error);
-      socket.emit('authenticated', { success: false, error: 'Authentication failed' });
-    }
-  });
-
-  // Join post-specific rooms for targeted updates
-  socket.on('join-post', (postId) => {
-    if (postId && typeof postId === 'string') {
-      socket.join(`post:${postId}`);
-      console.log(`📡 Socket ${socket.id} joined post room: ${postId}`);
-    }
-  });
-
-  socket.on('leave-post', (postId) => {
-    if (postId && typeof postId === 'string') {
-      socket.leave(`post:${postId}`);
-      console.log(`📡 Socket ${socket.id} left post room: ${postId}`);
-    }
-  });
-
-  // Join user to their personal room for targeted updates
-  socket.on('join-user', (userId) => {
-    socket.join(`user-${userId}`);
-    socket.userId = userId; // Store userId on socket for presence tracking
-    console.log(`👤 User ${userId} joined personal room`);
-  });
-
-  // Join feed rooms for real-time updates
-  socket.on('join-feed', (feedType) => {
-    socket.join(`feed-${feedType}`);
-    console.log(`📡 Client joined feed: ${feedType}`);
-  });
-
-  // Handle presence updates
-  socket.on('presence-update', async (data) => {
-    const { userId, isOnline, showOnlineStatus, showLastSeen } = data;
-
-    try {
-      // Update user's activity timestamps in database
-      if (userId) {
-        const User = require('./models/User');
-        const updateData = {
-          lastSeenAt: new Date()
-        };
-
-        // Also update lastLoginAt if they're coming online
-        if (isOnline) {
-          updateData.lastLoginAt = new Date();
-        }
-
-        await User.findByIdAndUpdate(userId, updateData);
-      }
-
-      // Store presence data
-      const presenceData = {
-        userId,
-        isOnline,
-        lastSeen: isOnline ? new Date() : new Date(),
-        showOnlineStatus,
-        showLastSeen,
-        socketId: socket.id,
-      };
-
-      userPresence.set(userId, presenceData);
-
-      // Only broadcast presence if user allows it
-      if (showOnlineStatus) {
-        socket.broadcast.emit('presence-update', {
-          userId,
-          isOnline,
-          lastSeen: showLastSeen ? presenceData.lastSeen : undefined,
-          showOnlineStatus,
-          showLastSeen,
-        });
-      }
-
-      console.log(`👤 Presence updated for user ${userId}: ${isOnline ? 'online' : 'offline'}`);
-    } catch (error) {
-      console.error('Error updating presence:', error);
-    }
-  });
-
-  // Handle post interactions
-  socket.on('post-interaction', (data) => {
-    console.log(`📡 Post interaction received:`, data);
-    // Broadcast interaction to all clients in the same feed
-    socket.to(`feed-${data.feedType || 'for-you'}`).emit('post-updated', data);
-  });
-
-  // Handle test messages
-  socket.on('test-message', (data) => {
-    console.log(`🧪 Test message received:`, data);
-    // Echo back to sender
-    socket.emit('test-response', {
-      ...data,
-      echo: true,
-      serverTime: new Date().toISOString(),
-    });
-  });
-
-  // Stream-related handlers have been removed
-
-  // Handle general follow/unfollow updates
-  socket.on('follow_update', async (data) => {
-    const { userId, targetUserId, action, followerCount } = data;
-
-    try {
-      console.log(`👥 Follow update: ${userId} ${action}ed ${targetUserId}`);
-
-      // Broadcast to all connected clients
-      io.emit('follow_update', {
-        userId,
-        targetUserId,
-        action,
-        followerCount,
-        timestamp: new Date().toISOString()
-      });
-
-      // Send personal notification to the target user
-      io.to(`user-${targetUserId}`).emit('follower_change', {
-        followerId: userId,
-        action,
-        followerCount,
-        timestamp: new Date().toISOString()
-      });
-
-    } catch (error) {
-      console.error('Error handling follow update:', error);
-    }
-  });
-
-  // Handle stream follow events
-  socket.on('stream-follow', async ({ streamId, followerId, followerUsername, streamerId }) => {
-    try {
-      await Stream.findByIdAndUpdate(streamId, {
-        $inc: { 'analytics.newFollowers': 1 }
-      });
-
-      const followNotification = {
-        streamId,
-        followerId,
-        followerUsername,
-        timestamp: new Date().toISOString(),
-        type: 'follow'
-      };
-
-      // Broadcast follow notification to stream
-      io.to(`stream-${streamId}`).emit('stream-follow', followNotification);
-
-      // Send personal notification to streamer
-      io.to(`user-${streamerId}`).emit('new-follower', followNotification);
-
-      console.log(`👥 New follower in stream ${streamId}: ${followerUsername}`);
-    } catch (error) {
-      console.error('Error handling stream follow:', error);
-    }
-  });
-
-  // ============================================================================
-  // WEBRTC SIGNALING HANDLERS
-  // ============================================================================
-
-  // Handle stream started (WebRTC)
-  socket.on('stream-started', async (data) => {
-    const { streamId, streamerId, title, hasVideo, hasAudio } = data;
-
-    try {
-      console.log(`🎥 WebRTC stream started: ${streamId} by ${streamerId}`);
-
-      // Update stream status in database
-      const Stream = require('./models/Stream');
-      await Stream.findOneAndUpdate(
-        { _id: streamId },
-        {
-          isLive: true,
-          startedAt: new Date(),
-          'health.status': 'live',
-          title: title || 'Live WebRTC Stream'
-        },
-        { upsert: true, new: true }
-      );
-
-      // Notify all viewers in the stream room
-      socket.to(`stream-${streamId}`).emit('stream-started', {
-        streamId,
-        streamerId,
-        title,
-        hasVideo,
-        hasAudio,
-        timestamp: new Date().toISOString()
-      });
-
-      // Store streamer info
-      socket.streamerId = streamerId;
-      socket.streamId = streamId;
-
-      console.log(`📡 Stream ${streamId} is now live`);
-    } catch (error) {
-      console.error('Error handling stream started:', error);
-    }
-  });
-
-  // Handle stream stopped (WebRTC)
-  socket.on('stream-stopped', async (data) => {
-    const { streamId, streamerId } = data;
-
-    try {
-      console.log(`⏹️ WebRTC stream stopped: ${streamId} by ${streamerId}`);
-
-      // Update stream status in database
-      const Stream = require('./models/Stream');
-      await Stream.findByIdAndUpdate(streamId, {
-        isLive: false,
-        endedAt: new Date(),
-        'health.status': 'offline',
-        viewerCount: 0
-      });
-
-      // Notify all viewers
-      socket.to(`stream-${streamId}`).emit('stream-stopped', {
-        streamId,
-        streamerId,
-        timestamp: new Date().toISOString()
-      });
-
-      console.log(`📡 Stream ${streamId} has ended`);
-    } catch (error) {
-      console.error('Error handling stream stopped:', error);
-    }
-  });
-
-  // Handle WebRTC offer
-  socket.on('webrtc-offer', (data) => {
-    const { offer, streamId, viewerId, streamerId } = data;
-
-    console.log(`📨 WebRTC offer from ${data.viewerId || 'viewer'} to ${data.streamerId || 'streamer'}`);
-
-    if (streamerId) {
-      // Forward offer to specific streamer
-      socket.to(`user-${streamerId}`).emit('webrtc-offer', {
-        offer,
-        streamId,
-        viewerId: viewerId || socket.id,
-        timestamp: new Date().toISOString()
-      });
-    } else {
-      // Forward to stream room (for peer-to-peer scenarios)
-      socket.to(`stream-${streamId}`).emit('webrtc-offer', {
-        offer,
-        streamId,
-        viewerId: viewerId || socket.id,
-        timestamp: new Date().toISOString()
-      });
-    }
-  });
-
-  // Handle WebRTC answer
-  socket.on('webrtc-answer', (data) => {
-    const { answer, streamId, viewerId, streamerId } = data;
-
-    console.log(`📨 WebRTC answer from ${streamerId || 'streamer'} to ${viewerId || 'viewer'}`);
-
-    if (viewerId) {
-      // Forward answer to specific viewer
-      socket.to(`user-${viewerId}`).emit('webrtc-answer', {
-        answer,
-        streamId,
-        streamerId: streamerId || socket.id,
-        timestamp: new Date().toISOString()
-      });
-    } else {
-      // Forward to stream room
-      socket.to(`stream-${streamId}`).emit('webrtc-answer', {
-        answer,
-        streamId,
-        streamerId: streamerId || socket.id,
-        timestamp: new Date().toISOString()
-      });
-    }
-  });
-
-  // Handle ICE candidates
-  socket.on('webrtc-ice-candidate', (data) => {
-    const { candidate, streamId, viewerId, senderId } = data;
-
-    console.log(`🧊 ICE candidate from ${senderId}`);
-
-    // Forward ICE candidate to the appropriate peer
-    if (viewerId && viewerId !== senderId) {
-      socket.to(`user-${viewerId}`).emit('webrtc-ice-candidate', {
-        candidate,
-        streamId,
-        senderId,
-        timestamp: new Date().toISOString()
-      });
-    } else {
-      // Broadcast to stream room (excluding sender)
-      socket.to(`stream-${streamId}`).emit('webrtc-ice-candidate', {
-        candidate,
-        streamId,
-        senderId,
-        timestamp: new Date().toISOString()
-      });
-    }
-  });
-
-  // Handle viewer joining stream for WebRTC
-  socket.on('viewer-join-webrtc', (data) => {
-    const { streamId, viewerId } = data;
-
-    console.log(`👀 Viewer joining WebRTC stream: ${viewerId} -> ${streamId}`);
-
-    // Notify the streamer about new viewer
-    socket.to(`stream-${streamId}`).emit('viewer-joined', {
-      streamId,
-      viewerId: viewerId || socket.id,
-      timestamp: new Date().toISOString()
-    });
-  });
-
-  // Handle viewer leaving stream for WebRTC
-  socket.on('viewer-leave-webrtc', (data) => {
-    const { streamId, viewerId } = data;
-
-    console.log(`👋 Viewer leaving WebRTC stream: ${viewerId} -> ${streamId}`);
-
-    // Notify the streamer about viewer leaving
-    socket.to(`stream-${streamId}`).emit('viewer-left', {
-      streamId,
-      viewerId: viewerId || socket.id,
-      timestamp: new Date().toISOString()
-    });
-  });
-
-  // Handle WebRTC connection quality reports
-  socket.on('webrtc-stats', async (data) => {
-    const { streamId, stats, peerId } = data;
-
-    try {
-      // Update stream health with WebRTC stats
-      const Stream = require('./models/Stream');
-
-      if (stats.bitrate || stats.fps || stats.quality) {
-        await Stream.findByIdAndUpdate(streamId, {
-          'health.bitrate': stats.bitrate || 0,
-          'health.fps': stats.fps || 0,
-          'health.quality': stats.quality || 'unknown',
-          'health.latency': stats.latency || 0,
-          'health.droppedFrames': stats.droppedFrames || 0
-        });
-
-        // Broadcast health update if quality is poor
-        if (stats.quality === 'poor' || stats.droppedFrames > 100) {
-          socket.to(`stream-${streamId}`).emit('stream-health', {
-            streamId,
-            health: {
-              bitrate: stats.bitrate,
-              fps: stats.fps,
-              quality: stats.quality,
-              latency: stats.latency,
-              droppedFrames: stats.droppedFrames
-            },
-            timestamp: new Date().toISOString()
-          });
-        }
-      }
-    } catch (error) {
-      console.error('Error handling WebRTC stats:', error);
-    }
-  });
-
-  // Handle disconnection
-  socket.on('disconnect', async () => {
-    console.log(`🔌 Client disconnected: ${socket.id}`);
-
-    // Handle stream viewer leaving on disconnect
-    if (socket.currentStream) {
-      try {
-        const Stream = require('./models/Stream');
-        const stream = await Stream.findByIdAndUpdate(
-          socket.currentStream,
-          {
-            $inc: { viewerCount: -1 }
-          },
-          { new: true }
-        );
-
-        if (stream) {
-          // Broadcast updated viewer count
-          io.to(`stream-${socket.currentStream}`).emit('stream-viewers-update', {
-            streamId: socket.currentStream,
-            viewerCount: Math.max(0, stream.viewerCount - 1)
-          });
-        }
-      } catch (error) {
-        console.error('Error cleaning up stream viewer on disconnect:', error);
-      }
-    }
-
-    // Stream-related disconnect handlers have been removed
-
-    // Handle user going offline
-    if (socket.userId) {
-      const presence = userPresence.get(socket.userId);
-      if (presence) {
-        const offlinePresence = {
-          ...presence,
-          isOnline: false,
-          lastSeen: new Date(),
-        };
-
-        userPresence.set(socket.userId, offlinePresence);
-
-        // Only broadcast offline status if user allows it
-        if (presence.showOnlineStatus) {
-          socket.broadcast.emit('user-disconnected', {
-            userId: socket.userId,
-          });
-        }
-      }
-    }
-
-    connectedClients.delete(socket.id);
-  });
-});
-
-// Helper function to broadcast to all clients
-const broadcastToAll = (event, data) => {
-  io.emit(event, data);
-};
-
-// Helper function to broadcast to specific feed
-// NOTE: Room naming uses underscore to match 'join-feed' handler (feed_${feedType})
-const broadcastToFeed = (feedType, event, data) => {
-  // Emit to feed room
-  io.to(`feed_${feedType}`).emit(event, data);
-  // Stream-related functionality has been removed
-};
-
-// Helper function to broadcast to specific user
-const broadcastToUser = (userId, event, data) => {
-  io.to(`user-${userId}`).emit(event, data);
-};
-
-// Make broadcast functions available globally
-global.broadcastToAll = broadcastToAll;
-global.broadcastToFeed = broadcastToFeed;
-global.broadcastToUser = broadcastToUser;
 
 // Initialize MongoDB and start server
 const initializeApp = async () => {

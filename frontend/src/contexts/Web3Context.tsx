@@ -26,7 +26,6 @@ const Web3Context = createContext<Web3ContextType | null>(null);
 
 export const Web3Provider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const router = useRouter();
-  const { loginWithWallet } = useAuth();
   const [isConnecting, setIsConnecting] = useState(false);
   const [state, setState] = useState<Web3State>({
     provider: null,
@@ -124,9 +123,23 @@ export const Web3Provider: React.FC<{ children: React.ReactNode }> = ({ children
       
       toast.success('Wallet connected successfully');
       return true;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error connecting wallet:', error);
-      toast.error('Failed to connect wallet');
+      
+      // Handle specific wallet errors with user-friendly messages
+      let errorMessage = 'Failed to connect wallet';
+      
+      if (error.message.includes('No Ethereum wallet detected')) {
+        errorMessage = 'No wallet detected. Please install MetaMask or another Web3 wallet to make crypto payments.';
+      } else if (error.message.includes('connection was rejected')) {
+        errorMessage = 'Wallet connection rejected. Please approve the connection in your wallet.';
+      } else if (error.message.includes('already pending')) {
+        errorMessage = 'Connection request pending. Please check your wallet extension.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      toast.error(errorMessage);
       return false;
     } finally {
       setIsConnecting(false);

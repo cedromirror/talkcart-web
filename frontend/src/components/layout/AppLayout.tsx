@@ -27,6 +27,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   const router = useRouter();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const isTablet = useMediaQuery(theme.breakpoints.down('lg'));
   
   const [sidebarOpen, setSidebarOpen] = useState(!isMobile);
 
@@ -50,26 +51,26 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   };
 
   // Don't show sidebar on auth pages
-  const isAuthPage = router.pathname.startsWith('/auth');
+  const isAuthPage = router.pathname?.startsWith('/auth') || false;
   const shouldShowSidebar = showSidebar && showNavigation && !isAuthPage && isAuthenticated;
   const shouldShowTopBar = showNavigation && !isAuthPage;
 
   const sidebarWidth = 280;
 
   return (
-    <Box sx={{ display: 'flex', minHeight: '100vh' }}>
+    <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'background.default' }}>
       {/* Top Bar */}
       {shouldShowTopBar && (
         <TopBar
           onMenuClick={handleSidebarToggle}
-          showMenuButton={shouldShowSidebar}
+          showMenuButton={showSidebar && showNavigation && !isAuthPage && isAuthenticated}
         />
       )}
 
       {/* Sidebar */}
       {shouldShowSidebar && (
         <Sidebar
-          open={sidebarOpen}
+          open={sidebarOpen && (isMobile || isTablet)}
           onClose={handleSidebarClose}
           variant={isMobile ? 'temporary' : 'persistent'}
           width={sidebarWidth}
@@ -83,7 +84,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           flexGrow: 1,
           bgcolor: 'background.default',
           minHeight: '100vh',
-          marginLeft: shouldShowSidebar && !isMobile && sidebarOpen ? 0 : 0,
+          marginLeft: 0,
           marginTop: shouldShowTopBar ? '64px' : 0,
           transition: theme.transitions.create(['margin'], {
             easing: theme.transitions.easing.sharp,

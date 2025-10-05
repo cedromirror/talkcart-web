@@ -27,6 +27,7 @@ import {
   useMediaQuery,
   CircularProgress,
   Button,
+  Chip,
 } from '@mui/material';
 import {
   Menu as MenuIcon,
@@ -41,17 +42,21 @@ import {
   TrendingUp,
   History,
   Hash as HashtagIcon,
-  Settings
+  Settings,
+  ShoppingBag,
+  Package,
+  ShoppingCart,
+  Globe,
+  LogOut,
+  Award,
+  Zap,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useThemeToggle } from '@/hooks/useThemeToggle';
 import { useSearch } from '@/hooks/useSearch';
 import { useNotifications } from '@/hooks/useNotifications';
-import { useCart } from '@/contexts/CartContext';
 import UserAvatar from '../common/UserAvatar';
 import WalletButton from '@/components/wallet/WalletButton';
-import CartIcon from '@/components/cart/CartIcon';
-import CartDrawer from '@/components/cart/CartDrawer';
 
 interface TopBarProps {
   onMenuClick: () => void;
@@ -62,7 +67,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onMenuClick,
   showMenuButton = true,
 }) => {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, logout } = useAuth();
   const theme = useTheme();
   const router = useRouter();
   const { toggleTheme } = useThemeToggle();
@@ -105,26 +110,6 @@ export const TopBar: React.FC<TopBarProps> = ({
   // State for notifications popover
   const [notificationsAnchor, setNotificationsAnchor] = useState<null | HTMLElement>(null);
   const notificationsOpen = Boolean(notificationsAnchor);
-
-  // Cart state
-  const { cart } = useCart();
-  const [cartDrawerOpen, setCartDrawerOpen] = useState(false);
-
-  // Listen for global cart open/close events
-  React.useEffect(() => {
-    const openHandler = () => setCartDrawerOpen(true);
-    const closeHandler = () => setCartDrawerOpen(false);
-    if (typeof window !== 'undefined') {
-      window.addEventListener('cart:open', openHandler);
-      window.addEventListener('cart:close', closeHandler);
-    }
-    return () => {
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('cart:open', openHandler);
-        window.removeEventListener('cart:close', closeHandler);
-      }
-    };
-  }, []);
 
   // Handle click away from search suggestions
   const handleClickAway = () => {
@@ -229,6 +214,17 @@ export const TopBar: React.FC<TopBarProps> = ({
     setUserMenuAnchor(null);
   };
 
+  // Handle logout
+  const handleLogout = async () => {
+    try {
+      await logout();
+      handleUserMenuClose();
+      router.push('/auth/login');
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+  };
+
   // Settings menu handlers removed
 
   // Handle notifications
@@ -244,7 +240,14 @@ export const TopBar: React.FC<TopBarProps> = ({
     fetchNotifications();
   };
 
-  const handleNotificationsClose = () => setNotificationsAnchor(null);
+  const handleNotificationsClose = () => {
+    setNotificationsAnchor(null);
+    // Return focus to the notification button when closing
+    const notificationButton = document.querySelector('[aria-label="Notifications"]');
+    if (notificationButton) {
+      (notificationButton as HTMLElement).focus();
+    }
+  };
 
   // Handle notification click
   const handleNotificationClick = (notificationId: string, url?: string) => {
@@ -621,6 +624,23 @@ export const TopBar: React.FC<TopBarProps> = ({
 
           {isAuthenticated ? (
             <>
+              {/* Social Feed Icon */}
+              <Tooltip title="Social Feed">
+                <IconButton
+                  color="inherit"
+                  size="small"
+                  onClick={() => {
+                    if (isAuthenticated) {
+                      router.push('/social');
+                    } else {
+                      router.push('/auth/login');
+                    }
+                  }}
+                >
+                  <Globe size={20} />
+                </IconButton>
+              </Tooltip>
+
               {/* Notification Icon */}
               <Tooltip title="Notifications">
                 <IconButton
@@ -653,12 +673,6 @@ export const TopBar: React.FC<TopBarProps> = ({
                 </IconButton>
               </Tooltip>
 
-              {/* Cart Icon */}
-              <CartIcon
-                size="small"
-                onClick={() => setCartDrawerOpen(true)}
-              />
-
               {/* Settings Icon */}
               <Tooltip title="Settings">
                 <IconButton
@@ -676,8 +690,59 @@ export const TopBar: React.FC<TopBarProps> = ({
                 </IconButton>
               </Tooltip>
 
+              {/* Marketplace Icon */}
+              <Tooltip title="Marketplace">
+                <IconButton
+                  color="inherit"
+                  size="small"
+                  onClick={() => {
+                    if (isAuthenticated) {
+                      router.push('/marketplace');
+                    } else {
+                      router.push('/auth/login');
+                    }
+                  }}
+                >
+                  <ShoppingCart size={20} />
+                </IconButton>
+              </Tooltip>
+
+              {/* Marketplace Dashboard Icon */}
+              <Tooltip title="Marketplace Dashboard">
+                <IconButton
+                  color="inherit"
+                  size="small"
+                  onClick={() => {
+                    if (isAuthenticated) {
+                      router.push('/marketplace/dashboard');
+                    } else {
+                      router.push('/auth/login');
+                    }
+                  }}
+                >
+                  <ShoppingBag size={20} />
+                </IconButton>
+              </Tooltip>
+
+              {/* Orders Icon */}
+              <Tooltip title="My Orders">
+                <IconButton
+                  color="inherit"
+                  size="small"
+                  onClick={() => {
+                    if (isAuthenticated) {
+                      router.push('/marketplace/dashboard?tab=0');
+                    } else {
+                      router.push('/auth/login');
+                    }
+                  }}
+                >
+                  <Package size={20} />
+                </IconButton>
+              </Tooltip>
+
               {/* Wallet Button */}
-              <Box sx={{ display: { xs: 'none', sm: 'block' }, ml: 1 }}>
+              <Box sx={{ display: { xs: 'none', sm: 'block', ml: 1 } }}>
                 <WalletButton />
               </Box>
 
@@ -723,9 +788,9 @@ export const TopBar: React.FC<TopBarProps> = ({
 
       {/* User Menu */}
       <Menu
-        anchorEl={userMenuAnchor}
+        anchorEl={userMenuAnchor && userMenuAnchor.isConnected ? userMenuAnchor : null}
         id="account-menu"
-        open={userMenuOpen}
+        open={Boolean(userMenuOpen && userMenuAnchor && userMenuAnchor.isConnected)}
         onClose={handleUserMenuClose}
         onClick={handleUserMenuClose}
         PaperProps={{
@@ -734,7 +799,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             overflow: 'visible',
             filter: 'drop-shadow(0px 2px 8px rgba(0,0,0,0.15))',
             mt: 1.5,
-            width: 220,
+            width: 280,
             borderRadius: 2,
             '& .MuiAvatar-root': {
               width: 32,
@@ -749,12 +814,50 @@ export const TopBar: React.FC<TopBarProps> = ({
       >
         {isAuthenticated && user && (
           <Box sx={{ px: 2, py: 1 }}>
-            <Typography variant="subtitle1" fontWeight={600}>
-              {user.displayName}
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ wordBreak: 'break-all' }}>
-              @{user.username}
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+              <UserAvatar
+                src={user?.avatar}
+                alt={user?.displayName || 'User'}
+                size={40}
+                isVerified={user?.isVerified}
+              />
+              <Box>
+                <Typography variant="subtitle1" fontWeight={600}>
+                  {user.displayName}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ wordBreak: 'break-all' }}>
+                  @{user.username}
+                </Typography>
+              </Box>
+            </Box>
+            
+            {/* User stats */}
+            <Box sx={{ display: 'flex', gap: 2, mt: 1 }}>
+              <Box sx={{ textAlign: 'center' }}>
+                <Typography variant="body2" fontWeight={700}>
+                  {user.followerCount || 0}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Followers
+                </Typography>
+              </Box>
+              <Box sx={{ textAlign: 'center' }}>
+                <Typography variant="body2" fontWeight={700}>
+                  {user.followingCount || 0}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Following
+                </Typography>
+              </Box>
+              <Box sx={{ textAlign: 'center' }}>
+                <Typography variant="body2" fontWeight={700}>
+                  {user.postCount || 0}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Posts
+                </Typography>
+              </Box>
+            </Box>
           </Box>
         )}
 
@@ -799,15 +902,21 @@ export const TopBar: React.FC<TopBarProps> = ({
           <ListItemText primary="Settings" />
         </MenuItem>
 
-        {/* Logout option removed */}
+        {/* Logout option */}
+        <MenuItem onClick={handleLogout}>
+          <ListItemIcon>
+            <LogOut size={18} />
+          </ListItemIcon>
+          <ListItemText primary="Logout" />
+        </MenuItem>
       </Menu>
 
       {/* Settings Menu removed */}
 
       {/* Notifications Popover */}
       <Popover
-        open={notificationsOpen}
-        anchorEl={notificationsAnchor}
+        open={Boolean(notificationsOpen && notificationsAnchor && notificationsAnchor.isConnected)}
+        anchorEl={notificationsAnchor && notificationsAnchor.isConnected ? notificationsAnchor : null}
         onClose={handleNotificationsClose}
         anchorOrigin={{
           vertical: 'bottom',
@@ -825,12 +934,15 @@ export const TopBar: React.FC<TopBarProps> = ({
             p: 1,
           }
         }}
+        disableAutoFocus={false}
+        disableEnforceFocus={false}
+        disableRestoreFocus={false}
       >
         <Box sx={{ p: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Typography variant="h6" fontWeight={600}>
             Notifications
           </Typography>
-          {notifications.length > 0 && (
+          {Array.isArray(notifications) && notifications.length > 0 && (
             <Button
               size="small"
               onClick={handleMarkAllAsRead}
@@ -842,14 +954,18 @@ export const TopBar: React.FC<TopBarProps> = ({
         </Box>
         <Divider sx={{ mb: 1 }} />
 
-        {notifications.length === 0 ? (
+        {!notifications ? (
+          <Box sx={{ p: 3, textAlign: 'center' }}>
+            <CircularProgress size={24} />
+          </Box>
+        ) : Array.isArray(notifications) && notifications.length === 0 ? (
           <Box sx={{ p: 3, textAlign: 'center' }}>
             <Typography variant="body2" color="text.secondary">
               No notifications yet
             </Typography>
           </Box>
         ) : (
-          notifications.map((notification) => {
+          Array.isArray(notifications) && notifications.map((notification) => {
             // Format relative time
             const timeAgo = (date: string) => {
               const now = new Date();
@@ -869,7 +985,7 @@ export const TopBar: React.FC<TopBarProps> = ({
 
             // Get notification URL
             const getNotificationUrl = () => {
-              if (!notification.data) return '/notifications';
+              if (!notification.data) return undefined;
 
               if (notification.data.postId) {
                 return `/post/${notification.data.postId}`;
@@ -879,7 +995,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                 return `/profile/${notification.data.userId}`;
               }
 
-              return notification.data.url || '/notifications';
+              return notification.data.url || undefined;
             };
 
             return (
@@ -893,7 +1009,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                   bgcolor: notification.isRead ? 'transparent' : alpha(theme.palette.primary.main, 0.05),
                   '&:hover': { bgcolor: alpha(theme.palette.action.hover, 0.1) }
                 }}
-                onClick={() => handleNotificationClick(notification.id, getNotificationUrl())}
+                onClick={() => handleNotificationClick(notification.id, getNotificationUrl() || undefined)}
               >
                 <Box sx={{ display: 'flex', alignItems: 'flex-start' }}>
                   <Avatar
@@ -909,7 +1025,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                       <Bell size={20} />
                     )}
                   </Avatar>
-                  <Box>
+                  <Box sx={{ flex: 1 }}>
                     <Typography variant="body2">
                       {notification.sender && (
                         <Typography component="span" fontWeight={600}>
@@ -918,9 +1034,19 @@ export const TopBar: React.FC<TopBarProps> = ({
                       )}{' '}
                       {notification.content}
                     </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {timeAgo(notification.createdAt)}
-                    </Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
+                      <Typography variant="caption" color="text.secondary">
+                        {timeAgo(notification.createdAt)}
+                      </Typography>
+                      {!notification.isRead && (
+                        <Chip 
+                          label="New" 
+                          size="small" 
+                          color="primary" 
+                          sx={{ height: 16, fontSize: '0.6rem' }} 
+                        />
+                      )}
+                    </Box>
                   </Box>
                 </Box>
               </Box>
@@ -947,12 +1073,6 @@ export const TopBar: React.FC<TopBarProps> = ({
         </Box>
       </Popover>
 
-      {/* Cart Drawer */}
-      <CartDrawer
-        open={cartDrawerOpen}
-        onClose={() => setCartDrawerOpen(false)}
-        anchor="right"
-      />
     </AppBar>
   );
 };

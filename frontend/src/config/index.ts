@@ -60,7 +60,7 @@ export const PAGINATION = {
 // Timeout Configuration
 export const TIMEOUTS = {
   API_REQUEST: 30000, // 30 seconds
-  AUTH_REQUEST: 15000, // 15 seconds
+  AUTH_REQUEST: 60000, // 60 seconds (increased from 30s for login reliability)
   UPLOAD: 120000, // 2 minutes
   WEBSOCKET_CONNECT: 10000, // 10 seconds
 };

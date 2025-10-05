@@ -7,6 +7,7 @@ import {
   Paper,
   List,
   ListItem,
+  ListItemButton,
   ListItemIcon,
   ListItemText,
   Divider,
@@ -25,7 +26,10 @@ import {
   MessageSquare, 
   HelpCircle, 
   ChevronRight,
-  Settings as SettingsIcon
+  Settings as SettingsIcon,
+  Palette,
+  Key,
+  Languages
 } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { useAuth } from '@/contexts/AuthContext';
@@ -54,6 +58,22 @@ const SettingsPage: React.FC = () => {
       color: theme.palette.error.main
     },
     {
+      id: 'appearance',
+      title: 'Appearance',
+      description: 'Customize the look and feel of the platform',
+      icon: <Palette size={24} />,
+      path: '/settings/appearance',
+      color: theme.palette.info.main
+    },
+    {
+      id: 'language',
+      title: 'Language & Region',
+      description: 'Change your language and regional preferences',
+      icon: <Languages size={24} />,
+      path: '/settings/language',
+      color: theme.palette.secondary.main
+    },
+    {
       id: 'notifications',
       title: 'Notification Settings',
       description: 'Customize how you receive notifications',
@@ -68,14 +88,6 @@ const SettingsPage: React.FC = () => {
       icon: <Wallet size={24} />,
       path: '/settings/wallet',
       color: theme.palette.success.main
-    },
-    {
-      id: 'language',
-      title: 'Language & Region',
-      description: 'Change your language and regional preferences',
-      icon: <Globe size={24} />,
-      path: '/settings/language',
-      color: theme.palette.info.main
     },
     {
       id: 'messaging',
@@ -109,14 +121,14 @@ const SettingsPage: React.FC = () => {
               <List disablePadding>
                 {settingsCategories.map((category, index) => (
                   <React.Fragment key={category.id}>
-                    <ListItem 
-                      button
-                      onClick={() => router.push(category.path)}
-                      sx={{ 
-                        py: 2,
-                        '&:hover': { bgcolor: alpha(theme.palette.action.hover, 0.1) }
-                      }}
-                    >
+                    <ListItem disablePadding>
+                      <ListItemButton 
+                        onClick={() => router.push(category.path)}
+                        sx={{ 
+                          py: 2,
+                          '&:hover': { bgcolor: alpha(theme.palette.action.hover, 0.1) }
+                        }}
+                      >
                       <ListItemIcon sx={{ color: category.color }}>
                         {category.icon}
                       </ListItemIcon>
@@ -126,6 +138,7 @@ const SettingsPage: React.FC = () => {
                         primaryTypographyProps={{ fontWeight: 500 }}
                       />
                       <ChevronRight size={20} color={theme.palette.text.secondary} />
+                    </ListItemButton>
                     </ListItem>
                     {index < settingsCategories.length - 1 && <Divider />}
                   </React.Fragment>
@@ -201,8 +214,8 @@ const SettingsPage: React.FC = () => {
                     <Typography variant="body2" color="text.secondary" gutterBottom>
                       Two-Factor Authentication
                     </Typography>
-                    <Typography variant="body1" gutterBottom color={user.twoFactorEnabled ? 'success.main' : 'error.main'}>
-                      {user.twoFactorEnabled ? 'Enabled' : 'Disabled'}
+                    <Typography variant="body1" gutterBottom color={user.settings?.security?.twoFactorEnabled ? 'success.main' : 'error.main'}>
+                      {user.settings?.security?.twoFactorEnabled ? 'Enabled' : 'Disabled'}
                     </Typography>
                     
                     <Typography variant="body2" color="text.secondary" gutterBottom sx={{ mt: 2 }}>
