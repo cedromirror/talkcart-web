@@ -1,46 +1,31 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import api from '@/lib/api';
 import {
-  Box,
   Container,
+  Box,
   Typography,
   Grid,
-  Card,
-  CardContent,
-  CardMedia,
-  Button,
   TextField,
   InputAdornment,
-  Chip,
-  Select,
-  MenuItem,
   FormControl,
   InputLabel,
-  Pagination,
-  Skeleton,
-  Switch,
+  Select,
+  MenuItem,
   FormControlLabel,
+  Switch,
+  Button,
+  Chip,
   useTheme,
+  Skeleton,
+  Alert,
+  Pagination,
+  IconButton,
+  Tooltip,
+  Divider,
   Paper,
   Stack,
-  Badge,
-  Rating,
-  Divider,
-  Alert,
   Fab,
-  Tooltip,
-  Fade,
-  Zoom,
-  Slide,
-  Avatar,
-  AvatarGroup,
-  CircularProgress,
-  LinearProgress,
-  Backdrop,
-  IconButton,
-  Drawer,
 } from '@mui/material';
 import {
   Search,
@@ -57,7 +42,7 @@ import {
   SortAsc,
   SortDesc,
   Grid3x3,
-  List,
+  List as ListIcon,
   RefreshCcw,
   FilterX,
   Sparkles,
@@ -68,7 +53,6 @@ import {
   Award,
   Heart,
   Share2,
-  Bookmark,
   ShoppingBag,
   ArrowRight,
   TrendingDown,
@@ -77,9 +61,7 @@ import {
   Verified,
   Bell,
   Settings,
-  Menu,
-  X,
-  Truck
+  Building,
 } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { useAuth } from '@/contexts/AuthContext';
@@ -90,6 +72,7 @@ import ProductCard from '@/components/marketplace/ProductCard';
 
 import MarketplaceGrid from '@/components/marketplace/MarketplaceGrid';
 import toast from 'react-hot-toast';
+import api from '@/lib/api';
 
 // Define sort options for the marketplace
 const SORT_OPTIONS = [
@@ -123,6 +106,10 @@ const MarketplacePage: React.FC = () => {
     buyProduct
   } = useMarketplace();
   
+  console.log('Marketplace page received products:', products);
+  console.log('Marketplace page loading state:', loading);
+  console.log('Marketplace page error state:', error);
+
   // View mode
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   
@@ -146,6 +133,10 @@ const MarketplacePage: React.FC = () => {
     tags: [] as string[],
     priceRange: [0, 10000] as [number, number],
   });
+
+  // Vendor filter state
+  const [marketplaceVendors, setMarketplaceVendors] = useState<{ id: string; username: string; displayName: string }[]>([]);
+  const [vendorFilter, setVendorFilter] = useState('all');
 
   // UI States
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -172,6 +163,30 @@ const MarketplacePage: React.FC = () => {
     }));
   }, [router.isReady, router.query]);
 
+  // Fetch vendors for filter
+  useEffect(() => {
+    const fetchVendors = async () => {
+      try {
+        console.log('Fetching vendors for filter...');
+        const response: any = await api.marketplace.getVendors({ limit: 100 });
+        console.log('Vendors API response:', response);
+        
+        if (response.success) {
+          const vendorList = response.data.vendors.map((vendor: any) => ({
+            id: vendor.id,
+            username: vendor.username,
+            displayName: vendor.displayName
+          }));
+          setMarketplaceVendors(vendorList);
+        }
+      } catch (err) {
+        console.error('Failed to fetch vendors:', err);
+      }
+    };
+    
+    fetchVendors();
+  }, []);
+
   // Update URL when filters change
   const updateURL = useCallback((newFilters: typeof filters) => {
     const query: any = { ...newFilters };
@@ -195,6 +210,14 @@ const MarketplacePage: React.FC = () => {
     setFilters(updatedFilters);
     updateURL(updatedFilters);
     
+    // Validate vendorId before passing to API
+    let vendorId = vendorFilter !== 'all' ? vendorFilter : undefined;
+    if (vendorId && !isValidObjectId(vendorId)) {
+      console.warn('Invalid vendor ID detected:', vendorId);
+      vendorId = undefined; // Don't pass invalid vendor IDs to the API
+    }
+    
+    console.log('Fetching products with updated filters:', updatedFilters);
     fetchProducts({
       page: updatedFilters.page,
       search: updatedFilters.search || undefined,
@@ -204,8 +227,9 @@ const MarketplacePage: React.FC = () => {
       isNFT: updatedFilters.isNFT || undefined,
       featured: updatedFilters.featured || undefined,
       sortBy: updatedFilters.sortBy,
+      vendorId: vendorId,
     });
-  }, [filters, fetchProducts, updateURL]);
+  }, [filters, fetchProducts, updateURL, vendorFilter]);
 
   // Join marketplace for real-time updates
   useEffect(() => {
@@ -250,6 +274,14 @@ const MarketplacePage: React.FC = () => {
   useEffect(() => {
     if (!router.isReady) return;
     
+    // Validate vendorId before passing to API
+    let vendorId = vendorFilter !== 'all' ? vendorFilter : undefined;
+    if (vendorId && !isValidObjectId(vendorId)) {
+      console.warn('Invalid vendor ID detected:', vendorId);
+      vendorId = undefined; // Don't pass invalid vendor IDs to the API
+    }
+    
+    console.log('Initial fetch with filters:', filters);
     fetchProducts({
       page: filters.page,
       search: filters.search || undefined,
@@ -259,14 +291,16 @@ const MarketplacePage: React.FC = () => {
       isNFT: filters.isNFT || undefined,
       featured: filters.featured || undefined,
       sortBy: filters.sortBy,
+      vendorId: vendorId,
     });
     
     fetchCategories();
-  }, [router.isReady]);
+  }, [router.isReady, vendorFilter, filters, fetchProducts, fetchCategories]);
 
   // Handle search
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('Handling search with filters:', filters);
     handleFiltersChange({});
   };
   
@@ -276,6 +310,14 @@ const MarketplacePage: React.FC = () => {
     setFilters(newFilters);
     updateURL(newFilters);
     
+    // Validate vendorId before passing to API
+    let vendorId = vendorFilter !== 'all' ? vendorFilter : undefined;
+    if (vendorId && !isValidObjectId(vendorId)) {
+      console.warn('Invalid vendor ID detected:', vendorId);
+      vendorId = undefined; // Don't pass invalid vendor IDs to the API
+    }
+    
+    console.log('Fetching products for page:', value);
     fetchProducts({
       page: value,
       search: filters.search || undefined,
@@ -285,6 +327,7 @@ const MarketplacePage: React.FC = () => {
       isNFT: filters.isNFT || undefined,
       featured: filters.featured || undefined,
       sortBy: filters.sortBy,
+      vendorId: vendorId,
     });
 
     // Scroll to top
@@ -357,8 +400,9 @@ const MarketplacePage: React.FC = () => {
       priceRange: [0, 10000] as [number, number],
     };
     setFilters(defaultFilters);
+    setVendorFilter('all');
     updateURL(defaultFilters);
-    fetchProducts({ sortBy: 'newest' });
+    fetchProducts({ sortBy: 'newest', vendorId: undefined });
   };
   
   // Format price with proper currency symbols
@@ -376,17 +420,17 @@ const MarketplacePage: React.FC = () => {
   // Get proper image URL
   const getImageUrl = (images: any) => {
     if (!images || images.length === 0) {
-      return 'https://via.placeholder.com/400x400?text=No+Image';
+      return '/images/placeholder-image.png';
     }
     
     const firstImage = images[0];
     if (typeof firstImage === 'string') return firstImage;
-    return firstImage.secure_url || firstImage.url || 'https://via.placeholder.com/400x400?text=No+Image';
+    return firstImage.secure_url || firstImage.url || '/images/placeholder-image.png';
   };
 
   // Check if filters are applied
   const hasActiveFilters = filters.search || filters.category !== 'all' || filters.minPrice || 
-                          filters.maxPrice || filters.isNFT || filters.featured || filters.sortBy !== 'newest';
+                          filters.maxPrice || filters.isNFT || filters.featured || filters.sortBy !== 'newest' || vendorFilter !== 'all';
   
   // Handle comparison toggle
   const handleComparisonToggle = (productId: string) => {
@@ -431,7 +475,8 @@ const MarketplacePage: React.FC = () => {
           </Box>
           
           {user && (
-            <Box sx={{ display: 'flex', gap: 1 }}>
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+              {/* My Orders Button - Visible to all authenticated users */}
               <Button
                 variant="contained"
                 startIcon={<Package size={20} />}
@@ -447,23 +492,106 @@ const MarketplacePage: React.FC = () => {
               >
                 My Orders
               </Button>
+              
+              {/* My Dashboard Button - Only show if user is not a vendor */}
+              {user.role !== 'vendor' && (
+                <Button
+                  variant="contained"
+                  startIcon={<ShoppingCart size={20} />}
+                  onClick={() => router.push('/marketplace/my-dashboard')}
+                  sx={{
+                    bgcolor: '#1976d2',
+                    color: 'white',
+                    '&:hover': {
+                      bgcolor: '#1565c0',
+                    },
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  My Dashboard
+                </Button>
+              )}
+              
+              {/* Vendor Store Button - Only show if user is a vendor */}
+              {user.role === 'vendor' && (
+                <Button
+                  variant="contained"
+                  startIcon={<ShoppingCart size={20} />}
+                  onClick={() => router.push('/marketplace/vendor-payment-settings')}
+                  sx={{
+                    bgcolor: '#FF9900',
+                    color: 'white',
+                    '&:hover': {
+                      bgcolor: '#e88900',
+                    },
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  Vendor Store
+                </Button>
+              )}
+              
+              {/* Vendor Dashboard Button - Only show if user is a vendor */}
+              {user.role === 'vendor' && (
+                <Button
+                  variant="contained"
+                  startIcon={<Building size={20} />}
+                  onClick={() => router.push('/marketplace/vendor-dashboard')}
+                  sx={{
+                    bgcolor: '#FF9900',
+                    color: 'white',
+                    '&:hover': {
+                      bgcolor: '#e88900',
+                    },
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  My Store Dashboard
+                </Button>
+              )}
+              
+              {/* Vendor Registration Button - Only show if user is not already a vendor */}
+              {user.role !== 'vendor' && (
+                <Button
+                  variant="contained"
+                  startIcon={<Plus size={20} />}
+                  onClick={() => router.push('/marketplace/vendor-store-registration')}
+                  sx={{
+                    bgcolor: '#4CAF50',
+                    color: 'white',
+                    '&:hover': {
+                      bgcolor: '#45a049',
+                    },
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  Register Your Store
+                </Button>
+              )}
+            </Box>
+          )}
+          
+          {/* Show registration button for non-authenticated users */}
+          {!user && (
+            <Box sx={{ display: 'flex', gap: 1 }}>
               <Button
                 variant="contained"
-                startIcon={<ShoppingBag size={20} />}
-                onClick={() => router.push('/marketplace/dashboard')}
+                startIcon={<Plus size={20} />}
+                onClick={() => router.push('/register')}
                 sx={{
-                  bgcolor: '#FF9900',
+                  bgcolor: '#4CAF50',
                   color: 'white',
                   '&:hover': {
-                    bgcolor: '#e88900',
+                    bgcolor: '#45a049',
                   },
                   whiteSpace: 'nowrap',
                 }}
               >
-                My Dashboard
+                Register to Sell
               </Button>
             </Box>
           )}
+
         </Box>
         
         {/* Search and Filters */}
@@ -539,6 +667,41 @@ const MarketplacePage: React.FC = () => {
                     {categories.map((category) => (
                       <MenuItem key={category} value={category}>
                         {category}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              
+              <Grid item xs={12} md={2.5}>
+                <FormControl fullWidth>
+                  <InputLabel>Vendor</InputLabel>
+                  <Select
+                    value={vendorFilter}
+                    label="Vendor"
+                    onChange={(e) => {
+                      setVendorFilter(e.target.value);
+                      handleFiltersChange({});
+                    }}
+                    size="medium"
+                    sx={{
+                      backgroundColor: 'white',
+                      '& .MuiOutlinedInput-notchedOutline': {
+                        borderColor: '#ddd',
+                      },
+                      '&:hover .MuiOutlinedInput-notchedOutline': {
+                        borderColor: '#FF9900',
+                      },
+                      '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                        borderColor: '#FF9900',
+                        borderWidth: '2px',
+                      },
+                    }}
+                  >
+                    <MenuItem value="all">All Vendors</MenuItem>
+                    {marketplaceVendors.map((vendor) => (
+                      <MenuItem key={vendor.id} value={vendor.id}>
+                        {vendor.displayName || vendor.username}
                       </MenuItem>
                     ))}
                   </Select>
@@ -698,7 +861,7 @@ const MarketplacePage: React.FC = () => {
                     borderRadius: '0 4px 4px 0',
                   }}
                 >
-                  <List size={16} />
+                  <ListIcon size={16} />
                 </IconButton>
               </Box>
             </Box>
@@ -724,30 +887,7 @@ const MarketplacePage: React.FC = () => {
         
         {/* Amazon-Style Products Grid */}
         <MarketplaceGrid
-          products={products.map(p => ({
-            id: p.id,
-            name: p.name,
-            description: p.description,
-            price: p.price,
-            currency: p.currency,
-            images: p.images,
-            category: p.category,
-            vendor: p.vendor,
-            isNFT: p.isNFT,
-            featured: p.featured,
-            tags: p.tags || [],
-            stock: p.stock !== undefined ? p.stock : 0,
-            rating: p.rating !== undefined ? p.rating : 0,
-            reviewCount: p.reviewCount !== undefined ? p.reviewCount : 0,
-            sales: p.sales !== undefined ? p.sales : 0,
-            views: p.views !== undefined ? p.views : 0,
-            availability: '',
-            createdAt: p.createdAt,
-            discount: (p as any).discount !== undefined ? (p as any).discount : 0,
-            freeShipping: (p as any).freeShipping !== undefined ? (p as any).freeShipping : false,
-            fastDelivery: (p as any).fastDelivery !== undefined ? (p as any).fastDelivery : false,
-            prime: (p as any).prime !== undefined ? (p as any).prime : false,
-          }))}
+          products={products}
           loading={loading}
         />
 
@@ -829,3 +969,8 @@ const MarketplacePage: React.FC = () => {
 };
 
 export default MarketplacePage;
+
+// Simple ObjectId validation function
+const isValidObjectId = (id: string): boolean => {
+  return /^[0-9a-fA-F]{24}$/.test(id);
+};

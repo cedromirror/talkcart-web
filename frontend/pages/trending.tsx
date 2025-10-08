@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { PostCardEnhanced as PostCard } from '@/components/social/new/PostCardEnhanced';
+import { VideoFeedProvider } from '@/components/video/VideoFeedManager';
 import TrendingPosts from '@/components/social/new/TrendingPosts';
 import { Post } from '@/types/social';
 
@@ -354,13 +355,29 @@ const TrendingPage: React.FC = () => {
             
             <TabPanel value={activeTab} index={0}>
               <Box sx={{ p: 2 }}>
-                {mockPosts.map((post) => (
-                  <PostCard 
-                    key={post.id} 
-                    post={post} 
-                    onBookmark={handleBookmarkPost}
-                  />
-                ))}
+                {/* Wrap PostCard components with VideoFeedProvider */}
+                <VideoFeedProvider
+                  initialSettings={{
+                    enabled: true,
+                    threshold: 0.6,
+                    pauseOnScroll: true,
+                    muteByDefault: true,
+                    preloadStrategy: 'metadata',
+                    maxConcurrentVideos: 2,
+                    scrollPauseDelay: 150,
+                    viewTrackingThreshold: 3,
+                    autoplayOnlyOnWifi: false,
+                    respectReducedMotion: true,
+                  }}
+                >
+                  {mockPosts.map((post) => (
+                    <PostCard 
+                      key={post.id} 
+                      post={post} 
+                      onBookmark={handleBookmarkPost}
+                    />
+                  ))}
+                </VideoFeedProvider>
               </Box>
             </TabPanel>
             

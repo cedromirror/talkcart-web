@@ -47,6 +47,7 @@ import useMarketplace from '@/hooks/useMarketplace';
 import useRotatingProducts from '@/hooks/useRotatingProducts';
 import api from '@/lib/api';
 import { PostCardEnhanced as PostCard } from '@/components/social/new/PostCardEnhanced';
+import { VideoFeedProvider } from '@/components/video/VideoFeedManager';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -758,11 +759,27 @@ const TrendingPostsSection: React.FC = () => {
 
   return (
     <Grid container spacing={3}>
-      {trendingPosts.map((post) => (
-        <Grid item xs={12} key={post.id}>
-          <PostCard post={post as any} />
-        </Grid>
-      ))}
+      {/* Wrap PostCard components with VideoFeedProvider */}
+      <VideoFeedProvider
+        initialSettings={{
+          enabled: true,
+          threshold: 0.6,
+          pauseOnScroll: true,
+          muteByDefault: true,
+          preloadStrategy: 'metadata',
+          maxConcurrentVideos: 2,
+          scrollPauseDelay: 150,
+          viewTrackingThreshold: 3,
+          autoplayOnlyOnWifi: false,
+          respectReducedMotion: true,
+        }}
+      >
+        {trendingPosts.map((post) => (
+          <Grid item xs={12} key={post.id}>
+            <PostCard post={post as any} />
+          </Grid>
+        ))}
+      </VideoFeedProvider>
     </Grid>
   );
 };

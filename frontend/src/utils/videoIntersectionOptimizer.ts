@@ -39,6 +39,7 @@ class VideoIntersectionOptimizer {
     averageCheckTime: 0,
   };
   private rafId: number | null = null;
+  private lastUpdateTimestamp = 0; // Add timestamp tracking
 
   constructor() {
     this.initializeIntersectionObserver();
@@ -51,12 +52,19 @@ class VideoIntersectionOptimizer {
 
     this.intersectionObserver = new IntersectionObserver(
       (entries) => {
+        // Throttle updates to improve performance
+        const now = Date.now();
+        if (now - this.lastUpdateTimestamp < 16) { // ~60fps limit
+          return;
+        }
+        this.lastUpdateTimestamp = now;
+        
         this.handleIntersectionChange(entries);
       },
       {
         root: null,
         rootMargin: '0px',
-        threshold: [0, 0.1, 0.25, 0.5, 0.75, 1.0],
+        threshold: [0, 0.25, 0.5, 0.75, 1.0], // Optimized thresholds
       }
     );
   }
@@ -82,6 +90,15 @@ class VideoIntersectionOptimizer {
         const viewportCenter = window.innerHeight / 2;
         const elementCenter = rect.top + rect.height / 2;
         videoData.distanceFromCenter = Math.abs(elementCenter - viewportCenter);
+        
+        // Determine viewport position
+        if (elementCenter < viewportCenter * 0.7) {
+          videoData.viewportPosition = 'above';
+        } else if (elementCenter > viewportCenter * 1.3) {
+          videoData.viewportPosition = 'below';
+        } else {
+          videoData.viewportPosition = 'center';
+        }
       }
 
       // Calculate performance score based on intersection and distance
@@ -106,18 +123,18 @@ class VideoIntersectionOptimizer {
   private calculatePerformanceScore(videoData: VideoIntersectionData): number {
     let score = 0;
 
-    // Intersection ratio contributes to score
-    score += videoData.intersectionRatio * 0.4;
+    // Intersection ratio contributes to score (weighted more heavily)
+    score += videoData.intersectionRatio * 0.6;
 
     // Distance from center (closer is better)
     const maxDistance = window.innerHeight / 2;
     const distanceScore = Math.max(0, 1 - (videoData.distanceFromCenter / maxDistance));
-    score += distanceScore * 0.4;
+    score += distanceScore * 0.3;
 
     // Recency bonus
     const timeSinceUpdate = Date.now() - videoData.lastUpdate;
     const recencyScore = Math.max(0, 1 - (timeSinceUpdate / 1000)); // 1 second max
-    score += recencyScore * 0.2;
+    score += recencyScore * 0.1;
 
     return Math.min(1, Math.max(0, score));
   }
@@ -136,7 +153,8 @@ class VideoIntersectionOptimizer {
       }
     }
 
-    if (bestVideo && bestScore > 0.5) {
+    // Only trigger change if score is significantly high
+    if (bestVideo && bestScore > 0.6) {
       this.optimalVideoChangeCallback(bestVideo.videoId);
     }
   }

@@ -52,6 +52,7 @@ import { useProfile } from '@/contexts/ProfileContext'; // Add this import
 import { ProfileUser, Post } from '@/types';
 import UserCard from '@/components/profile/UserCard';
 import { PostCardEnhanced as PostCard } from '@/components/social/new/PostCardEnhanced';
+import { VideoFeedProvider } from '@/components/video/VideoFeedManager'; // Add this import
 import { useProfileCache } from '@/contexts/ProfileCacheContext';
 
 // Modern Stats Card Component
@@ -899,13 +900,29 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                     </Paper>
                   ) : (
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                      {posts.map((p) => (
-                        <Fade in={true} timeout={300} key={p.id}>
-                          <Box>
-                            <PostCard post={p as any} />
-                          </Box>
-                        </Fade>
-                      ))}
+                      {/* Wrap PostCard components with VideoFeedProvider */}
+                      <VideoFeedProvider
+                        initialSettings={{
+                          enabled: true,
+                          threshold: 0.6,
+                          pauseOnScroll: true,
+                          muteByDefault: true,
+                          preloadStrategy: 'metadata',
+                          maxConcurrentVideos: 2,
+                          scrollPauseDelay: 150,
+                          viewTrackingThreshold: 3,
+                          autoplayOnlyOnWifi: false,
+                          respectReducedMotion: true,
+                        }}
+                      >
+                        {posts.map((p) => (
+                          <Fade in={true} timeout={300} key={p.id}>
+                            <Box>
+                              <PostCard post={p as any} />
+                            </Box>
+                          </Fade>
+                        ))}
+                      </VideoFeedProvider>
                     </Box>
                   )}
 
@@ -967,13 +984,29 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                     </Paper>
                   ) : (
                     <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)' }, gap: 2 }}>
-                      {mediaPosts.map((p) => (
-                        <Fade in={true} timeout={300} key={p.id}>
-                          <Box>
-                            <PostCard post={p as any} />
-                          </Box>
-                        </Fade>
-                      ))}
+                      {/* Wrap PostCard components with VideoFeedProvider */}
+                      <VideoFeedProvider
+                        initialSettings={{
+                          enabled: true,
+                          threshold: 0.6,
+                          pauseOnScroll: true,
+                          muteByDefault: true,
+                          preloadStrategy: 'metadata',
+                          maxConcurrentVideos: 2,
+                          scrollPauseDelay: 150,
+                          viewTrackingThreshold: 3,
+                          autoplayOnlyOnWifi: false,
+                          respectReducedMotion: true,
+                        }}
+                      >
+                        {mediaPosts.map((p) => (
+                          <Fade in={true} timeout={300} key={p.id}>
+                            <Box>
+                              <PostCard post={p as any} />
+                            </Box>
+                          </Fade>
+                        ))}
+                      </VideoFeedProvider>
                     </Box>
                   )}
 
@@ -1038,13 +1071,29 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                     </Paper>
                   ) : (
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                      {likedPosts.map((p) => (
-                        <Fade in={true} timeout={300} key={p.id}>
-                          <Box>
-                            <PostCard post={p as any} />
-                          </Box>
-                        </Fade>
-                      ))}
+                      {/* Wrap PostCard components with VideoFeedProvider */}
+                      <VideoFeedProvider
+                        initialSettings={{
+                          enabled: true,
+                          threshold: 0.6,
+                          pauseOnScroll: true,
+                          muteByDefault: true,
+                          preloadStrategy: 'metadata',
+                          maxConcurrentVideos: 2,
+                          scrollPauseDelay: 150,
+                          viewTrackingThreshold: 3,
+                          autoplayOnlyOnWifi: false,
+                          respectReducedMotion: true,
+                        }}
+                      >
+                        {likedPosts.map((p) => (
+                          <Fade in={true} timeout={300} key={p.id}>
+                            <Box>
+                              <PostCard post={p as any} />
+                            </Box>
+                          </Fade>
+                        ))}
+                      </VideoFeedProvider>
                     </Box>
                   )}
 
@@ -1109,13 +1158,29 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                     </Paper>
                   ) : (
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                      {bookmarkedPosts.map((p) => (
-                        <Fade in={true} timeout={300} key={p.id}>
-                          <Box>
-                            <PostCard post={p as any} />
-                          </Box>
-                        </Fade>
-                      ))}
+                      {/* Wrap PostCard components with VideoFeedProvider */}
+                      <VideoFeedProvider
+                        initialSettings={{
+                          enabled: true,
+                          threshold: 0.6,
+                          pauseOnScroll: true,
+                          muteByDefault: true,
+                          preloadStrategy: 'metadata',
+                          maxConcurrentVideos: 2,
+                          scrollPauseDelay: 150,
+                          viewTrackingThreshold: 3,
+                          autoplayOnlyOnWifi: false,
+                          respectReducedMotion: true,
+                        }}
+                      >
+                        {bookmarkedPosts.map((p) => (
+                          <Fade in={true} timeout={300} key={p.id}>
+                            <Box>
+                              <PostCard post={p as any} />
+                            </Box>
+                          </Fade>
+                        ))}
+                      </VideoFeedProvider>
                     </Box>
                   )}
 

@@ -4,6 +4,9 @@ const mongoose = require('mongoose');
 const { authenticateToken, authenticateTokenStrict } = require('./auth');
 const { Conversation, Message, User } = require('../models');
 
+// Add this after the imports at the top of the file
+const NotificationService = require('../services/notificationService');
+
 // Health check endpoint
 router.get('/health', (req, res) => {
   res.json({
@@ -622,6 +625,26 @@ router.post('/conversations/:id/messages', authenticateTokenStrict, async (req, 
 
     // Populate sender data
     await newMessage.populate('senderId', 'username displayName avatar isVerified');
+
+    // Create notifications for other participants in the conversation
+    try {
+      // Get other participants (excluding sender)
+      const otherParticipants = conversation.participants.filter(
+        participantId => participantId.toString() !== userId
+      );
+
+      // Create message notifications for each participant
+      for (const participantId of otherParticipants) {
+        await NotificationService.createMessageNotification(
+          userId,
+          participantId.toString(),
+          id,
+          hasContent ? content.trim() : 'sent you a message'
+        );
+      }
+    } catch (notificationError) {
+      console.error('Error creating message notifications:', notificationError);
+    }
 
     // Emit socket event for real-time updates
     const io = req.app.get('io');
@@ -1581,3 +1604,4 @@ router.put('/conversations/:id/read', authenticateTokenStrict, async (req, res) 
 });
 
 module.exports = router;
+

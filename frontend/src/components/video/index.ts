@@ -5,8 +5,8 @@ export { VideoFeedProvider, useVideoFeed } from './VideoFeedManager';
 export { VideoSettings } from './VideoSettings';
 export { VideoAnalytics } from './VideoAnalytics';
 export { VideoControls } from './VideoControls';
-export { VideoPerformanceMonitor } from './VideoPerformanceMonitor';
-export { SmoothScrollMonitor } from './SmoothScrollMonitor';
+export { default as VideoPerformanceMonitor } from './VideoPerformanceMonitor';
+export { default as VideoAutoplayTest } from './VideoAutoplayTest'; // Add test component
 
 // Hooks
 export { useVideoAutoscroll } from '../../hooks/useVideoAutoscroll';

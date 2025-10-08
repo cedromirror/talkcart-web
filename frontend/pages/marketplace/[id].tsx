@@ -42,7 +42,8 @@ import {
   Zap,
   CheckCircle,
   Lock,
-  RotateCcw
+  RotateCcw,
+  Store
 } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { useAuth } from '@/contexts/AuthContext';
@@ -53,6 +54,7 @@ import { ProductImage } from '@/types';
 import { toast } from 'react-hot-toast';
 import { SessionExpiredError } from '@/lib/api';
 import BuyModal from '@/components/marketplace/BuyModal';
+import VendorPaymentInfo from '@/components/marketplace/VendorPaymentInfo';
 
 // Keyframes for animations
 const pulse = keyframes`
@@ -270,7 +272,7 @@ const ProductPage: React.FC<ProductPageProps> = () => {
     );
   }
 
-  const isOwner = false; // Since all products show @admin, users can never be owners
+  const isOwner = user && product && user.id === product.vendor?.id;
   const canPurchase = isAuthenticated && (product.stock > 0 || product.isNFT);
 
   return (
@@ -320,7 +322,7 @@ const ProductPage: React.FC<ProductPageProps> = () => {
                     ? (typeof product.images[imageIndex] === 'string' 
                         ? product.images[imageIndex] 
                         : product.images[imageIndex]?.secure_url || product.images[imageIndex]?.url)
-                    : 'https://via.placeholder.com/600x400?text=No+Image'
+                    : '/images/placeholder-image.png'
                 }
                 alt={product.name}
                 sx={{ 
@@ -396,22 +398,28 @@ const ProductPage: React.FC<ProductPageProps> = () => {
                     >
                       {product.vendor?.displayName?.charAt(0) || product.vendor?.username?.charAt(0)}
                     </Avatar>
-                    <Box>
-                      <Typography variant="body2" fontWeight={600}>
-                        {product.vendor?.displayName || product.vendor?.username}
-                      </Typography>
-                      {product.vendor?.isVerified && (
-                        <Chip 
-                          icon={<Shield size={12} />} 
-                          label="Verified" 
-                          size="small" 
-                          sx={{ 
-                            height: 18, 
-                            fontSize: '0.65rem',
-                            '& .MuiChip-icon': { mr: 0.5 }
-                          }} 
-                        />
-                      )}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box>
+                        <Typography variant="body2" fontWeight={600}>
+                          {product.vendor?.displayName || product.vendor?.username}
+                        </Typography>
+                        {product.vendor?.isVerified && (
+                          <Chip 
+                            icon={<Shield size={12} />} 
+                            label="Verified" 
+                            size="small" 
+                            sx={{ 
+                              height: 18, 
+                              fontSize: '0.65rem',
+                              '& .MuiChip-icon': { mr: 0.5 }
+                            }} 
+                          />
+                        )}
+                      </Box>
+                      <VendorPaymentInfo 
+                        vendorId={product.vendor?.id} 
+                        vendorName={product.vendor?.displayName || product.vendor?.username} 
+                      />
                     </Box>
                   </Box>
 
@@ -588,19 +596,33 @@ const ProductPage: React.FC<ProductPageProps> = () => {
                   borderRadius: 2
                 }}>
                   {isOwner ? (
-                    <Button
-                      fullWidth
-                      variant="outlined"
-                      disabled
-                      size="large"
-                      sx={{
-                        py: 1.5,
-                        borderRadius: 2,
-                        fontWeight: 600
-                      }}
-                    >
-                      This is your product
-                    </Button>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mb: 2 }}>
+                      <Button
+                        variant="outlined"
+                        startIcon={<Store size={20} />}
+                        onClick={() => router.push('/marketplace/vendor-payment-settings')}
+                        sx={{
+                          py: 1.5,
+                          borderRadius: 2,
+                          fontWeight: 600
+                        }}
+                      >
+                        Manage Vendor Store
+                      </Button>
+                      <Button
+                        fullWidth
+                        variant="outlined"
+                        disabled
+                        size="large"
+                        sx={{
+                          py: 1.5,
+                          borderRadius: 2,
+                          fontWeight: 600
+                        }}
+                      >
+                        This is your product
+                      </Button>
+                    </Box>
                   ) : (
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
                       {/* Direct Purchase Button - Replaces AddToCartButton */}
@@ -636,35 +658,6 @@ const ProductPage: React.FC<ProductPageProps> = () => {
                           'Buy Now'
                         )}
                       </Button>
-                      
-                      {/* Buy Now: open modal for Stripe/Crypto/NFT */}
-                      {canPurchase && (
-                        <Button
-                          fullWidth
-                          variant="contained"
-                          size="large"
-                          onClick={() => handlePurchase()}
-                          disabled={purchasing}
-                          startIcon={product.isNFT ? <Wallet size={20} /> : <CreditCard size={20} />}
-                          sx={{ 
-                            background: `linear-gradient(45deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
-                            color: 'white',
-                            boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
-                            textTransform: 'none',
-                            fontWeight: 600,
-                            border: 'none',
-                            py: 1.5,
-                            borderRadius: 2,
-                            '&:hover': {
-                              boxShadow: '0 6px 25px rgba(0,0,0,0.2)',
-                              transform: 'translateY(-2px)',
-                              transition: 'all 0.3s ease'
-                            }
-                          }}
-                        >
-                          {purchasing ? 'Processing...' : product.isNFT ? 'Buy NFT Now' : 'Buy Now'}
-                        </Button>
-                      )}
                     </Box>
                   )}
                 </Box>

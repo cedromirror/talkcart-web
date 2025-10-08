@@ -14,7 +14,7 @@ async function debugRecentFeed() {
     const bob = await User.findOne({ username: 'bob_recent' });
 
     if (!charlie || !alice || !bob) {
-      console.log('❌ Test users not found. Run testRecentFeedVisibility.js first.');
+      console.log('❌ Test users not found. Test data setup script has been removed for production.');
       return;
     }
 

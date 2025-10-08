@@ -115,7 +115,7 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['user', 'moderator', 'admin'],
+    enum: ['user', 'vendor', 'moderator', 'admin'],
     default: 'user'
   },
   followerCount: {
@@ -494,6 +494,35 @@ userSchema.statics.searchUsers = function(query, options = {}) {
   .sort({ [sortBy]: sortOrder })
   .limit(limit)
   .skip(skip);
+};
+
+// Instance method to check if user is a vendor
+userSchema.methods.isVendor = async function() {
+  // If role is already set to vendor, return true
+  if (this.role === 'vendor') {
+    return true;
+  }
+  
+  // Check if user has a vendor store
+  const VendorStore = require('./VendorStore');
+  const store = await VendorStore.findOne({ vendorId: this._id });
+  
+  // If user has a store, update their role to vendor
+  if (store) {
+    this.role = 'vendor';
+    await this.save();
+    return true;
+  }
+  
+  return false;
+};
+
+// Static method to check if user is a vendor
+userSchema.statics.isVendor = async function(userId) {
+  const user = await this.findById(userId);
+  if (!user) return false;
+  
+  return await user.isVendor();
 };
 
 module.exports = mongoose.model('User', userSchema);

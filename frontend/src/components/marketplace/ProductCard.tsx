@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import {
   Card,
   CardContent,
@@ -11,10 +12,12 @@ import {
 import {
   Eye,
   AlertCircle,
+  MessageCircle,
 } from 'lucide-react';
 import Image from 'next/image';
-import { convertUsdToCurrency, formatCurrencyAmount } from '@/utils/currencyConverter';
+import { convertUsdToCurrency, convertCurrencyToUsd, formatCurrencyAmount } from '@/utils/currencyConverter';
 import { getUserCurrency } from '@/utils/userCurrencyDetector';
+import ChatbotButton from './ChatbotButton';
 
 interface Product {
   id: string;
@@ -64,6 +67,9 @@ const ProductCard: React.FC<ProductCardProps> = ({
   userCurrency, // Accept userCurrency as prop
   onCurrencyConverted,
 }) => {
+  console.log('ProductCard received product:', product);
+  console.log('ProductCard loading state:', loading);
+  
   const theme = useTheme();
   const [imageError, setImageError] = useState(false);
   const [convertedPrice, setConvertedPrice] = useState<number | null>(null);
@@ -132,8 +138,8 @@ const ProductCard: React.FC<ProductCardProps> = ({
         areCurrenciesDifferent: product.currency !== effectiveUserCurrency
       });
 
-      // Convert price if currencies are different
-      if (product.currency !== effectiveUserCurrency) {
+      // Only attempt conversion if currencies are different and both are valid
+      if (product.currency && effectiveUserCurrency && product.currency !== effectiveUserCurrency) {
         setIsConverting(true);
         try {
           // If product is already in USD, convert to user's currency
@@ -208,14 +214,14 @@ const ProductCard: React.FC<ProductCardProps> = ({
 
   const getImageSrc = () => {
     if (!product.images || product.images.length === 0) {
-      return 'https://via.placeholder.com/120x120?text=No+Image';
+      return '/images/placeholder-image.png';
     }
     
     const firstImage = product.images[0];
     if (typeof firstImage === 'string') {
       return firstImage;
     }
-    return firstImage.secure_url || firstImage.url;
+    return firstImage.secure_url || firstImage.url || '/images/placeholder-image.png';
   };
 
   return (
@@ -231,7 +237,14 @@ const ProductCard: React.FC<ProductCardProps> = ({
         position: 'relative',
         overflow: 'hidden',
         backgroundColor: '#ffffff',
+        cursor: 'pointer',
+        '&:hover': {
+          transform: 'translateY(-2px)',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+        },
       }}
+      component={Link}
+      href={`/marketplace/${product.id}`}
     >
       {/* Product Image - Fixed size container with exact dimensions */}
       <Box sx={{ 
@@ -291,6 +304,15 @@ const ProductCard: React.FC<ProductCardProps> = ({
           <Typography variant="caption" sx={{ color: 'white', fontSize: '0.6rem' }} component="span">
             {product.views || 0}
           </Typography>
+        </Box>
+        
+        {/* Chatbot Button */}
+        <Box sx={{ position: 'absolute', top: 4, right: 4 }}>
+          <ChatbotButton 
+            productId={product.id}
+            vendorId={product.vendor.id}
+            productName={product.name}
+          />
         </Box>
       </Box>
 

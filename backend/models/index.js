@@ -8,9 +8,13 @@ const Settings = require('./Settings');
 const DAO = require('./DAO');
 const Proposal = require('./Proposal');
 const Notification = require('./Notification');
+const VendorPaymentPreferences = require('./VendorPaymentPreferences');
+const VendorStore = require('./VendorStore');
 
 const Conversation = require('./Conversation');
 const Message = require('./Message');
+const ChatbotConversation = require('./ChatbotConversation');
+const ChatbotMessage = require('./ChatbotMessage');
 const Call = require('./Call');
 const Follow = require('./Follow');
 const Share = require('./Share');
@@ -31,8 +35,12 @@ module.exports = {
   DAO,
   Proposal,
   Notification,
+  VendorPaymentPreferences,
+  VendorStore,
   Conversation,
   Message,
+  ChatbotConversation,
+  ChatbotMessage,
   Call,
   Follow,
   Share,

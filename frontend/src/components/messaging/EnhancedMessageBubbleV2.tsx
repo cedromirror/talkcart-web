@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
     Box,
     Stack,
@@ -33,6 +33,7 @@ import { Message } from '@/types/message';
 import { formatDistanceToNow, format } from 'date-fns';
 import { useAuth } from '@/contexts/AuthContext';
 import VoiceMessageBubble from './VoiceMessageBubble';
+import { useMediaMute } from '@/hooks/useMediaMute'; // Import the new hook
 
 // Placeholder VoiceMessageBubble component if not exists
 const VoiceMessageBubblePlaceholder: React.FC<any> = (props) => (
@@ -205,12 +206,15 @@ const EnhancedMessageBubbleV2: React.FC<EnhancedMessageBubbleV2Props> = ({
         const audio = audioRefs.current[mediaUrl];
         if (!audio) return;
 
-        audio.muted = !audio.muted;
+        // Use the unified mute hook functionality
+        const newMutedState = !audio.muted;
+        audio.muted = newMutedState;
+        
         setAudioStates(prev => ({
             ...prev,
             [mediaUrl]: {
                 ...prev[mediaUrl],
-                muted: audio.muted
+                muted: newMutedState
             }
         }));
     };

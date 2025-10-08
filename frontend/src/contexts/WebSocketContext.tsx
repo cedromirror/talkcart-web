@@ -197,10 +197,11 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
   const [isConnected, setIsConnected] = useState(false);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
   const reconnectAttemptsRef = useRef(0);
-  const maxReconnectAttempts = 5;
+  const maxReconnectAttempts = 10; // Increased from 5 to 10
   const joinedPostsRef = useRef<Set<string>>(new Set());
   // Add state to track if we're refreshing token
   const [isRefreshingToken, setIsRefreshingToken] = useState(false);
+  const socketRef = useRef<Socket | null>(null);
 
   const initializeSocket = useCallback(() => {
     if (!isAuthenticated) {
@@ -258,6 +259,12 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
 
     console.log('Initializing WebSocket connection to:', socketUrl);
 
+    // Clear any existing socket
+    if (socketRef.current) {
+      socketRef.current.removeAllListeners();
+      socketRef.current.disconnect();
+    }
+
     const newSocket = io(socketUrl, {
       path: '/socket.io/',
       auth: {
@@ -267,11 +274,16 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
       timeout: 20000,
       forceNew: true,
       reconnection: true,
-      reconnectionAttempts: 5,
+      reconnectionAttempts: 15, // Increased from 10 to 15
       reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
+      reconnectionDelayMax: 15000, // Increased from 10000 to 15000
       randomizationFactor: 0.5,
+      upgrade: true,
+      rememberUpgrade: false, // Keep as false to allow fallback
+      rejectUnauthorized: false, // For development environments
     });
+
+    socketRef.current = newSocket;
 
     newSocket.on('connect', () => {
       console.log('✅ WebSocket connected successfully!');
@@ -335,9 +347,12 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
             .finally(() => {
               setIsRefreshingToken(false);
             });
-        } else if (!payload?.success && payload?.userId) {
+        } else if (payload?.userId && !payload?.success) {
           // Log more detailed information about the authentication failure
           console.warn('Socket authentication failed for user:', payload.userId, 'with error:', payload.error);
+        } else if (payload?.userId && payload?.success !== false) {
+          // Handle case where server sends userId without explicit success field (successful auth)
+          console.log('Socket authentication successful for user:', payload.userId);
         }
       }
     });
@@ -387,7 +402,7 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
     });
 
     return newSocket;
-  }, [isAuthenticated]);
+  }, [isAuthenticated, isRefreshingToken]);
 
   const handleReconnect = useCallback(() => {
     // Clear any existing timeout
@@ -437,6 +452,12 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
         newSocket.disconnect();
         setSocket(null);
         setIsConnected(false);
+      }
+      // Clean up socketRef
+      if (socketRef.current) {
+        socketRef.current.removeAllListeners();
+        socketRef.current.disconnect();
+        socketRef.current = null;
       }
     };
   }, [isAuthenticated, initializeSocket]);

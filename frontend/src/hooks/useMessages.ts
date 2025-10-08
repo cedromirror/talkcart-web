@@ -69,17 +69,56 @@ export const useMessages = (): UseMessagesReturn => {
   const messageSoundRef = useRef<HTMLAudioElement | null>(null);
   const soundInitRef = useRef(false);
 
-  // Sound notification controls
-  const [soundsEnabled, setSoundsEnabled] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return true;
+  // Check if message sounds are enabled using global settings
+  const areMessageSoundsEnabled = useCallback(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      const interactionSettings = localStorage.getItem('talkcart-interaction-settings');
+      if (interactionSettings) {
+        const settings = JSON.parse(interactionSettings);
+        // Use global notification sounds setting
+        return settings.sound?.notificationSounds !== false; // Default to true if not set
+      }
+    } catch (e) {
+      console.debug('Error reading interaction settings:', e);
+    }
+    // Fallback to local setting
     const saved = localStorage.getItem('messages:soundsEnabled');
     return saved === null ? true : saved === 'true';
-  });
-  const [soundVolume, setSoundVolume] = useState<number>(() => {
+  }, []);
+
+  // Get volume level using global settings
+  const getMessageVolume = useCallback(() => {
     if (typeof window === 'undefined') return 0.6;
+    try {
+      const interactionSettings = localStorage.getItem('talkcart-interaction-settings');
+      if (interactionSettings) {
+        const settings = JSON.parse(interactionSettings);
+        // Use global master volume setting
+        switch (settings.sound?.masterVolume) {
+          case 'muted': return 0;
+          case 'low': return 0.3;
+          case 'medium': return 0.6;
+          case 'high': return 1.0;
+          default: return 0.6;
+        }
+      }
+    } catch (e) {
+      console.debug('Error reading interaction settings:', e);
+    }
+    // Fallback to local setting
     const saved = localStorage.getItem('messages:soundVolume');
     const v = saved ? Number(saved) : 0.6;
     return isNaN(v) ? 0.6 : Math.min(1, Math.max(0, v));
+  }, []);
+
+  // Sound notification controls - now integrated with global settings
+  const [soundsEnabled, setSoundsEnabled] = useState<boolean>(() => {
+    return areMessageSoundsEnabled();
+  });
+  
+  const [soundVolume, setSoundVolume] = useState<number>(() => {
+    return getMessageVolume();
   });
 
   const initMessageSound = useCallback(() => {
@@ -87,7 +126,7 @@ export const useMessages = (): UseMessagesReturn => {
     try {
       const audio = new Audio('/sounds/ringtone.wav');
       audio.preload = 'auto';
-      audio.volume = soundVolume;
+      audio.volume = getMessageVolume();
       audio.muted = true; // start muted to satisfy autoplay policies
       messageSoundRef.current = audio;
 
@@ -112,19 +151,7 @@ export const useMessages = (): UseMessagesReturn => {
     } catch (e) {
       console.debug('Init message sound failed:', e);
     }
-  }, [soundVolume]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (messageSoundRef.current) messageSoundRef.current.volume = soundVolume;
-    localStorage.setItem('messages:soundVolume', String(soundVolume));
-  }, [soundVolume]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    localStorage.setItem('messages:soundsEnabled', String(soundsEnabled));
-    if (soundsEnabled) initMessageSound();
-  }, [soundsEnabled, initMessageSound]);
+  }, [getMessageVolume]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -135,23 +162,99 @@ export const useMessages = (): UseMessagesReturn => {
     };
   }, [initMessageSound]);
 
-  const playMessageSound = useCallback(() => {
+  useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (!soundsEnabled) return;
+    // Update localStorage with global settings approach
+    try {
+      const interactionSettings = localStorage.getItem('talkcart-interaction-settings');
+      if (interactionSettings) {
+        const settings = JSON.parse(interactionSettings);
+        // We're using global settings now, but keeping the local storage for backward compatibility
+      }
+    } catch (e) {
+      console.debug('Error reading interaction settings:', e);
+    }
+    // Keep the existing local storage for backward compatibility
+    localStorage.setItem('messages:soundVolume', String(soundVolume));
+  }, [soundVolume]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    // Keep the existing local storage for backward compatibility
+    localStorage.setItem('messages:soundsEnabled', String(soundsEnabled));
+    if (soundsEnabled) initMessageSound();
+  }, [soundsEnabled, initMessageSound]);
+
+  // Update sound settings when global settings change
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'talkcart-interaction-settings') {
+        // Update soundsEnabled state
+        try {
+          const settings = e.newValue ? JSON.parse(e.newValue) : {};
+          const newSoundsEnabled = settings.sound?.notificationSounds !== false;
+          // Only update if different to prevent infinite loops
+          setSoundsEnabled(prev => {
+            if (prev !== newSoundsEnabled) {
+              return newSoundsEnabled;
+            }
+            return prev;
+          });
+          
+          // Update volume
+          switch (settings.sound?.masterVolume) {
+            case 'muted': 
+              setSoundVolume(0);
+              break;
+            case 'low': 
+              setSoundVolume(0.3);
+              break;
+            case 'medium': 
+              setSoundVolume(0.6);
+              break;
+            case 'high': 
+              setSoundVolume(1.0);
+              break;
+            default:
+              setSoundVolume(0.6);
+          }
+        } catch (e) {
+          console.debug('Error parsing interaction settings:', e);
+        }
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, []);
+
+  const playMessageSound = useCallback(() => {
+    // Check if message sounds are enabled
+    if (!areMessageSoundsEnabled()) {
+      return;
+    }
+
+    if (typeof window === 'undefined') return;
     const audio = messageSoundRef.current;
     if (!audio) {
       try {
         const a = new Audio('/sounds/ringtone.wav');
-        a.volume = soundVolume;
+        a.volume = getMessageVolume();
         a.play().catch(() => {});
       } catch {}
       return;
     }
     try {
+      audio.volume = getMessageVolume();
       audio.currentTime = 0;
       audio.play().catch(() => {});
     } catch {}
-  }, [soundsEnabled, soundVolume]);
+  }, [areMessageSoundsEnabled, getMessageVolume]);
 
   const toggleSounds = useCallback(() => setSoundsEnabled(v => !v), []);
 
@@ -756,6 +859,54 @@ export const useMessages = (): UseMessagesReturn => {
     }
   }, [user]);
 
+  // Update sound settings when global settings change
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'talkcart-interaction-settings') {
+        // Update soundsEnabled state
+        try {
+          const settings = e.newValue ? JSON.parse(e.newValue) : {};
+          const newSoundsEnabled = settings.sound?.notificationSounds !== false;
+          // Only update if different to prevent infinite loops
+          setSoundsEnabled(prev => {
+            if (prev !== newSoundsEnabled) {
+              return newSoundsEnabled;
+            }
+            return prev;
+          });
+          
+          // Update volume
+          switch (settings.sound?.masterVolume) {
+            case 'muted': 
+              setSoundVolume(0);
+              break;
+            case 'low': 
+              setSoundVolume(0.3);
+              break;
+            case 'medium': 
+              setSoundVolume(0.6);
+              break;
+            case 'high': 
+              setSoundVolume(1.0);
+              break;
+            default:
+              setSoundVolume(0.6);
+          }
+        } catch (e) {
+          console.debug('Error parsing interaction settings:', e);
+        }
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, []);
+
   // Fetch conversations on mount
   useEffect(() => {
     if (isAuthenticated) {
@@ -1028,6 +1179,14 @@ export const useMessages = (): UseMessagesReturn => {
 };
 
 export default useMessages;
+
+
+
+
+
+
+
+
 
 
 

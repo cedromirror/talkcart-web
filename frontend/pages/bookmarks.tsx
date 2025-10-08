@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { PostCardEnhanced as PostCard } from '@/components/social/new/PostCardEnhanced';
+import { VideoFeedProvider } from '@/components/video/VideoFeedManager';
 import { Post } from '@/types/social';
 
 interface TabPanelProps {
@@ -319,13 +320,29 @@ const BookmarksPage: React.FC = () => {
                 </Grid>
               ) : (
                 <Box sx={{ p: 2 }}>
-                  {bookmarkedPosts.map((post) => (
-                    <PostCard 
-                      key={post.id} 
-                      post={post} 
-                      onBookmark={handleBookmarkPost}
-                    />
-                  ))}
+                  {/* Wrap PostCard components with VideoFeedProvider */}
+                  <VideoFeedProvider
+                    initialSettings={{
+                      enabled: true,
+                      threshold: 0.6,
+                      pauseOnScroll: true,
+                      muteByDefault: true,
+                      preloadStrategy: 'metadata',
+                      maxConcurrentVideos: 2,
+                      scrollPauseDelay: 150,
+                      viewTrackingThreshold: 3,
+                      autoplayOnlyOnWifi: false,
+                      respectReducedMotion: true,
+                    }}
+                  >
+                    {bookmarkedPosts.map((post) => (
+                      <PostCard 
+                        key={post.id} 
+                        post={post} 
+                        onBookmark={handleBookmarkPost}
+                      />
+                    ))}
+                  </VideoFeedProvider>
                 </Box>
               )}
             </TabPanel>

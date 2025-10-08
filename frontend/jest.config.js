@@ -23,6 +23,10 @@ const customJestConfig = {
   testPathIgnorePatterns: ['<rootDir>/.next/', '<rootDir>/node_modules/'],
   moduleDirectories: ['node_modules', '<rootDir>/src'],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx'],
+  // Add this to fix the tr46 issue
+  transformIgnorePatterns: [
+    '/node_modules/(?!tr46|whatwg-url).+\\.js$'
+  ]
 };
 
 // createJestConfig is exported this way to ensure that next/jest can load the Next.js config which is async

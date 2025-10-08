@@ -54,12 +54,63 @@ const authenticateToken = (req, res, next) => {
   }
 
   // For actual JWT tokens, verify them (ignore expiration to remove login expiration)
-  jwt.verify(token, JWT_SECRET, { ignoreExpiration: true }, (err, user) => {
+  jwt.verify(token, JWT_SECRET, { ignoreExpiration: true }, async (err, user) => {
     if (err) {
       // If JWT verification fails, allow anonymous access instead of blocking
       req.user = { userId: 'anonymous-user', isAnonymous: true };
       return next();
     }
+    
+    // Check if user is a vendor - improved logic
+    if (user.userId && user.userId !== 'anonymous-user') {
+      try {
+        const User = require('../models/User');
+        const VendorStore = require('../models/VendorStore');
+        
+        // Check if user has a vendor store
+        const store = await VendorStore.findOne({ vendorId: user.userId });
+        if (store) {
+          // Update user role to vendor if not already set
+          const dbUser = await User.findById(user.userId);
+          if (dbUser && dbUser.role !== 'vendor') {
+            dbUser.role = 'vendor';
+            await dbUser.save();
+            // Update the user object to reflect the new role
+            user.role = 'vendor';
+          } else if (dbUser) {
+            // Ensure the user object has the correct role from the database
+            user.role = dbUser.role;
+          } else {
+            user.role = 'vendor'; // Default to vendor if we found a store
+          }
+        } else {
+          // Ensure user role is 'user' if they don't have a store
+          const dbUser = await User.findById(user.userId);
+          if (dbUser && dbUser.role === 'vendor') {
+            // Only change role to user if they no longer have a store
+            // But first double-check they really don't have a store
+            const storeCheck = await VendorStore.findOne({ vendorId: user.userId });
+            if (!storeCheck) {
+              dbUser.role = 'user';
+              await dbUser.save();
+              user.role = 'user';
+            } else {
+              user.role = 'vendor';
+            }
+          } else if (dbUser) {
+            // Ensure the user object has the correct role from the database
+            user.role = dbUser.role;
+          } else {
+            user.role = 'user'; // Default to user if no user found
+          }
+        }
+      } catch (error) {
+        console.error('Error checking vendor status:', error);
+        // Continue with the role that was already set, or default to user
+        user.role = user.role || 'user';
+      }
+    }
+    
     req.user = user;
     next();
   });
@@ -86,13 +137,64 @@ const authenticateTokenStrict = (req, res, next) => {
   }
 
   // Verify JWT token strictly (ignore expiration to remove login expiration)
-  jwt.verify(token, JWT_SECRET, { ignoreExpiration: true }, (err, user) => {
+  jwt.verify(token, JWT_SECRET, { ignoreExpiration: true }, async (err, user) => {
     if (err) {
       return res.status(401).json({
         success: false,
         message: 'Invalid token'
       });
     }
+    
+    // Check if user is a vendor - improved logic
+    if (user.userId && user.userId !== 'anonymous-user') {
+      try {
+        const User = require('../models/User');
+        const VendorStore = require('../models/VendorStore');
+        
+        // Check if user has a vendor store
+        const store = await VendorStore.findOne({ vendorId: user.userId });
+        if (store) {
+          // Update user role to vendor if not already set
+          const dbUser = await User.findById(user.userId);
+          if (dbUser && dbUser.role !== 'vendor') {
+            dbUser.role = 'vendor';
+            await dbUser.save();
+            // Update the user object to reflect the new role
+            user.role = 'vendor';
+          } else if (dbUser) {
+            // Ensure the user object has the correct role from the database
+            user.role = dbUser.role;
+          } else {
+            user.role = 'vendor'; // Default to vendor if we found a store
+          }
+        } else {
+          // Ensure user role is 'user' if they don't have a store
+          const dbUser = await User.findById(user.userId);
+          if (dbUser && dbUser.role === 'vendor') {
+            // Only change role to user if they no longer have a store
+            // But first double-check they really don't have a store
+            const storeCheck = await VendorStore.findOne({ vendorId: user.userId });
+            if (!storeCheck) {
+              dbUser.role = 'user';
+              await dbUser.save();
+              user.role = 'user';
+            } else {
+              user.role = 'vendor';
+            }
+          } else if (dbUser) {
+            // Ensure the user object has the correct role from the database
+            user.role = dbUser.role;
+          } else {
+            user.role = 'user'; // Default to user if no user found
+          }
+        }
+      } catch (error) {
+        console.error('Error checking vendor status:', error);
+        // Continue with the role that was already set, or default to user
+        user.role = user.role || 'user';
+      }
+    }
+    
     req.user = user;
     next();
   });
@@ -1338,37 +1440,7 @@ router.post('/logout', authenticateTokenStrict, async (req, res) => {
   }
 });
 
-// @route   GET /api/auth/me
-// @desc    Get current user
-// @access  Private
-router.get('/me', authenticateToken, async (req, res) => {
-  try {
-    // Find user by ID from token for registered users
-    const user = await User.findById(req.user.userId);
 
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found',
-      });
-    }
-
-    // Return user data (without password)
-    const { password: _, ...userWithoutPassword } = user.toObject();
-
-    res.json({
-      success: true,
-      user: userWithoutPassword,
-    });
-  } catch (error) {
-    console.error('Get user error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to get user',
-      message: error.message,
-    });
-  }
-});
 
 // @route   GET /api/auth/profile
 // @desc    Get current user's complete profile
@@ -2082,8 +2154,8 @@ router.post('/reset-password', async (req, res) => {
 // @access  Public (returns not authenticated if no valid token)
 router.get('/me', authenticateToken, async (req, res) => {
   try {
-    // If no token or anonymous access, return a consistent unauthenticated response
-    if (!req.user || req.user.isAnonymous) {
+    // Handle anonymous access explicitly to avoid ObjectId cast errors
+    if (!req.user || req.user.isAnonymous || req.user.userId === 'anonymous-user') {
       return res.json({ success: false, message: 'Not authenticated' });
     }
 
@@ -2116,6 +2188,7 @@ router.get('/me', authenticateToken, async (req, res) => {
       settings: user.settings,
       lastSeen: user.lastSeenAt,
       isOnline: user.lastSeenAt && (Date.now() - new Date(user.lastSeenAt).getTime()) < 300000, // 5 minutes
+      role: user.role || 'user', // Include the user's role
     };
 
     return res.json({ success: true, data: transformedUser });

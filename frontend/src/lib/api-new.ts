@@ -132,14 +132,18 @@ class ApiService {
       const retryResponse = await this.fetchWithTimeout(url, { ...init, headers }, timeout);
       const retryData = await this.safeJsonParse(retryResponse);
       if (!retryResponse.ok) {
-        throw new HttpError(retryResponse.status, (retryData && (retryData.message || retryData.error)) || `Request failed with status ${retryResponse.status}`, retryData);
+        // Ensure status is always a valid number
+        const validStatus = retryResponse.status !== undefined && retryResponse.status !== null ? retryResponse.status : 500;
+        throw new HttpError(validStatus, (retryData && (retryData.message || retryData.error)) || `Request failed with status ${retryResponse.status}`, retryData);
       }
       return retryData as T;
     }
 
     const data = await this.safeJsonParse(response);
     if (!response.ok) {
-      throw new HttpError(response.status, (data && (data.message || data.error)) || `Request failed with status ${response.status}`, data);
+      // Ensure status is always a valid number
+      const validStatus = response.status !== undefined && response.status !== null ? response.status : 500;
+      throw new HttpError(validStatus, (data && (data.message || data.error)) || `Request failed with status ${response.status}`, data);
     }
     return data as T;
   }
@@ -1088,3 +1092,17 @@ class ApiService {
 
         if (!publicId) {
           throw new Error('Public ID is required for video optimization');
+        }
+        
+        // Add the rest of the implementation here
+        // This seems to be a partial implementation
+        throw new Error('Not implemented');
+      } catch (error) {
+        // Handle the error appropriately
+        console.error('Video optimization error:', error);
+        throw error;
+      }
+    },
+  };
+
+}

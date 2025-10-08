@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWebSocket } from '@/contexts/WebSocketContext';
 import { API_URL } from '@/config';
@@ -6,8 +6,9 @@ import toast from 'react-hot-toast';
 
 export interface Notification {
   id: string;
-  type: 'like' | 'comment' | 'follow' | 'mention' | 'system' | 'tag' | 'order' | 'payment' | 'product_approved' | 'product_rejected' | 'share' | 'message' | 'view';
+  type: 'like' | 'comment' | 'follow' | 'unfollow' | 'mention' | 'system' | 'tag' | 'order' | 'payment' | 'product_approved' | 'product_rejected' | 'share' | 'message' | 'view' | 'achievement';
   content: string;
+  title: string;
   isRead: boolean;
   createdAt: string;
   sender?: {
@@ -47,6 +48,103 @@ export const useNotifications = (): UseNotificationsReturn => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Audio element for notification sounds
+  const notificationSoundRef = useRef<HTMLAudioElement | null>(null);
+  const soundInitRef = useRef(false);
+
+  // Check if notification sounds are enabled
+  const areNotificationSoundsEnabled = useCallback(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      const interactionSettings = localStorage.getItem('talkcart-interaction-settings');
+      if (interactionSettings) {
+        const settings = JSON.parse(interactionSettings);
+        return settings.sound?.notificationSounds !== false; // Default to true if not set
+      }
+    } catch (e) {
+      console.debug('Error reading interaction settings:', e);
+    }
+    return true; // Default to enabled if settings can't be read
+  }, []);
+
+  // Get master volume level
+  const getMasterVolume = useCallback(() => {
+    if (typeof window === 'undefined') return 0.6;
+    try {
+      const interactionSettings = localStorage.getItem('talkcart-interaction-settings');
+      if (interactionSettings) {
+        const settings = JSON.parse(interactionSettings);
+        switch (settings.sound?.masterVolume) {
+          case 'muted': return 0;
+          case 'low': return 0.3;
+          case 'medium': return 0.6;
+          case 'high': return 1.0;
+          default: return 0.6;
+        }
+      }
+    } catch (e) {
+      console.debug('Error reading interaction settings:', e);
+    }
+    return 0.6; // Default volume
+  }, []);
+
+  // Initialize notification sound
+  const initNotificationSound = useCallback(() => {
+    if (typeof window === 'undefined' || soundInitRef.current) return;
+    try {
+      const audio = new Audio('/sounds/ringtone.wav');
+      audio.preload = 'auto';
+      audio.volume = getMasterVolume();
+      audio.muted = true; // start muted to satisfy autoplay policies
+      notificationSoundRef.current = audio;
+
+      // Unlock audio on first user gesture
+      const unlock = async () => {
+        if (!notificationSoundRef.current) return;
+        try {
+          await notificationSoundRef.current.play();
+        } catch {}
+        notificationSoundRef.current.pause();
+        notificationSoundRef.current.currentTime = 0;
+        notificationSoundRef.current.muted = false;
+        soundInitRef.current = true;
+        window.removeEventListener('click', unlock);
+        window.removeEventListener('keydown', unlock);
+        window.removeEventListener('touchstart', unlock);
+      };
+
+      window.addEventListener('click', unlock, { once: true });
+      window.addEventListener('keydown', unlock, { once: true });
+      window.addEventListener('touchstart', unlock, { once: true });
+    } catch (e) {
+      console.debug('Init notification sound failed:', e);
+    }
+  }, [getMasterVolume]);
+
+  // Play notification sound
+  const playNotificationSound = useCallback(() => {
+    // Check if notification sounds are enabled
+    if (!areNotificationSoundsEnabled()) {
+      return;
+    }
+
+    if (typeof window === 'undefined') return;
+    const audio = notificationSoundRef.current;
+    if (!audio) {
+      try {
+        const a = new Audio('/sounds/ringtone.wav');
+        a.volume = getMasterVolume();
+        a.play().catch(() => {});
+      } catch {}
+      return;
+    }
+    try {
+      audio.volume = getMasterVolume();
+      audio.currentTime = 0;
+      audio.play().catch(() => {});
+    } catch {}
+  }, [areNotificationSoundsEnabled, getMasterVolume]);
 
   // Get token from localStorage
   const getToken = useCallback(() => {
@@ -80,7 +178,26 @@ export const useNotifications = (): UseNotificationsReturn => {
 
       const data = await response.json();
       if (data.success) {
-        setNotifications(data.data.notifications);
+        // Ensure data.data exists and is an array
+        const notificationsData = Array.isArray(data.data) 
+          ? data.data 
+          : Array.isArray(data.data?.notifications) 
+          ? data.data.notifications 
+          : [];
+        
+        // Map backend notification data to frontend format
+        const mappedNotifications = notificationsData.map((notification: any) => ({
+          id: notification._id || notification.id,
+          type: notification.type,
+          title: notification.title || '',
+          content: notification.message || '', // Map message to content
+          isRead: notification.isRead || false,
+          createdAt: notification.createdAt || new Date().toISOString(),
+          sender: notification.sender,
+          data: notification.data
+        }));
+        
+        setNotifications(mappedNotifications);
         // The backend doesn't return unreadCount directly in this endpoint
         // We need to fetch it separately
         fetchUnreadCount();
@@ -91,6 +208,8 @@ export const useNotifications = (): UseNotificationsReturn => {
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch notifications';
       setError(errorMessage);
       console.error(errorMessage);
+      // Set empty notifications on error to prevent undefined issues
+      setNotifications([]);
     } finally {
       setLoading(false);
     }
@@ -117,13 +236,15 @@ export const useNotifications = (): UseNotificationsReturn => {
 
       const data = await response.json();
       if (data.success) {
-        setUnreadCount(data.data.unreadCount);
+        setUnreadCount(data.data?.unreadCount || 0);
       } else {
         throw new Error(data.message || 'Failed to fetch unread count');
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch unread count';
       console.error(errorMessage);
+      // Set unread count to 0 on error
+      setUnreadCount(0);
     }
   }, [isAuthenticated, getToken]);
 
@@ -308,17 +429,36 @@ export const useNotifications = (): UseNotificationsReturn => {
   useEffect(() => {
     if (!socket || !isAuthenticated) return;
 
-    const handleNewNotification = (notification: Notification) => {
-      addNotification(notification);
+    // Initialize notification sound
+    initNotificationSound();
+
+    const handleNewNotification = (notification: any) => {
+      // Map backend notification data to frontend format
+      const mappedNotification: Notification = {
+        id: notification._id || notification.id,
+        type: notification.type,
+        title: notification.title || '',
+        content: notification.message || '', // Map message to content
+        isRead: notification.isRead || false,
+        createdAt: notification.createdAt || new Date().toISOString(),
+        sender: notification.sender,
+        data: notification.data
+      };
+      
+      addNotification(mappedNotification);
+      
+      // Play notification sound
+      playNotificationSound();
+      
       // Show a toast notification
-      toast.success(`New notification: ${notification.content}`, {
+      toast.success(`New notification: ${mappedNotification.content}`, {
         duration: 4000,
         icon: '🔔'
       });
     };
 
     const handleUnreadCountUpdate = (data: { unreadCount: number }) => {
-      setUnreadCount(data.unreadCount);
+      setUnreadCount(data.unreadCount || 0);
     };
 
     // Listen for new notifications
@@ -329,7 +469,7 @@ export const useNotifications = (): UseNotificationsReturn => {
       socket.off('notification:new', handleNewNotification);
       socket.off('notification:unread-count', handleUnreadCountUpdate);
     };
-  }, [socket, isAuthenticated, addNotification]);
+  }, [socket, isAuthenticated, addNotification, initNotificationSound, playNotificationSound]);
 
   return {
     notifications,

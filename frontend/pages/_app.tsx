@@ -10,10 +10,10 @@ import { PrivacyProvider } from '@/contexts/PrivacyContext';
 import { PresenceProvider } from '@/contexts/PresenceContext';
 import { WebSocketProvider } from '@/contexts/WebSocketContext';
 import { Web3Provider } from '@/contexts/Web3Context';
-import { ThemeProvider as MuiThemeProvider } from '@mui/material/styles';
+import { ThemeProvider as MuiThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
-import { lightTheme } from '@/theme';
-import { ThemeProvider } from '@/contexts/ThemeContext';
+import { lightTheme, darkTheme } from '@/theme';
+import { ThemeProvider, useCustomTheme } from '@/contexts/ThemeContext';
 import { InteractionProvider } from '@/contexts/InteractionContext';
 import { Toaster, toast } from 'react-hot-toast';
 import '@/styles/globals.css';
@@ -23,6 +23,21 @@ import { ProfileCacheProvider } from '@/contexts/ProfileCacheContext';
 import { SessionExpiredError } from '@/lib/api';
 import { isAuthError } from '@/lib/authErrors';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
+
+// Create a component that consumes the theme context and provides the correct MUI theme
+const ThemedApp = ({ children }: { children: React.ReactNode }) => {
+  const { actualTheme } = useCustomTheme();
+  
+  // Create MUI theme based on actualTheme
+  const muiTheme = actualTheme === 'dark' ? darkTheme : lightTheme;
+  
+  return (
+    <MuiThemeProvider theme={muiTheme}>
+      <CssBaseline />
+      {children}
+    </MuiThemeProvider>
+  );
+};
 
 function MyApp({ Component, pageProps }: AppProps) {
   const [mounted, setMounted] = useState(false);
@@ -85,8 +100,7 @@ function MyApp({ Component, pageProps }: AppProps) {
         <AuthProvider>
           <ThemeProvider>
             <LanguageProvider>
-              <MuiThemeProvider theme={lightTheme}>
-                <CssBaseline />
+              <ThemedApp>
                 <ProfileProvider>
                   <Web3Provider>
                     <PrivacyProvider>
@@ -112,7 +126,7 @@ function MyApp({ Component, pageProps }: AppProps) {
                     </PrivacyProvider>
                   </Web3Provider>
                 </ProfileProvider>
-              </MuiThemeProvider>
+              </ThemedApp>
             </LanguageProvider>
           </ThemeProvider>
         </AuthProvider>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Grid, Box } from '@mui/material';
+import { Grid, Box, Typography } from '@mui/material';
 import ProductCard from '@/components/marketplace/ProductCard';
 
 interface Product {
@@ -48,6 +48,9 @@ const MarketplaceGrid: React.FC<MarketplaceGridProps> = ({
   loading = false,
   userCurrency,
 }) => {
+  console.log('MarketplaceGrid received products:', products);
+  console.log('MarketplaceGrid loading state:', loading);
+  
   if (loading) {
     return (
       <Box sx={{ mb: 4 }}>
@@ -65,37 +68,24 @@ const MarketplaceGrid: React.FC<MarketplaceGridProps> = ({
   return (
     <Box sx={{ mb: 4 }}>
       <Grid container spacing={1}>
-        {products.map((product) => (
-          <Grid item xs={6} sm={4} md={3} lg={2} key={product.id}>
-            <ProductCard
-              product={{
-                id: product.id,
-                name: product.name,
-                description: product.description,
-                price: product.price,
-                currency: product.currency,
-                images: product.images,
-                category: product.category,
-                vendor: product.vendor,
-                isNFT: product.isNFT,
-                featured: product.featured ?? false,
-                tags: product.tags,
-                stock: product.stock ?? 0,
-                rating: product.rating ?? 0,
-                reviewCount: product.reviewCount ?? 0,
-                sales: product.sales ?? 0,
-                views: product.views ?? 0,
-                availability: product.availability,
-                createdAt: product.createdAt,
-                discount: product.discount ?? 0,
-                freeShipping: product.freeShipping ?? false,
-                fastDelivery: product.fastDelivery ?? false,
-                prime: product.prime ?? false,
-              }}
-              userCurrency={userCurrency}
-            />
+        {products && products.length > 0 ? (
+          products.map((product) => (
+            <Grid item xs={6} sm={4} md={3} lg={2} key={product.id}>
+              <ProductCard
+                product={product}
+                userCurrency={userCurrency}
+              />
+            </Grid>
+          ))
+        ) : (
+          <Grid item xs={12}>
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+              <Typography variant="h6" color="text.secondary">
+                No products found
+              </Typography>
+            </Box>
           </Grid>
-        ))}
+        )}
       </Grid>
     </Box>
   );

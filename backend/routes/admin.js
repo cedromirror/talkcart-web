@@ -1,4 +1,4 @@
-﻿const express = require('express');
+﻿﻿const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 const Joi = require('joi');
@@ -3884,6 +3884,50 @@ router.get('/vendors/:id/fees', authenticateTokenStrict, requireAdmin, async (re
   } catch (e) {
     console.error('admin vendor fees error:', e);
     res.status(500).json({ success: false, message: 'Failed to fetch vendor fees' });
+  }
+});
+
+// GET /api/admin/vendors/:id/payout-history - Get vendor payout history (admin access)
+router.get('/vendors/:id/payout-history', authenticateTokenStrict, requireAdmin, async (req, res) => {
+  try {
+    const { id: vendorId } = req.params;
+    const { limit = 50, status } = req.query;
+
+    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res.status(400).json({ success: false, message: 'Invalid vendor ID' });
+    }
+
+    // Check if vendor exists
+    const vendor = await User.findById(vendorId);
+    if (!vendor) {
+      return res.status(404).json({ success: false, message: 'Vendor not found' });
+    }
+
+    // Get vendor's payout history
+    const history = await vendorPayoutService.getVendorPayoutHistory(vendorId, {
+      limit: parseInt(limit),
+      status
+    });
+
+    res.json({
+      success: true,
+      data: {
+        vendor: {
+          id: vendor._id,
+          username: vendor.username,
+          displayName: vendor.displayName,
+          email: vendor.email
+        },
+        payoutHistory: history
+      }
+    });
+  } catch (error) {
+    console.error('Admin get vendor payout history error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch vendor payout history',
+      error: error.message
+    });
   }
 });
 

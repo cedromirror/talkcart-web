@@ -9,7 +9,7 @@ class CurrencyService {
 
   private constructor() {}
 
-  static getInstance(): CurrencyService {
+  public static getInstance(): CurrencyService {
     if (!CurrencyService.instance) {
       CurrencyService.instance = new CurrencyService();
     }
@@ -68,6 +68,156 @@ class CurrencyService {
       this.exchangeRates = MOCK_EXCHANGE_RATES;
       this.lastUpdated = now;
       return this.exchangeRates;
+    }
+  }
+
+  /**
+   * Convert amount from one currency to another
+   * @param amount Amount to convert
+   * @param fromCurrency Source currency
+   * @param toCurrency Target currency
+   * @returns Converted amount
+   */
+  async convertCurrency(amount: number, fromCurrency: string, toCurrency: string): Promise<number> {
+    console.log('Converting currency in service:', { amount, fromCurrency, toCurrency });
+    
+    // If currencies are the same, no conversion needed
+    if (fromCurrency === toCurrency) {
+      console.log('Currencies are the same, returning original amount');
+      return amount;
+    }
+
+    try {
+      // Fetch exchange rates with USD as base
+      const rates = await this.fetchExchangeRates('USD');
+      console.log('Fetched exchange rates:', rates);
+      
+      // Convert to USD first if needed
+      let amountInUsd = amount;
+      if (fromCurrency !== 'USD') {
+        const fromRate = rates[fromCurrency.toUpperCase()];
+        console.log('From rate:', { fromCurrency, fromRate });
+        if (!fromRate) {
+          console.warn(`Exchange rate not found for ${fromCurrency}, returning original amount`);
+          return amount;
+        }
+        amountInUsd = amount / fromRate;
+        console.log('Amount in USD:', amountInUsd);
+      }
+      
+      // Convert from USD to target currency
+      if (toCurrency === 'USD') {
+        console.log('Converting to USD, result:', amountInUsd);
+        return amountInUsd;
+      }
+      
+      const toRate = rates[toCurrency.toUpperCase()];
+      console.log('To rate:', { toCurrency, toRate });
+      if (!toRate) {
+        console.warn(`Exchange rate not found for ${toCurrency}, returning original amount`);
+        return amount;
+      }
+      
+      const result = amountInUsd * toRate;
+      console.log('Final conversion result:', { amount, fromCurrency, toCurrency, result });
+      return result;
+    } catch (error) {
+      console.error('Error converting currency:', error);
+      // Return original amount if conversion fails
+      return amount;
+    }
+  }
+
+  /**
+   * Format currency amount with proper symbol and formatting
+   * @param amount Amount to format
+   * @param currency Currency code
+   * @returns Formatted currency string
+   */
+  formatCurrencyAmount(amount: number, currency: string): string {
+    console.log('Formatting currency amount:', { amount, currency });
+    try {
+      // Currency symbols mapping
+      const currencySymbols: Record<string, string> = {
+        'USD': '$',
+        'EUR': '€',
+        'GBP': '£',
+        'KES': 'KSh',
+        'UGX': 'USh',
+        'TZS': 'TSh',
+        'RWF': 'RF',
+        'NGN': '₦',
+        'GHS': 'GH₵',
+        'ZAR': 'R',
+        'ETB': 'Br',
+        'XOF': 'CFA',
+      };
+
+      const symbol = currencySymbols[currency.toUpperCase()] || currency;
+      console.log('Currency symbol:', symbol);
+      
+      // For most currencies, show 2 decimal places
+      // For some currencies with smaller denominations, show more precision
+      const precisionCurrencies = ['UGX', 'TZS', 'RWF', 'XOF'];
+      const decimals = precisionCurrencies.includes(currency.toUpperCase()) ? 0 : 2;
+      
+      // Format with commas for thousands
+      const formattedAmount = amount.toLocaleString('en-US', {
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals
+      });
+      
+      console.log('Formatted amount:', formattedAmount);
+      
+      // Place symbol appropriately based on currency
+      const symbolFirstCurrencies = ['USD', 'EUR', 'GBP', 'NGN', 'GHS', 'ZAR'];
+      let result: string;
+      if (symbolFirstCurrencies.includes(currency.toUpperCase())) {
+        result = `${symbol}${formattedAmount}`;
+      } else {
+        result = `${formattedAmount} ${symbol}`;
+      }
+      
+      console.log('Final formatted result:', result);
+      return result;
+    } catch (error: any) {
+      console.error('Error formatting currency amount:', error.message || error);
+      // Fallback to simple formatting
+      return `${amount.toFixed(2)} ${currency.toUpperCase()}`;
+    }
+  }
+
+  /**
+   * Detect user's preferred currency based on their locale
+   * @returns Detected currency code
+   */
+  detectUserCurrency(): string {
+    try {
+      console.log('Detecting user currency by locale...');
+      // This is a simplified example - in a real app, you would use a geolocation service
+      // or browser APIs to detect the user's location and map it to a currency
+      const userLocale = navigator.language || 'en-US';
+      console.log('User locale:', userLocale);
+      const currencyMap: Record<string, string> = {
+        'en-KE': 'KES',
+        'en-UG': 'UGX',
+        'en-TZ': 'TZS',
+        'en-RW': 'RWF',
+        'en-NG': 'NGN',
+        'en-GH': 'GHS',
+        'en-ZA': 'ZAR',
+        'en-ET': 'ETB',
+        'fr-SN': 'XOF',
+        'fr-BF': 'XOF',
+        'fr-ML': 'XOF',
+      };
+      
+      const currency = currencyMap[userLocale] || 'USD';
+      console.log('Locale-based currency:', currency);
+      return currency.toUpperCase(); // Make sure it's uppercase
+    } catch (error) {
+      console.error('Error detecting user currency:', error);
+      return 'USD';
     }
   }
 
@@ -348,165 +498,6 @@ class CurrencyService {
     
     console.log('No working alternative services found');
     return null;
-  }
-
-  /**
-   * Fetch currency using browser geolocation API (last resort)
-   * @returns Currency code or null if failed
-   */
-  private async fetchFromBrowserGeolocation(): Promise<string | null> {
-    // This is a simplified approach - in a real app, you would use a more
-    // sophisticated geolocation service that can convert coordinates to currency
-    console.log('Browser geolocation not implemented - using locale detection');
-    return null;
-  }
-
-  /**
-   * Convert amount from one currency to another
-   * @param amount Amount to convert
-   * @param fromCurrency Source currency
-   * @param toCurrency Target currency
-   * @returns Converted amount
-   */
-  async convertCurrency(amount: number, fromCurrency: string, toCurrency: string): Promise<number> {
-    console.log('Converting currency in service:', { amount, fromCurrency, toCurrency });
-    
-    // If currencies are the same, no conversion needed
-    if (fromCurrency === toCurrency) {
-      console.log('Currencies are the same, returning original amount');
-      return amount;
-    }
-
-    try {
-      // Fetch exchange rates with USD as base
-      const rates = await this.fetchExchangeRates('USD');
-      console.log('Fetched exchange rates:', rates);
-      
-      // Convert to USD first if needed
-      let amountInUsd = amount;
-      if (fromCurrency !== 'USD') {
-        const fromRate = rates[fromCurrency.toUpperCase()];
-        console.log('From rate:', { fromCurrency, fromRate });
-        if (!fromRate) {
-          throw new Error(`Exchange rate not found for ${fromCurrency}`);
-        }
-        amountInUsd = amount / fromRate;
-        console.log('Amount in USD:', amountInUsd);
-      }
-      
-      // Convert from USD to target currency
-      if (toCurrency === 'USD') {
-        console.log('Converting to USD, result:', amountInUsd);
-        return amountInUsd;
-      }
-      
-      const toRate = rates[toCurrency.toUpperCase()];
-      console.log('To rate:', { toCurrency, toRate });
-      if (!toRate) {
-        throw new Error(`Exchange rate not found for ${toCurrency}`);
-      }
-      
-      const result = amountInUsd * toRate;
-      console.log('Final conversion result:', { amount, fromCurrency, toCurrency, result });
-      return result;
-    } catch (error) {
-      console.error('Error converting currency:', error);
-      // Return original amount if conversion fails
-      return amount;
-    }
-  }
-
-  /**
-   * Format currency amount with proper symbol and formatting
-   * @param amount Amount to format
-   * @param currency Currency code
-   * @returns Formatted currency string
-   */
-  formatCurrencyAmount(amount: number, currency: string): string {
-    console.log('Formatting currency amount:', { amount, currency });
-    try {
-      // Currency symbols mapping
-      const currencySymbols: Record<string, string> = {
-        'USD': '$',
-        'EUR': '€',
-        'GBP': '£',
-        'KES': 'KSh',
-        'UGX': 'USh',
-        'TZS': 'TSh',
-        'RWF': 'RF',
-        'NGN': '₦',
-        'GHS': 'GH₵',
-        'ZAR': 'R',
-        'ETB': 'Br',
-        'XOF': 'CFA',
-      };
-
-      const symbol = currencySymbols[currency.toUpperCase()] || currency;
-      console.log('Currency symbol:', symbol);
-      
-      // For most currencies, show 2 decimal places
-      // For some currencies with smaller denominations, show more precision
-      const precisionCurrencies = ['UGX', 'TZS', 'RWF', 'XOF'];
-      const decimals = precisionCurrencies.includes(currency.toUpperCase()) ? 0 : 2;
-      
-      // Format with commas for thousands
-      const formattedAmount = amount.toLocaleString('en-US', {
-        minimumFractionDigits: decimals,
-        maximumFractionDigits: decimals
-      });
-      
-      console.log('Formatted amount:', formattedAmount);
-      
-      // Place symbol appropriately based on currency
-      const symbolFirstCurrencies = ['USD', 'EUR', 'GBP', 'NGN', 'GHS', 'ZAR'];
-      let result: string;
-      if (symbolFirstCurrencies.includes(currency.toUpperCase())) {
-        result = `${symbol}${formattedAmount}`;
-      } else {
-        result = `${formattedAmount} ${symbol}`;
-      }
-      
-      console.log('Final formatted result:', result);
-      return result;
-    } catch (error: any) {
-      console.error('Error formatting currency amount:', error.message || error);
-      // Fallback to simple formatting
-      return `${amount.toFixed(2)} ${currency.toUpperCase()}`;
-    }
-  }
-
-  /**
-   * Detect user's preferred currency based on their locale
-   * @returns Detected currency code
-   */
-  detectUserCurrency(): string {
-    try {
-      console.log('Detecting user currency by locale...');
-      // This is a simplified example - in a real app, you would use a geolocation service
-      // or browser APIs to detect the user's location and map it to a currency
-      const userLocale = navigator.language || 'en-US';
-      console.log('User locale:', userLocale);
-      const currencyMap: Record<string, string> = {
-        'en-KE': 'KES',
-        'en-UG': 'UGX',
-        'en-TZ': 'TZS',
-        'en-RW': 'RWF',
-        'en-NG': 'NGN',
-        'en-GH': 'GHS',
-        'en-ZA': 'ZAR',
-        'en-ET': 'ETB',
-        'fr-SN': 'XOF',
-        'fr-BF': 'XOF',
-        'fr-ML': 'XOF',
-      };
-      
-      const currency = currencyMap[userLocale] || 'USD';
-      console.log('Locale-based currency:', currency);
-      return currency.toUpperCase(); // Make sure it's uppercase
-    } catch (error) {
-      console.error('Error detecting user currency:', error);
-      return 'USD';
-    }
   }
 }
 

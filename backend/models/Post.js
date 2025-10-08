@@ -195,15 +195,26 @@ postSchema.virtual('postUrl').get(function() {
 
 // Instance method to check if user liked the post
 postSchema.methods.isLikedBy = function(userId) {
-  console.log(`isLikedBy called with userId: ${userId}`);
-  console.log(`Current likes:`, this.likes);
-  const result = this.likes.some(like => {
-    const isMatch = like.user.toString() === userId.toString();
-    console.log(`Comparing ${like.user} with ${userId}: ${isMatch}`);
-    return isMatch;
+  // Handle edge cases where likes array might be undefined or null
+  if (!this.likes || !Array.isArray(this.likes)) {
+    return false;
+  }
+  
+  // Check if user has liked this post
+  return this.likes.some(like => {
+    // Handle different possible structures of like objects
+    if (!like || !like.user) return false;
+    
+    // Compare user IDs
+    try {
+      const likeUserId = like.user.toString ? like.user.toString() : String(like.user);
+      const targetUserId = userId.toString ? userId.toString() : String(userId);
+      return likeUserId === targetUserId;
+    } catch (error) {
+      console.error('Error comparing user IDs in isLikedBy:', error);
+      return false;
+    }
   });
-  console.log(`isLikedBy result: ${result}`);
-  return result;
 };
 
 // Instance method to check if user shared the post
@@ -213,44 +224,64 @@ postSchema.methods.isSharedBy = function(userId) {
 
 // Instance method to check if user bookmarked the post
 postSchema.methods.isBookmarkedBy = function(userId) {
-  console.log(`isBookmarkedBy called with userId: ${userId}`);
-  console.log(`Current bookmarks:`, this.bookmarks);
-  const result = this.bookmarks.some(bookmark => {
-    const isMatch = bookmark.user.toString() === userId.toString();
-    console.log(`Comparing ${bookmark.user} with ${userId}: ${isMatch}`);
-    return isMatch;
+  // Handle edge cases where bookmarks array might be undefined or null
+  if (!this.bookmarks || !Array.isArray(this.bookmarks)) {
+    return false;
+  }
+  
+  // Check if user has bookmarked this post
+  return this.bookmarks.some(bookmark => {
+    // Handle different possible structures of bookmark objects
+    if (!bookmark || !bookmark.user) return false;
+    
+    // Compare user IDs
+    try {
+      const bookmarkUserId = bookmark.user.toString ? bookmark.user.toString() : String(bookmark.user);
+      const targetUserId = userId.toString ? userId.toString() : String(userId);
+      return bookmarkUserId === targetUserId;
+    } catch (error) {
+      console.error('Error comparing user IDs in isBookmarkedBy:', error);
+      return false;
+    }
   });
-  console.log(`isBookmarkedBy result: ${result}`);
-  return result;
 };
 
 // Instance method to add like
 postSchema.methods.addLike = function(userId) {
-  console.log(`addLike called with userId: ${userId}`);
-  console.log(`Current likes:`, this.likes);
-  const alreadyLiked = this.isLikedBy(userId);
-  console.log(`User ${userId} already liked: ${alreadyLiked}`);
-  if (!alreadyLiked) {
-    console.log(`Adding like for user ${userId}`);
-    this.likes.push({ user: userId });
-    console.log(`Likes after adding:`, this.likes);
-  } else {
-    console.log(`User ${userId} already liked this post, not adding again`);
+  // Initialize likes array if it doesn't exist
+  if (!this.likes || !Array.isArray(this.likes)) {
+    this.likes = [];
   }
-  console.log(`Saving post with likes:`, this.likes);
+  
+  const alreadyLiked = this.isLikedBy(userId);
+  if (!alreadyLiked) {
+    this.likes.push({ user: userId });
+  }
   return this.save();
 };
 
 // Instance method to remove like
 postSchema.methods.removeLike = function(userId) {
-  console.log(`removeLike called with userId: ${userId}`);
-  console.log(`Current likes before removal:`, this.likes);
+  // Initialize likes array if it doesn't exist
+  if (!this.likes || !Array.isArray(this.likes)) {
+    this.likes = [];
+    return this.save();
+  }
+  
   this.likes = this.likes.filter(like => {
-    const shouldKeep = like.user.toString() !== userId.toString();
-    console.log(`Keeping like from user ${like.user}: ${shouldKeep}`);
-    return shouldKeep;
+    // Handle different possible structures of like objects
+    if (!like || !like.user) return true;
+    
+    // Compare user IDs
+    try {
+      const likeUserId = like.user.toString ? like.user.toString() : String(like.user);
+      const targetUserId = userId.toString ? userId.toString() : String(userId);
+      return likeUserId !== targetUserId;
+    } catch (error) {
+      console.error('Error comparing user IDs in removeLike:', error);
+      return true; // Keep the like if we can't compare
+    }
   });
-  console.log(`Likes after removal:`, this.likes);
   return this.save();
 };
 
@@ -273,31 +304,40 @@ postSchema.methods.addShare = function(userId) {
 
 // Instance method to add bookmark
 postSchema.methods.addBookmark = function(userId) {
-  console.log(`addBookmark called with userId: ${userId}`);
-  console.log(`Current bookmarks:`, this.bookmarks);
-  const alreadyBookmarked = this.isBookmarkedBy(userId);
-  console.log(`User ${userId} already bookmarked: ${alreadyBookmarked}`);
-  if (!alreadyBookmarked) {
-    console.log(`Adding bookmark for user ${userId}`);
-    this.bookmarks.push({ user: userId });
-    console.log(`Bookmarks after adding:`, this.bookmarks);
-  } else {
-    console.log(`User ${userId} already bookmarked this post, not adding again`);
+  // Initialize bookmarks array if it doesn't exist
+  if (!this.bookmarks || !Array.isArray(this.bookmarks)) {
+    this.bookmarks = [];
   }
-  console.log(`Saving post with bookmarks:`, this.bookmarks);
+  
+  const alreadyBookmarked = this.isBookmarkedBy(userId);
+  if (!alreadyBookmarked) {
+    this.bookmarks.push({ user: userId });
+  }
   return this.save();
 };
 
 // Instance method to remove bookmark
 postSchema.methods.removeBookmark = function(userId) {
-  console.log(`removeBookmark called with userId: ${userId}`);
-  console.log(`Current bookmarks before removal:`, this.bookmarks);
+  // Initialize bookmarks array if it doesn't exist
+  if (!this.bookmarks || !Array.isArray(this.bookmarks)) {
+    this.bookmarks = [];
+    return this.save();
+  }
+  
   this.bookmarks = this.bookmarks.filter(bookmark => {
-    const shouldKeep = bookmark.user.toString() !== userId.toString();
-    console.log(`Keeping bookmark from user ${bookmark.user}: ${shouldKeep}`);
-    return shouldKeep;
+    // Handle different possible structures of bookmark objects
+    if (!bookmark || !bookmark.user) return true;
+    
+    // Compare user IDs
+    try {
+      const bookmarkUserId = bookmark.user.toString ? bookmark.user.toString() : String(bookmark.user);
+      const targetUserId = userId.toString ? userId.toString() : String(userId);
+      return bookmarkUserId !== targetUserId;
+    } catch (error) {
+      console.error('Error comparing user IDs in removeBookmark:', error);
+      return true; // Keep the bookmark if we can't compare
+    }
   });
-  console.log(`Bookmarks after removal:`, this.bookmarks);
   return this.save();
 };
 

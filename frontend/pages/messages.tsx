@@ -756,19 +756,6 @@ const MessagesPage: React.FC = () => {
                             >
                               {conversation.lastMessage?.content || 'No messages yet'}
                             </Typography>
-                            {conversation.unreadCount > 0 && (
-                              <Chip
-                                label={conversation.unreadCount}
-                                color="primary"
-                                size="small"
-                                sx={{
-                                  height: 20,
-                                  minWidth: 20,
-                                  fontSize: '0.75rem',
-                                  fontWeight: 600,
-                                }}
-                              />
-                            )}
                           </Typography>
                         }
                         sx={{ ml: 1 }}

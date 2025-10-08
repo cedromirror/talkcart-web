@@ -3,7 +3,7 @@ import { Cloudinary } from '@cloudinary/url-gen';
 // Cloudinary configuration
 const cloudinary = new Cloudinary({
   cloud: {
-    cloudName: process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || 'your-cloud-name',
+    cloudName: process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || 'dgi1c5jia',
   },
 });
 
@@ -67,86 +67,45 @@ export const uploadToCloudinary = async (
     }
 
     xhr.addEventListener('load', () => {
-      if (xhr.status === 200) {
+      if (xhr.status >= 200 && xhr.status < 300) {
         try {
           const response = JSON.parse(xhr.responseText);
-          if (!response.public_id || !response.secure_url) {
-            reject(new Error('Missing required fields in upload response'));
-            return;
+          if (response.success) {
+            resolve(response.data);
+          } else {
+            reject(new Error(response.error || 'Upload failed'));
           }
-          resolve({
-            public_id: response.public_id,
-            secure_url: response.secure_url,
-            url: response.url || response.secure_url,
-            format: response.format,
-            resource_type: response.resource_type || 'auto',
-            bytes: response.bytes,
-            width: response.width,
-            height: response.height,
-            duration: response.duration,
-            created_at: response.created_at || new Date().toISOString()
-          });
-        } catch (error) {
-          reject(new Error(`Failed to parse upload response: ${error instanceof Error ? error.message : 'Unknown error'}`));
+        } catch (parseError) {
+          reject(new Error('Invalid response format'));
         }
       } else {
-        // Try to get error details from response
-        let errorMessage = `Upload failed with status: ${xhr.status}`;
         try {
           const errorResponse = JSON.parse(xhr.responseText);
-          if (errorResponse.error) {
-            errorMessage += ` - ${errorResponse.error}`;
-          }
-          if (errorResponse.details) {
-            errorMessage += ` (${errorResponse.details})`;
-          }
-        } catch (e) {
-          // If response is not JSON, include raw response
-          if (xhr.responseText) {
-            errorMessage += ` - ${xhr.responseText}`;
-          }
+          reject(new Error(errorResponse.error || `Upload failed with status ${xhr.status}`));
+        } catch (parseError) {
+          reject(new Error(`Upload failed with status ${xhr.status}`));
         }
-        reject(new Error(errorMessage));
       }
     });
 
     xhr.addEventListener('error', () => {
-      reject(new Error('Upload failed due to network error'));
+      reject(new Error('Network error during upload'));
+    });
+
+    xhr.addEventListener('abort', () => {
+      reject(new Error('Upload was cancelled'));
     });
 
     xhr.open('POST', UPLOAD_URL);
+    
+    // Add auth token if available
+    const token = localStorage.getItem('token');
+    if (token) {
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    }
+
     xhr.send(formData);
   });
-};
-
-/**
- * Upload multiple files to Cloudinary
- */
-export const uploadMultipleToCloudinary = async (
-  files: File[],
-  options: {
-    resourceType?: 'image' | 'video' | 'raw' | 'auto';
-    folder?: string;
-    tags?: string[];
-    onProgress?: (fileIndex: number, progress: UploadProgress) => void;
-    onFileComplete?: (fileIndex: number, result: CloudinaryUploadResult) => void;
-  } = {}
-): Promise<CloudinaryUploadResult[]> => {
-  const { onProgress, onFileComplete, ...uploadOptions } = options;
-  
-  const uploadPromises = files.map((file, index) => {
-    return uploadToCloudinary(file, {
-      ...uploadOptions,
-      onProgress: onProgress ? (progress) => onProgress(index, progress) : undefined,
-    }).then((result) => {
-      if (onFileComplete) {
-        onFileComplete(index, result);
-      }
-      return result;
-    });
-  });
-
-  return Promise.all(uploadPromises);
 };
 
 /**
@@ -157,14 +116,14 @@ export const getOptimizedImageUrl = (
   options: {
     width?: number;
     height?: number;
-    quality?: string;
-    format?: string;
-    crop?: string;
+    quality?: 'auto' | string | number;
+    format?: 'auto' | 'webp' | 'jpg' | 'png';
+    crop?: 'fill' | 'fit' | 'scale' | 'crop';
   } = {}
 ): string => {
   const {
-    width,
-    height,
+    width = 400,
+    height = 300,
     quality = 'auto',
     format = 'auto',
     crop = 'fill',
@@ -173,13 +132,13 @@ export const getOptimizedImageUrl = (
   let transformations = [`q_${quality}`, `f_${format}`];
   
   if (width || height) {
-    const dimensions = [];
+    const dimensions: string[] = [];
     if (width) dimensions.push(`w_${width}`);
     if (height) dimensions.push(`h_${height}`);
     transformations.push(...dimensions, `c_${crop}`);
   }
 
-  const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || 'your-cloud-name';
+  const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || 'dgi1c5jia';
   return `https://res.cloudinary.com/${cloudName}/image/upload/${transformations.join(',')}/${publicId}`;
 };
 
@@ -200,7 +159,7 @@ export const getVideoThumbnailUrl = (
     quality = 'auto',
   } = options;
 
-  const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || 'your-cloud-name';
+  const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || 'dgi1c5jia';
   return `https://res.cloudinary.com/${cloudName}/video/upload/w_${width},h_${height},c_fill,q_${quality},f_jpg/${publicId}.jpg`;
 };
 
@@ -218,51 +177,3 @@ export const deleteFromCloudinary = async (
   // This would typically be done via your backend API
   // Example: await api.cloudinary.delete({ publicId, resourceType });
 };
-
-/**
- * Validate file before upload
- */
-export const validateFile = (
-  file: File,
-  options: {
-    maxSize?: number; // in bytes
-    allowedTypes?: string[];
-    maxWidth?: number;
-    maxHeight?: number;
-  } = {}
-): { isValid: boolean; error?: string } => {
-  const {
-    maxSize = 10 * 1024 * 1024, // 10MB default
-    allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'video/mp4', 'video/mov', 'audio/mp3', 'audio/wav'],
-  } = options;
-
-  // Check file size
-  if (file.size > maxSize) {
-    return {
-      isValid: false,
-      error: `File size must be less than ${Math.round(maxSize / (1024 * 1024))}MB`,
-    };
-  }
-
-  // Check file type
-  if (!allowedTypes.includes(file.type)) {
-    return {
-      isValid: false,
-      error: `File type ${file.type} is not allowed`,
-    };
-  }
-
-  return { isValid: true };
-};
-
-/**
- * Get file type category
- */
-export const getFileTypeCategory = (file: File): 'image' | 'video' | 'audio' | 'document' => {
-  if (file.type.startsWith('image/')) return 'image';
-  if (file.type.startsWith('video/')) return 'video';
-  if (file.type.startsWith('audio/')) return 'audio';
-  return 'document';
-};
-
-export default cloudinary;

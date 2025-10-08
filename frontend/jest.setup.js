@@ -51,3 +51,21 @@ jest.mock('react-hot-toast', () => ({
     loading: jest.fn(),
   },
 }));
+
+// Fix for Next.js require hook issue
+jest.mock('next/dist/server/require-hook', () => ({
+  addHookAliases: jest.fn(),
+  mod: {
+    require: jest.fn().mockImplementation((module) => {
+      try {
+        return require(module);
+      } catch (e) {
+        // Return a mock for problematic modules
+        if (module.includes('tr46') || module.includes('whatwg-url')) {
+          return {};
+        }
+        throw e;
+      }
+    })
+  }
+}));

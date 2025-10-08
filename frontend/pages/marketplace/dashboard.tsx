@@ -363,14 +363,14 @@ const MarketplaceDashboard: React.FC = () => {
   // Get image source from product images array
   const getImageSrc = (images: any[]) => {
     if (!images || images.length === 0) {
-      return 'https://via.placeholder.com/60x60?text=No+Image';
+      return '/images/placeholder-image.png';
     }
     
     const firstImage = images[0];
     if (typeof firstImage === 'string') {
       return firstImage;
     }
-    return firstImage?.secure_url || firstImage?.url || 'https://via.placeholder.com/60x60?text=No+Image';
+    return firstImage?.secure_url || firstImage?.url || '/images/placeholder-image.png';
   };
 
   if (!user) {

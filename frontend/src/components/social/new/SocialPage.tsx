@@ -63,6 +63,7 @@ import TrendingProducts from './TrendingProducts';
 import TrendingPostsSidebar from './TrendingPostsSidebar';
 import TrendingPosts from './TrendingPosts';
 import UserAchievements from './UserAchievements';
+import { VideoFeedProvider } from '@/components/video/VideoFeedManager'; // Import VideoFeedProvider
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -313,59 +314,75 @@ const SocialPage: React.FC = () => {
             overflowY: 'auto',
             p: { xs: 1, md: 2 }
           }}>
-            {loading ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', my: 8 }}>
-                <CircularProgress size={40} />
-              </Box>
-            ) : error ? (
-              <Box sx={{ textAlign: 'center', my: 8 }}>
-                <AlertCircle size={56} color={theme.palette.error.main} style={{ marginBottom: 20 }} />
-                <Typography color="error" variant="h6" sx={{ mb: 2 }}>
-                  {error}
-                </Typography>
-                <Button 
-                  variant="outlined" 
-                  color="primary" 
-                  startIcon={<RefreshCw size={18} />}
-                  sx={{ mt: 2, borderRadius: 2, px: 4 }}
-                  onClick={handleRefresh}
-                >
-                  Try Again
-                </Button>
-              </Box>
-            ) : posts.length === 0 ? (
-              <Box sx={{ textAlign: 'center', my: 8 }}>
-                <Typography variant="h6" color="text.secondary" sx={{ mb: 2 }}>
-                  No posts found
-                </Typography>
-                <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-                  Be the first to post something!
-                </Typography>
-                <Button 
-                  variant="contained" 
-                  size="large"
-                  startIcon={<Plus size={20} />}
-                  onClick={() => setCreatePostOpen(true)}
-                  sx={{ borderRadius: 3, px: 4, py: 1.5 }}
-                >
-                  Create Your First Post
-                </Button>
-              </Box>
-            ) : (
-              posts.map((post) => (
-                <PostCardEnhanced 
-                  key={post.id} 
-                  post={post} 
-                  onBookmark={handleBookmarkPost}
-                  onLike={likePost}
-                  onShare={sharePost}
-                  onComment={(postId) => {
-                    // Navigate to the post detail page with focus on comments
-                    router.push(`/post/${postId}?focus=comments`);
-                  }}
-                />
-              ))
-            )}
+            {/* Wrap the feed content with VideoFeedProvider for auto play/pause functionality */}
+            <VideoFeedProvider
+              initialSettings={{
+                enabled: true,
+                threshold: 0.6,
+                pauseOnScroll: true,
+                muteByDefault: true,
+                preloadStrategy: 'metadata',
+                maxConcurrentVideos: 2,
+                scrollPauseDelay: 150,
+                viewTrackingThreshold: 3,
+                autoplayOnlyOnWifi: false,
+                respectReducedMotion: true,
+              }}
+            >
+              {loading ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', my: 8 }}>
+                  <CircularProgress size={40} />
+                </Box>
+              ) : error ? (
+                <Box sx={{ textAlign: 'center', my: 8 }}>
+                  <AlertCircle size={56} color={theme.palette.error.main} style={{ marginBottom: 20 }} />
+                  <Typography color="error" variant="h6" sx={{ mb: 2 }}>
+                    {error}
+                  </Typography>
+                  <Button 
+                    variant="outlined" 
+                    color="primary" 
+                    startIcon={<RefreshCw size={18} />}
+                    sx={{ mt: 2, borderRadius: 2, px: 4 }}
+                    onClick={handleRefresh}
+                  >
+                    Try Again
+                  </Button>
+                </Box>
+              ) : posts.length === 0 ? (
+                <Box sx={{ textAlign: 'center', my: 8 }}>
+                  <Typography variant="h6" color="text.secondary" sx={{ mb: 2 }}>
+                    No posts found
+                  </Typography>
+                  <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+                    Be the first to post something!
+                  </Typography>
+                  <Button 
+                    variant="contained" 
+                    size="large"
+                    startIcon={<Plus size={20} />}
+                    onClick={() => setCreatePostOpen(true)}
+                    sx={{ borderRadius: 3, px: 4, py: 1.5 }}
+                  >
+                    Create Your First Post
+                  </Button>
+                </Box>
+              ) : (
+                posts.map((post) => (
+                  <PostCardEnhanced 
+                    key={post.id} 
+                    post={post} 
+                    onBookmark={handleBookmarkPost}
+                    onLike={likePost}
+                    onShare={sharePost}
+                    onComment={(postId) => {
+                      // Navigate to the post detail page with focus on comments
+                      router.push(`/post/${postId}?focus=comments`);
+                    }}
+                  />
+                ))
+              )}
+            </VideoFeedProvider>
           </Box>
         </Box>
         

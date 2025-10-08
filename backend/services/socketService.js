@@ -4,7 +4,7 @@
  */
 
 const mongoose = require('mongoose');
-const { Message, Conversation, User, Product, RefundEvent } = require('../models');
+const { Message, Conversation, ChatbotConversation, ChatbotMessage, User, Product, RefundEvent } = require('../models');
 
 class SocketService {
   constructor(io) {
@@ -70,6 +70,81 @@ class SocketService {
 
   setupSocketEventHandlers(socket) {
     const userId = socket.userId;
+
+    // Join notifications room
+    socket.on('join-notifications', () => {
+      try {
+        // Join user's notification room
+        socket.join(`notifications_${userId}`);
+        console.log(`User ${userId} joined notifications room`);
+
+        socket.emit('notifications-joined');
+      } catch (error) {
+        console.error('Join notifications room error:', error);
+        socket.emit('error', { message: 'Failed to join notifications room' });
+      }
+    });
+
+    // Leave notifications room
+    socket.on('leave-notifications', () => {
+      try {
+        // Leave user's notification room
+        socket.leave(`notifications_${userId}`);
+        console.log(`User ${userId} left notifications room`);
+
+        socket.emit('notifications-left');
+      } catch (error) {
+        console.error('Leave notifications room error:', error);
+        socket.emit('error', { message: 'Failed to leave notifications room' });
+      }
+    });
+
+    // Mark notification as read
+    socket.on('notification:mark-read', async (data) => {
+      try {
+        const { notificationId } = data;
+        const userId = this.socketUsers.get(socket.id);
+
+        if (!userId || !notificationId) {
+          socket.emit('error', { message: 'Invalid request' });
+          return;
+        }
+
+        // Import NotificationService here to avoid circular dependencies
+        const NotificationService = require('./notificationService');
+        
+        // Mark notification as read
+        await NotificationService.markAsRead([notificationId], userId);
+
+        socket.emit('notification:marked-read', { notificationId });
+      } catch (error) {
+        console.error('Mark notification as read error:', error);
+        socket.emit('error', { message: 'Failed to mark notification as read' });
+      }
+    });
+
+    // Mark all notifications as read
+    socket.on('notification:mark-all-read', async () => {
+      try {
+        const userId = this.socketUsers.get(socket.id);
+
+        if (!userId) {
+          socket.emit('error', { message: 'Invalid request' });
+          return;
+        }
+
+        // Import NotificationService here to avoid circular dependencies
+        const NotificationService = require('./notificationService');
+        
+        // Mark all notifications as read
+        await NotificationService.markAllAsRead(userId);
+
+        socket.emit('notification:all-marked-read');
+      } catch (error) {
+        console.error('Mark all notifications as read error:', error);
+        socket.emit('error', { message: 'Failed to mark all notifications as read' });
+      }
+    });
 
     // Join conversation room
     socket.on('join-conversation', async (data) => {

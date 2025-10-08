@@ -28,9 +28,7 @@ import {
   BookmarkCheck,
   UserPlus,
   UserCheck,
-  Eye,
   Hash,
-  Clock,
   Flag,
   ExternalLink,
   Copy,
@@ -43,6 +41,8 @@ import { api } from '@/lib/api';
 import { Post } from '@/types/social';
 import UserAvatar from '@/components/common/UserAvatar';
 import toast from 'react-hot-toast';
+import { useVideoFeed } from '@/components/video/VideoFeedManager';
+import { useMediaMute } from '@/hooks/useMediaMute'; // Import the new hook
 
 interface PostCardProps {
   post: Post;
@@ -57,9 +57,24 @@ export const PostCardEnhanced: React.FC<PostCardProps> = ({ post, onBookmark, on
   const router = useRouter();
   const { user } = useAuth();
   const { socket } = useWebSocket();
+  // Use video feed context for auto play/pause functionality
+  const { 
+    registerVideo, 
+    unregisterVideo, 
+    playVideo, 
+    pauseVideo, 
+    currentPlayingVideo,
+    isScrolling,
+    settings 
+  } = useVideoFeed();
+  
+  // Use the unified media mute hook
+  const { isMuted, toggleMute } = useMediaMute({
+    initialMuted: settings.muteByDefault,
+    globalMuteSetting: settings.muteByDefault
+  });
   
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
   const [isLiked, setIsLiked] = useState(post.isLiked || false);
   const [isBookmarked, setIsBookmarked] = useState(post.isBookmarked || false);
   const [likeCount, setLikeCount] = useState(post.likeCount || post.likes || 0);
@@ -69,38 +84,79 @@ export const PostCardEnhanced: React.FC<PostCardProps> = ({ post, onBookmark, on
   const [isFollowing, setIsFollowing] = useState(false);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null); // Reference to the video container
 
   // Check if current user is the post author
   const isOwnPost = user?.id === post.author.id;
 
-  // Toggle play state for videos
-  const togglePlay = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (videoRef.current) {
-      if (isPlaying) {
-        videoRef.current.pause();
-        setIsPlaying(false);
-      } else {
-        // Ensure video is unmuted when user initiates play
-        videoRef.current.muted = false;
-        setIsMuted(false);
+  // Register video with feed manager when component mounts
+  useEffect(() => {
+    const videoItem = post.media?.[0];
+    if (videoItem?.resource_type === 'video' && videoRef.current && containerRef.current) {
+      const postId = post._id || post.id;
+      const cleanup = registerVideo(postId, videoRef.current, containerRef.current);
+      
+      // Set initial muted state based on settings
+      if (videoRef.current) {
+        videoRef.current.muted = isMuted;
         
-        videoRef.current.play().then(() => {
-          setIsPlaying(true);
-        }).catch((error) => {
-          console.log('Video play failed:', error);
-        });
+        // Set additional video attributes for better performance
+        videoRef.current.playsInline = true;
+        videoRef.current.preload = 'metadata';
+        videoRef.current.loop = true;
+      }
+      
+      return cleanup;
+    }
+  }, [post, registerVideo, isMuted]);
+
+  // Synchronize video element muted state with hook state
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.muted = isMuted;
+    }
+  }, [isMuted]);
+
+  // Handle video play/pause based on scroll state with improved performance
+  useEffect(() => {
+    const videoItem = post.media?.[0];
+    if (videoItem?.resource_type === 'video' && videoRef.current) {
+      const postId = post._id || post.id;
+      
+      // If scrolling, pause the video for better performance
+      if (isScrolling && isPlaying) {
+        // Use a small delay to avoid excessive pausing during fast scrolls
+        const timer = setTimeout(() => {
+          if (isScrolling && isPlaying) {
+            pauseVideo(postId);
+          }
+        }, 50);
+        
+        return () => clearTimeout(timer);
       }
     }
-  };
+  }, [isScrolling, isPlaying, post, pauseVideo]);
 
-  // Toggle mute state for videos
-  const toggleMute = (e: React.MouseEvent) => {
+  // Toggle play state for videos with improved error handling
+  const togglePlay = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (videoRef.current) {
-      const newMutedState = !isMuted;
-      videoRef.current.muted = newMutedState;
-      setIsMuted(newMutedState);
+    const videoItem = post.media?.[0];
+    if (videoItem?.resource_type === 'video' && videoRef.current) {
+      const postId = post._id || post.id;
+      
+      if (isPlaying) {
+        pauseVideo(postId);
+      } else {
+        // Unmute when user initiates play
+        if (isMuted) {
+          toggleMute();
+        }
+        playVideo(postId).catch(error => {
+          console.warn('Failed to play video:', error);
+          // Show user-friendly error message
+          toast.error('Failed to play video. Please try again.');
+        });
+      }
     }
   };
 
@@ -113,15 +169,15 @@ export const PostCardEnhanced: React.FC<PostCardProps> = ({ post, onBookmark, on
     }
     
     try {
-      if (isLiked) {
-        // Unlike is handled by calling like again (toggles on backend)
-        await api.posts.like(post.id);
-        setLikeCount(prev => Math.max(0, prev - 1));
-      } else {
-        await api.posts.like(post.id);
-        setLikeCount(prev => prev + 1);
-      }
-      setIsLiked(!isLiked);
+      // Call the like endpoint which now handles both like and unlike
+      const response: any = await api.posts.like(post.id);
+      
+      // Update state based on the response from the backend
+      setLikeCount(response.data.likeCount);
+      setIsLiked(response.data.action === 'like');
+      
+      // Show appropriate message
+      toast.success(response.data.message);
       
       // Notify parent component if callback provided
       if (onLike) onLike(post.id);
@@ -131,7 +187,7 @@ export const PostCardEnhanced: React.FC<PostCardProps> = ({ post, onBookmark, on
         socket.emit('post:like', { postId: post.id, userId: user?.id });
       }
     } catch (error) {
-      toast.error('Failed to like post');
+      toast.error('Failed to like/unlike post');
       console.error('Like error:', error);
     }
   };
@@ -139,13 +195,14 @@ export const PostCardEnhanced: React.FC<PostCardProps> = ({ post, onBookmark, on
   // Handle bookmark action
   const handleBookmark = async () => {
     try {
-      if (isBookmarked) {
-        // Unbookmark is handled by calling bookmark again (toggles on backend)
-        await api.posts.bookmark(post.id);
-      } else {
-        await api.posts.bookmark(post.id);
-      }
-      setIsBookmarked(!isBookmarked);
+      // Call the bookmark endpoint which handles both bookmark and unbookmark
+      const response: any = await api.posts.bookmark(post.id);
+      
+      // Update state based on the response from the backend
+      setIsBookmarked(response.data.isBookmarked);
+      
+      // Show appropriate message
+      toast.success(response.data.message);
       
       // Notify parent component if callback provided
       if (onBookmark) onBookmark(post.id);
@@ -155,7 +212,7 @@ export const PostCardEnhanced: React.FC<PostCardProps> = ({ post, onBookmark, on
         socket.emit('post:bookmark', { postId: post.id, userId: user?.id });
       }
     } catch (error) {
-      toast.error('Failed to bookmark post');
+      toast.error('Failed to bookmark/unbookmark post');
       console.error('Bookmark error:', error);
     }
   };
@@ -216,7 +273,12 @@ export const PostCardEnhanced: React.FC<PostCardProps> = ({ post, onBookmark, on
   // Handle comment action
   const handleComment = () => {
     // Notify parent component if callback provided
-    if (onComment) onComment(post.id);
+    if (onComment) {
+      onComment(post.id);
+    } else {
+      // Default behavior: navigate to post detail with focus on comments
+      router.push(`/post/${post.id}?focus=comments`);
+    }
   };
 
   // Handle menu open
@@ -499,7 +561,7 @@ export const PostCardEnhanced: React.FC<PostCardProps> = ({ post, onBookmark, on
                     {mediaItem.resource_type === 'image' ? (
                       <Box
                         component="img"
-                        src={mediaItem.secure_url || mediaItem.url}
+                        src={mediaItem.secure_url || mediaItem.url || '/images/placeholder-image.png'}
                         alt={`Post image`}
                         loading="lazy"
                         sx={{
@@ -510,16 +572,20 @@ export const PostCardEnhanced: React.FC<PostCardProps> = ({ post, onBookmark, on
                         }}
                         onError={(e) => {
                           const target = e.target as HTMLImageElement;
+                          target.src = '/images/placeholder-image.png';
                           target.style.objectFit = 'contain';
                           target.style.backgroundColor = alpha(theme.palette.divider, 0.2);
                         }}
                       />
                     ) : mediaItem.resource_type === 'video' ? (
-                      <Box sx={{ 
-                        position: 'relative',
-                        width: '100%',
-                        maxHeight: 500,
-                      }}>
+                      <Box 
+                        ref={containerRef}
+                        sx={{ 
+                          position: 'relative',
+                          width: '100%',
+                          maxHeight: 500,
+                        }}
+                      >
                         <video
                           ref={videoRef}
                           style={{
@@ -528,7 +594,7 @@ export const PostCardEnhanced: React.FC<PostCardProps> = ({ post, onBookmark, on
                             objectFit: 'cover',
                             backgroundColor: 'black',
                           }}
-                          poster={mediaItem.thumbnail_url || (mediaItem as any).thumbnail}
+                          poster={mediaItem.thumbnail_url || (mediaItem as any).thumbnail || '/images/placeholder-video.png'}
                           muted={isMuted}
                           loop
                           playsInline
@@ -536,7 +602,7 @@ export const PostCardEnhanced: React.FC<PostCardProps> = ({ post, onBookmark, on
                           onPlay={() => setIsPlaying(true)}
                           onPause={() => setIsPlaying(false)}
                         >
-                          <source src={mediaItem.secure_url || mediaItem.url} type="video/mp4" />
+                          <source src={mediaItem.secure_url || mediaItem.url || '/images/placeholder-video.png'} type="video/mp4" />
                           Your browser does not support the video tag.
                         </video>
                         {/* Play/Pause overlay */}
@@ -580,12 +646,18 @@ export const PostCardEnhanced: React.FC<PostCardProps> = ({ post, onBookmark, on
                     ) : (
                       <Box
                         component="img"
-                        src={mediaItem.secure_url || mediaItem.url}
+                        src={mediaItem.secure_url || mediaItem.url || '/images/placeholder-image.png'}
                         alt="Post content"
                         sx={{
                           width: '100%',
                           maxHeight: 500,
                           objectFit: 'cover',
+                        }}
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.src = '/images/placeholder-image.png';
+                          target.style.objectFit = 'contain';
+                          target.style.backgroundColor = alpha(theme.palette.divider, 0.2);
                         }}
                       />
                     )}

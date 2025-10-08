@@ -1,10 +1,11 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { PostCardEnhanced } from './PostCardEnhanced';
+import { VideoFeedProvider } from '@/components/video/VideoFeedManager';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWebSocket } from '@/contexts/WebSocketContext';
 import { useRouter } from 'next/router';
-import { Post } from '@/types/social'; // Import the Post type
+import { Post } from '@/types/social';
 
 // Mock the contexts
 jest.mock('@/contexts/AuthContext', () => ({
@@ -56,8 +57,61 @@ jest.mock('date-fns', () => ({
   parseISO: jest.fn().mockImplementation((date) => new Date(date)),
 }));
 
+// Mock VideoFeedProvider to avoid complex setup in tests
+jest.mock('@/components/video/VideoFeedManager', () => {
+  const actual = jest.requireActual('@/components/video/VideoFeedManager');
+  return {
+    ...actual,
+    useVideoFeed: () => ({
+      registerVideo: jest.fn(),
+      unregisterVideo: jest.fn(),
+      playVideo: jest.fn(),
+      pauseVideo: jest.fn(),
+      pauseAllVideos: jest.fn(),
+      currentPlayingVideo: null,
+      isScrolling: false,
+      settings: {
+        enabled: true,
+        threshold: 0.6,
+        pauseOnScroll: true,
+        muteByDefault: false,
+        preloadStrategy: 'metadata',
+        maxConcurrentVideos: 2,
+        scrollPauseDelay: 150,
+        viewTrackingThreshold: 3,
+        autoplayOnlyOnWifi: false,
+        respectReducedMotion: true,
+      },
+      updateSettings: jest.fn(),
+      getVideoStats: jest.fn(),
+    }),
+  };
+});
+
+// Wrapper component that provides the VideoFeedProvider for tests
+const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  return (
+    <VideoFeedProvider
+      initialSettings={{
+        enabled: true,
+        threshold: 0.6,
+        pauseOnScroll: true,
+        muteByDefault: false,
+        preloadStrategy: 'metadata',
+        maxConcurrentVideos: 2,
+        scrollPauseDelay: 150,
+        viewTrackingThreshold: 3,
+        autoplayOnlyOnWifi: false,
+        respectReducedMotion: true,
+      }}
+    >
+      {children}
+    </VideoFeedProvider>
+  );
+};
+
 describe('PostCardEnhanced Comment Flow', () => {
-  const mockPost: Post = { // Use the Post type
+  const mockPost: Post = {
     id: '1',
     type: 'image',
     content: 'Test post content',
@@ -94,7 +148,11 @@ describe('PostCardEnhanced Comment Flow', () => {
 
   it('calls onComment handler with correct postId when comment button is clicked', () => {
     const mockOnComment = jest.fn();
-    render(<PostCardEnhanced post={mockPost} onComment={mockOnComment} />);
+    render(
+      <TestWrapper>
+        <PostCardEnhanced post={mockPost} onComment={mockOnComment} />
+      </TestWrapper>
+    );
     
     // Find the comment button by its icon
     const commentButton = screen.getByRole('button', { name: 'Comment' });
@@ -106,12 +164,14 @@ describe('PostCardEnhanced Comment Flow', () => {
 
   it('navigates to post detail page with focus=comments when used in SocialPage context', () => {
     render(
-      <PostCardEnhanced 
-        post={mockPost} 
-        onComment={(postId) => {
-          mockRouter.push(`/post/${postId}?focus=comments`);
-        }}
-      />
+      <TestWrapper>
+        <PostCardEnhanced 
+          post={mockPost} 
+          onComment={(postId) => {
+            mockRouter.push(`/post/${postId}?focus=comments`);
+          }}
+        />
+      </TestWrapper>
     );
     
     // Find the comment button by its icon

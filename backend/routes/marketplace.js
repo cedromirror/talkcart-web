@@ -3,12 +3,13 @@ const router = express.Router();
 const mongoose = require('mongoose');
 const multer = require('multer');
 const { authenticateToken, authenticateTokenStrict } = require('./auth');
-const { Product, User, Order, ProductReview } = require('../models');
+const { Product, User, Order, ProductReview, VendorPaymentPreferences, VendorStore } = require('../models');
 const { uploadToCloudinary } = require('../config/cloudinary');
 const Joi = require('joi');
 const { ethers } = require('ethers');
 const { validate } = require('../middleware/validation');
 const { asyncHandler, sendSuccess, sendError } = require('../middleware/errorHandler');
+
 
 // Canonical categories list reused across routes and validation
 const CATEGORIES = [
@@ -95,16 +96,16 @@ router.get('/health', (req, res) => {
 });
 
 // @route   POST /api/marketplace/products/upload-images
-// @desc    Upload product images (Admin only)
-// @access  Private - Admin only
+// @desc    Upload product images (Authenticated users only)
+// @access  Private - Authenticated users only
 router.post('/products/upload-images', authenticateTokenStrict, upload.array('images', 5), async (req, res) => {
   try {
-    // Check if user is admin
+    // Check if user is authenticated
     const user = await User.findById(req.user.userId);
-    if (!user || user.role !== 'admin') {
+    if (!user) {
       return res.status(403).json({
         success: false,
-        error: 'Access denied. Only administrators can upload product images.'
+        error: 'Access denied. User not found.'
       });
     }
 
@@ -246,31 +247,21 @@ router.get('/products', async (req, res) => {
       }
     }
 
-    // Restrict to admin-posted products
-    const adminIds = await User.find({ role: 'admin' }).distinct('_id');
-
+    // Allow all active products from any vendor
+    // If a vendorId is provided, use it as is
+    // Otherwise, show all active products from all vendors
     if (query.vendorId) {
-      // If a vendorId is provided and it's not an admin, return empty set
-      const isAdminVendor = adminIds.some(id => String(id) === String(query.vendorId));
-      if (!isAdminVendor) {
-        return res.json({
-          success: true,
-          data: {
-            products: [],
-            pagination: {
-              page: parseInt(page),
-              limit: parseInt(limit),
-              total: 0,
-              pages: 0,
-            },
-          },
+      // Validate the vendorId is a valid ObjectId
+      if (!mongoose.Types.ObjectId.isValid(query.vendorId)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid vendor ID'
         });
       }
-    } else {
-      query.vendorId = { $in: adminIds };
     }
+    // If no vendorId is provided, we'll show all active products (no filter needed)
 
-    // Get products from database (admin-only)
+    // Get products from database
     const products = await Product.find(query)
       .populate('vendorId', 'username displayName avatar isVerified walletAddress role')
       .sort(sort)
@@ -325,16 +316,16 @@ router.get('/products', async (req, res) => {
 });
 
 // @route   POST /api/marketplace/products
-// @desc    Create a new product (Admin only)
-// @access  Private (strict) - Admin only
+// @desc    Create a new product (Authenticated users only)
+// @access  Private (strict)
 router.post('/products', authenticateTokenStrict, async (req, res) => {
   try {
-    // Check if user is admin
+    // Check if user is authenticated
     const user = await User.findById(req.user.userId);
-    if (!user || user.role !== 'admin') {
+    if (!user) {
       return res.status(403).json({
         success: false,
-        error: 'Access denied. Only administrators can create products.'
+        error: 'Access denied. User not found.'
       });
     }
 
@@ -618,8 +609,8 @@ router.get('/products/:id', async (req, res) => {
       })
       .catch(err => console.error('View increment error:', err));
 
-    // Restrict detail view to admin-posted products
-    if (!product.vendorId || String(product.vendorId.role) !== 'admin') {
+    // Allow viewing products from any vendor as long as the product is active
+    if (!product.vendorId || !product.isActive) {
       return res.status(404).json({ success: false, error: 'Product not found' });
     }
 
@@ -658,19 +649,19 @@ router.get('/products/:id', async (req, res) => {
 });
 
 // @route   PUT /api/marketplace/products/:id
-// @desc    Update product (Admin only)
-// @access  Private (strict) - Admin only
+// @desc    Update product (Product owner only)
+// @access  Private (strict)
 router.put('/products/:id', authenticateTokenStrict, async (req, res) => {
   try {
     const { id } = req.params;
     const updateData = req.body;
 
-    // Check if user is admin
+    // Check if user is authenticated
     const user = await User.findById(req.user.userId);
-    if (!user || user.role !== 'admin') {
+    if (!user) {
       return res.status(403).json({
         success: false,
-        error: 'Access denied. Only administrators can update products.'
+        error: 'Access denied. User not found.'
       });
     }
 
@@ -683,7 +674,7 @@ router.put('/products/:id', authenticateTokenStrict, async (req, res) => {
       });
     }
 
-    // Check if user owns the product (admin check already passed)
+    // Check if user owns the product
     if (product.vendorId.toString() !== req.user.userId) {
       return res.status(403).json({
         success: false,
@@ -733,18 +724,18 @@ router.put('/products/:id', authenticateTokenStrict, async (req, res) => {
 });
 
 // @route   DELETE /api/marketplace/products/:id
-// @desc    Delete product (Admin only)
-// @access  Private (strict) - Admin only
+// @desc    Delete product (Product owner only)
+// @access  Private (strict)
 router.delete('/products/:id', authenticateTokenStrict, async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Check if user is admin
+    // Check if user is authenticated
     const user = await User.findById(req.user.userId);
-    if (!user || user.role !== 'admin') {
+    if (!user) {
       return res.status(403).json({
         success: false,
-        error: 'Access denied. Only administrators can delete products.'
+        error: 'Access denied. User not found.'
       });
     }
 
@@ -757,7 +748,7 @@ router.delete('/products/:id', authenticateTokenStrict, async (req, res) => {
       });
     }
 
-    // Check if user owns the product (admin check already passed)
+    // Check if user owns the product
     if (product.vendorId.toString() !== req.user.userId) {
       return res.status(403).json({
         success: false,
@@ -932,8 +923,8 @@ router.post('/products/:id/buy', authenticateTokenStrict, async (req, res) => {
 
     const product = await Product.findById(id).populate('vendorId', 'username displayName avatar isVerified walletAddress role');
 
-    // Enforce admin-only vendor products can be purchased
-    if (!product || !product.vendorId || String(product.vendorId.role) !== 'admin') {
+    // Allow purchasing products from any vendor as long as the product is active
+    if (!product || !product.vendorId || !product.isActive) {
       return res.status(404).json({ success: false, error: 'Product not found' });
     }
     if (!product || product.isActive === false) {
@@ -1108,7 +1099,73 @@ router.post('/products/:id/buy', authenticateTokenStrict, async (req, res) => {
       });
     }
 
-    return res.json({ success: true, data: { product: responseData, payment: paymentResult } });
+    // Create order record
+    const orderData = {
+      userId: buyerId,
+      orderNumber: `ORD-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+      items: [{
+        productId: product._id,
+        name: product.name,
+        price: product.price,
+        quantity: 1,
+        currency: product.currency,
+        isNFT: product.isNFT,
+        vendorId: product.vendorId._id // Add vendorId directly to item for easier processing
+      }],
+      totalAmount: product.price,
+      currency: product.currency,
+      paymentMethod: req.body.paymentMethod || 'unknown',
+      paymentDetails: req.body.paymentDetails || {},
+      status: 'completed',
+      completedAt: new Date()
+    };
+
+    // Add payment transaction details if available
+    if (paymentResult.transactionId) {
+      orderData.tx_ref = paymentResult.transactionId;
+    }
+
+    const order = new Order(orderData);
+    await order.save();
+
+    // For non-NFT products, calculate and prepare vendor payout
+    if (!product.isNFT) {
+      try {
+        // Calculate vendor payout after commission
+        const payoutCalculation = await vendorPayoutService.calculatePayout(
+          product.price, 
+          product.currency
+        );
+        
+        // Store payout information in order metadata for later processing
+        if (!order.metadata) order.metadata = {};
+        order.metadata.vendorPayout = {
+          vendorId: product.vendorId._id,
+          vendorAmount: payoutCalculation.vendorAmount,
+          commissionAmount: payoutCalculation.commissionAmount,
+          commissionRate: payoutCalculation.commissionRate,
+          currency: payoutCalculation.currency,
+          status: 'pending'
+        };
+        await order.save();
+      } catch (payoutError) {
+        console.error('Error calculating vendor payout:', payoutError);
+        // Continue with the purchase even if payout calculation fails
+      }
+    }
+
+    return res.json({ 
+      success: true, 
+      data: { 
+        product: responseData, 
+        payment: paymentResult,
+        order: {
+          id: order._id,
+          orderNumber: order.orderNumber,
+          status: order.status
+        }
+      } 
+    });
   } catch (error) {
     console.error('Buy product error:', error);
     return res.status(500).json({ success: false, error: 'Failed to process purchase', message: error.message });
@@ -1536,5 +1593,953 @@ router.post('/reviews/:productId', authenticateTokenStrict, validate('createRevi
 }));
 
 
+
+// @route   GET /api/marketplace/vendors/:vendorId/products
+// @desc    Get products by vendor
+// @access  Public
+router.get('/vendors/:vendorId/products', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const { limit = 20, page = 1 } = req.query;
+
+    // Validate vendorId
+    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res.status(400).json({ success: false, error: 'Invalid vendor ID' });
+    }
+
+    // Check if vendor exists
+    const vendor = await User.findById(vendorId);
+    if (!vendor) {
+      return res.status(404).json({ success: false, error: 'Vendor not found' });
+    }
+
+    // Build query for vendor's products
+    const query = { 
+      vendorId: vendorId,
+      isActive: true 
+    };
+
+    // Calculate pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Get vendor's products
+    const products = await Product.find(query)
+      .populate('vendorId', 'username displayName avatar isVerified walletAddress')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip(skip)
+      .lean();
+
+    // Get total count
+    const total = await Product.countDocuments(query);
+
+    // Transform data for compatibility
+    const transformedProducts = products.map(product => ({
+      ...product,
+      id: product._id,
+      vendor: {
+        id: product.vendorId._id,
+        username: product.vendorId.username,
+        displayName: product.vendorId.displayName,
+        avatar: product.vendorId.avatar,
+        isVerified: product.vendorId.isVerified,
+        walletAddress: product.vendorId.walletAddress
+      },
+      // Include new fields for enhanced marketplace experience
+      discount: product.discount || 0,
+      freeShipping: product.freeShipping || false,
+      fastDelivery: product.fastDelivery || false,
+      prime: product.prime || false,
+      inStock: product.inStock !== undefined ? product.inStock : (product.stock > 0 || product.isNFT)
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        products: transformedProducts,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / parseInt(limit)),
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Get vendor products error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get vendor products',
+      message: error.message,
+    });
+  }
+});
+
+// @route   GET /api/marketplace/vendors/:vendorId
+// @desc    Get vendor information
+// @access  Public
+router.get('/vendors/:vendorId', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+
+    // Validate vendorId
+    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res.status(400).json({ success: false, error: 'Invalid vendor ID' });
+    }
+
+    // Get vendor information
+    const vendor = await User.findById(vendorId, 'username displayName avatar isVerified walletAddress bio location website socialLinks followerCount followingCount createdAt');
+    
+    if (!vendor) {
+      return res.status(404).json({ success: false, error: 'Vendor not found' });
+    }
+
+    // Get vendor's product count
+    const productCount = await Product.countDocuments({ 
+      vendorId: vendorId,
+      isActive: true 
+    });
+
+    const vendorData = {
+      id: vendor._id,
+      username: vendor.username,
+      displayName: vendor.displayName,
+      avatar: vendor.avatar,
+      isVerified: vendor.isVerified,
+      walletAddress: vendor.walletAddress,
+      bio: vendor.bio,
+      location: vendor.location,
+      website: vendor.website,
+      socialLinks: vendor.socialLinks,
+      followerCount: vendor.followerCount,
+      followingCount: vendor.followingCount,
+      productCount,
+      createdAt: vendor.createdAt
+    };
+
+    res.json({
+      success: true,
+      data: { vendor: vendorData }
+    });
+  } catch (error) {
+    console.error('Get vendor error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get vendor information',
+      message: error.message,
+    });
+  }
+});
+
+// @route   GET /api/marketplace/vendors
+// @desc    Get all vendors
+// @access  Public
+router.get('/vendors', async (req, res) => {
+  try {
+    const { limit = 20, page = 1, search } = req.query;
+
+    // Build query for vendors who have active products
+    let vendorQuery = {};
+    
+    // Find vendors with active products
+    const productVendors = await Product.distinct('vendorId', { isActive: true });
+    
+    if (productVendors.length === 0) {
+      return res.json({
+        success: true,
+        data: {
+          vendors: [],
+          pagination: {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            total: 0,
+            pages: 0,
+          },
+        },
+      });
+    }
+    
+    vendorQuery._id = { $in: productVendors };
+    
+    // Add search filter if provided
+    if (search) {
+      vendorQuery.$or = [
+        { username: { $regex: search, $options: 'i' } },
+        { displayName: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    // Calculate pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Get vendors
+    const vendors = await User.find(vendorQuery, 'username displayName avatar isVerified walletAddress followerCount followingCount')
+      .sort({ followerCount: -1 })
+      .limit(parseInt(limit))
+      .skip(skip)
+      .lean();
+
+    // Get total count
+    const total = await User.countDocuments(vendorQuery);
+
+    // Add product count for each vendor
+    const vendorsWithCounts = await Promise.all(vendors.map(async (vendor) => {
+      const productCount = await Product.countDocuments({ 
+        vendorId: vendor._id,
+        isActive: true 
+      });
+      
+      return {
+        ...vendor,
+        id: vendor._id,
+        productCount
+      };
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        vendors: vendorsWithCounts,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / parseInt(limit)),
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Get vendors error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get vendors',
+      message: error.message,
+    });
+  }
+});
+
+// @route   GET /api/marketplace/my/products
+// @desc    Get current user's products
+// @access  Private
+router.get('/my/products', authenticateTokenStrict, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { limit = 20, page = 1 } = req.query;
+
+    // Build query for user's products
+    const query = { vendorId: userId };
+
+    // Calculate pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Get user's products
+    const products = await Product.find(query)
+      .populate('vendorId', 'username displayName avatar isVerified walletAddress')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip(skip)
+      .lean();
+
+    // Get total count
+    const total = await Product.countDocuments(query);
+
+    // Transform data for compatibility
+    const transformedProducts = products.map(product => ({
+      ...product,
+      id: product._id,
+      vendor: {
+        id: product.vendorId._id,
+        username: product.vendorId.username,
+        displayName: product.vendorId.displayName,
+        avatar: product.vendorId.avatar,
+        isVerified: product.vendorId.isVerified,
+        walletAddress: product.vendorId.walletAddress
+      },
+      // Include new fields for enhanced marketplace experience
+      discount: product.discount || 0,
+      freeShipping: product.freeShipping || false,
+      fastDelivery: product.fastDelivery || false,
+      prime: product.prime || false,
+      inStock: product.inStock !== undefined ? product.inStock : (product.stock > 0 || product.isNFT)
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        products: transformedProducts,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / parseInt(limit)),
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Get my products error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get your products',
+      message: error.message,
+    });
+  }
+});
+
+// @route   GET /api/marketplace/vendors/:vendorId/payment-preferences
+// @desc    Get vendor payment preferences (public endpoint)
+// @access  Public
+router.get('/vendors/:vendorId/payment-preferences', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    
+    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid vendor ID'
+      });
+    }
+
+    const preferences = await VendorPaymentPreferences.findOne({ vendorId });
+    
+    if (!preferences) {
+      return res.json({
+        success: true,
+        data: {
+          mobileMoney: { enabled: false },
+          bankAccount: { enabled: false },
+          paypal: { enabled: false },
+          cryptoWallet: { enabled: false },
+          defaultPaymentMethod: 'mobileMoney'
+        }
+      });
+    }
+
+    // Only return enabled payment methods for public access
+    const publicPreferences = {
+      mobileMoney: {
+        enabled: preferences.mobileMoney.enabled,
+        ...(preferences.mobileMoney.enabled && {
+          provider: preferences.mobileMoney.provider,
+          country: preferences.mobileMoney.country
+        })
+      },
+      bankAccount: {
+        enabled: preferences.bankAccount.enabled,
+        ...(preferences.bankAccount.enabled && {
+          bankName: preferences.bankAccount.bankName,
+          country: preferences.bankAccount.country
+        })
+      },
+      paypal: {
+        enabled: preferences.paypal.enabled
+      },
+      cryptoWallet: {
+        enabled: preferences.cryptoWallet.enabled,
+        ...(preferences.cryptoWallet.enabled && {
+          network: preferences.cryptoWallet.network
+        })
+      },
+      defaultPaymentMethod: preferences.defaultPaymentMethod
+    };
+
+    res.json({
+      success: true,
+      data: publicPreferences
+    });
+  } catch (error) {
+    console.error('Get vendor payment preferences error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch payment preferences'
+    });
+  }
+});
+
+// @route   GET /api/marketplace/vendors/me/payment-preferences
+// @desc    Get my payment preferences (vendor only)
+// @access  Private - Vendor only
+router.get('/vendors/me/payment-preferences', authenticateTokenStrict, async (req, res) => {
+  try {
+    const vendorId = req.user.userId;
+    
+    console.log('=== GET /vendors/me/payment-preferences ===');
+    console.log('Vendor ID from token:', vendorId);
+    console.log('Full user object:', req.user);
+    
+    if (!vendorId) {
+      console.log('ERROR: No vendorId in request');
+      return res.status(400).json({
+        success: false,
+        error: 'Vendor ID is required'
+      });
+    }
+    
+    const preferences = await VendorPaymentPreferences.findOne({ vendorId });
+    
+    console.log('Preferences query result:', preferences ? 'FOUND' : 'NOT FOUND');
+    
+    if (!preferences) {
+      console.log('No payment preferences found, returning defaults for vendor:', vendorId);
+      return res.json({
+        success: true,
+        data: {
+          mobileMoney: { enabled: false },
+          bankAccount: { enabled: false },
+          paypal: { enabled: false },
+          cryptoWallet: { enabled: false },
+          defaultPaymentMethod: 'mobileMoney',
+          withdrawalPreferences: {
+            minimumAmount: 10,
+            frequency: 'weekly'
+          }
+        }
+      });
+    }
+
+    console.log('Returning payment preferences for vendor:', vendorId);
+    res.json({
+      success: true,
+      data: preferences
+    });
+  } catch (error) {
+    console.error('Get my payment preferences error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch payment preferences',
+      message: error.message
+    });
+  }
+});
+
+// @route   PUT /api/marketplace/vendors/me/payment-preferences
+// @desc    Update my payment preferences (vendor only)
+// @access  Private - Vendor only
+router.put('/vendors/me/payment-preferences', authenticateTokenStrict, async (req, res) => {
+  try {
+    const vendorId = req.user.userId;
+    const updateData = req.body;
+
+    // Validate that at least one payment method is enabled
+    const hasEnabledMethod = 
+      updateData.mobileMoney?.enabled || 
+      updateData.bankAccount?.enabled || 
+      updateData.paypal?.enabled || 
+      updateData.cryptoWallet?.enabled;
+
+    if (!hasEnabledMethod) {
+      return res.status(400).json({
+        success: false,
+        error: 'At least one payment method must be enabled'
+      });
+    }
+
+    // Validate default payment method is enabled
+    const defaultMethod = updateData.defaultPaymentMethod || 'mobileMoney';
+    const isDefaultEnabled = updateData[defaultMethod]?.enabled;
+    
+    if (!isDefaultEnabled) {
+      return res.status(400).json({
+        success: false,
+        error: 'Default payment method must be enabled'
+      });
+    }
+
+    // Additional validation for each payment method
+    if (updateData.mobileMoney?.enabled) {
+      if (!updateData.mobileMoney.provider) {
+        return res.status(400).json({
+          success: false,
+          error: 'Mobile money provider is required'
+        });
+      }
+      if (!updateData.mobileMoney.phoneNumber) {
+        return res.status(400).json({
+          success: false,
+          error: 'Mobile money phone number is required'
+        });
+      }
+      if (!updateData.mobileMoney.country) {
+        return res.status(400).json({
+          success: false,
+          error: 'Mobile money country is required'
+        });
+      }
+    }
+
+    if (updateData.bankAccount?.enabled) {
+      if (!updateData.bankAccount.accountHolderName) {
+        return res.status(400).json({
+          success: false,
+          error: 'Bank account holder name is required'
+        });
+      }
+      if (!updateData.bankAccount.accountNumber) {
+        return res.status(400).json({
+          success: false,
+          error: 'Bank account number is required'
+        });
+      }
+      if (!updateData.bankAccount.bankName) {
+        return res.status(400).json({
+          success: false,
+          error: 'Bank name is required'
+        });
+      }
+      if (!updateData.bankAccount.country) {
+        return res.status(400).json({
+          success: false,
+          error: 'Bank country is required'
+        });
+      }
+    }
+
+    if (updateData.paypal?.enabled) {
+      if (!updateData.paypal.email) {
+        return res.status(400).json({
+          success: false,
+          error: 'PayPal email is required'
+        });
+      }
+    }
+
+    if (updateData.cryptoWallet?.enabled) {
+      if (!updateData.cryptoWallet.walletAddress) {
+        return res.status(400).json({
+          success: false,
+          error: 'Crypto wallet address is required'
+        });
+      }
+      if (!updateData.cryptoWallet.network) {
+        return res.status(400).json({
+          success: false,
+          error: 'Crypto network is required'
+        });
+      }
+    }
+
+    // Validate withdrawal preferences
+    if (updateData.withdrawalPreferences) {
+      const { minimumAmount, frequency } = updateData.withdrawalPreferences;
+      if (minimumAmount !== undefined && (typeof minimumAmount !== 'number' || minimumAmount < 1)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Minimum withdrawal amount must be a number greater than 0'
+        });
+      }
+      if (frequency && !['daily', 'weekly', 'monthly', 'manual'].includes(frequency)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid withdrawal frequency'
+        });
+      }
+    }
+
+    // Create or update preferences
+    const preferences = await VendorPaymentPreferences.findOneAndUpdate(
+      { vendorId },
+      { 
+        vendorId,
+        ...updateData
+      },
+      { 
+        new: true, 
+        upsert: true,
+        runValidators: true
+      }
+    );
+
+    if (!preferences) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to update payment preferences'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: preferences,
+      message: 'Payment preferences updated successfully'
+    });
+  } catch (error) {
+    console.error('Update payment preferences error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update payment preferences'
+    });
+  }
+});
+
+// @route   GET /api/marketplace/vendors/me/store
+// @desc    Get my vendor store information
+// @access  Private - Vendor only
+router.get('/vendors/me/store', authenticateTokenStrict, async (req, res) => {
+  try {
+    const vendorId = req.user.userId;
+    
+    const store = await VendorStore.findOne({ vendorId });
+    
+    if (!store) {
+      return res.json({
+        success: true,
+        data: null
+      });
+    }
+
+    res.json({
+      success: true,
+      data: store
+    });
+  } catch (error) {
+    console.error('Get my store error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch store information'
+    });
+  }
+});
+
+// @route   POST /api/marketplace/vendors/me/store
+// @desc    Create vendor store registration
+// @access  Private - Authenticated users only
+router.post('/vendors/me/store', authenticateTokenStrict, async (req, res) => {
+  try {
+    const vendorId = req.user.userId;
+    const storeData = req.body;
+    
+    // Check if store already exists
+    const existingStore = await VendorStore.findOne({ vendorId });
+    if (existingStore) {
+      return res.status(400).json({
+        success: false,
+        error: 'Vendor store already exists'
+      });
+    }
+    
+    // Validate required fields
+    if (!storeData.storeName) {
+      return res.status(400).json({
+        success: false,
+        error: 'Store name is required'
+      });
+    }
+    
+    // Create store
+    const newStore = new VendorStore({
+      vendorId,
+      ...storeData
+    });
+    
+    await newStore.save();
+    
+    // Update user role to vendor
+    const user = await User.findById(vendorId);
+    if (user && user.role !== 'vendor') {
+      user.role = 'vendor';
+      await user.save();
+    }
+    
+    res.status(201).json({
+      success: true,
+      data: newStore,
+      message: 'Vendor store registered successfully'
+    });
+  } catch (error) {
+    console.error('Create store error:', error);
+    
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({
+        success: false,
+        error: 'Validation failed',
+        details: Object.values(error.errors).map(err => err.message)
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: 'Failed to register vendor store'
+    });
+  }
+});
+
+// @route   PUT /api/marketplace/vendors/me/store
+// @desc    Update my vendor store information
+// @access  Private - Vendor only
+router.put('/vendors/me/store', authenticateTokenStrict, async (req, res) => {
+  try {
+    const vendorId = req.user.userId;
+    const updateData = req.body;
+    
+    // Find and update store
+    const store = await VendorStore.findOneAndUpdate(
+      { vendorId },
+      { $set: updateData },
+      { new: true, runValidators: true }
+    );
+    
+    if (!store) {
+      return res.status(404).json({
+        success: false,
+        error: 'Vendor store not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      data: store,
+      message: 'Vendor store updated successfully'
+    });
+  } catch (error) {
+    console.error('Update store error:', error);
+    
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({
+        success: false,
+        error: 'Validation failed',
+        details: Object.values(error.errors).map(err => err.message)
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update vendor store'
+    });
+  }
+});
+
+// @route   DELETE /api/marketplace/vendors/me/store
+// @desc    Delete my vendor store
+// @access  Private - Vendor only
+router.delete('/vendors/me/store', authenticateTokenStrict, async (req, res) => {
+  try {
+    const vendorId = req.user.userId;
+
+    const store = await VendorStore.findOne({ vendorId });
+
+    if (!store) {
+      return res.status(404).json({
+        success: false,
+        error: 'Vendor store not found'
+      });
+    }
+
+    await VendorStore.findOneAndDelete({ vendorId });
+
+    // Update user role back to 'user'
+    const user = await User.findById(vendorId);
+    if (user && user.role === 'vendor') {
+      user.role = 'user';
+      await user.save();
+    }
+
+    res.json({
+      success: true,
+      message: 'Vendor store deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete store error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete vendor store'
+    });
+  }
+});
+
+// @route   GET /api/marketplace/vendors/:vendorId/store
+// @desc    Get vendor store information (public endpoint)
+// @access  Public
+router.get('/vendors/:vendorId/store', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    
+    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid vendor ID'
+      });
+    }
+    
+    const store = await VendorStore.findOne({ vendorId, isActive: true });
+    
+    if (!store) {
+      return res.status(404).json({
+        success: false,
+        error: 'Vendor store not found'
+      });
+    }
+    
+    // Get vendor information
+    const vendor = await User.findById(vendorId, 'username displayName avatar isVerified walletAddress bio followerCount followingCount createdAt');
+
+    if (!vendor) {
+      return res.status(404).json({
+        success: false,
+        error: 'Vendor not found'
+      });
+    }
+
+    const storeData = {
+      id: store._id,
+      storeName: store.storeName,
+      description: store.description,
+      logo: store.logo,
+      coverImage: store.coverImage,
+      location: store.location,
+      website: store.website,
+      socialLinks: store.socialLinks,
+      storePolicy: store.storePolicy,
+      returnPolicy: store.returnPolicy,
+      shippingPolicy: store.shippingPolicy,
+      isActive: store.isActive,
+      createdAt: store.createdAt,
+      updatedAt: store.updatedAt,
+      vendor: {
+        id: vendor._id,
+        username: vendor.username,
+        displayName: vendor.displayName,
+        avatar: vendor.avatar,
+        isVerified: vendor.isVerified,
+        bio: vendor.bio,
+        followerCount: vendor.followerCount,
+        followingCount: vendor.followingCount,
+        createdAt: vendor.createdAt
+      }
+    };
+
+    res.json({
+      success: true,
+      data: storeData
+    });
+  } catch (error) {
+    console.error('Get vendor store error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch store information'
+    });
+  }
+});
+
+// @route   GET /api/marketplace/vendors/me/store
+// @desc    Get my vendor store information (private endpoint for store owner only)
+// @access  Private - Vendor only
+router.get('/vendors/me/store', authenticateTokenStrict, async (req, res) => {
+  try {
+    const vendorId = req.user.userId;
+    
+    // Check if the authenticated user is a vendor
+    const user = await User.findById(vendorId);
+    if (!user || user.role !== 'vendor') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied. Vendor access required.'
+      });
+    }
+    
+    const store = await VendorStore.findOne({ vendorId });
+    
+    if (!store) {
+      return res.json({
+        success: true,
+        data: null
+      });
+    }
+
+    // Return full store information for the owner
+    const storeData = {
+      id: store._id,
+      storeName: store.storeName,
+      description: store.description,
+      logo: store.logo,
+      coverImage: store.coverImage,
+      location: store.location,
+      website: store.website,
+      contactEmail: store.contactEmail,
+      contactPhone: store.contactPhone,
+      socialLinks: store.socialLinks,
+      storePolicy: store.storePolicy,
+      returnPolicy: store.returnPolicy,
+      shippingPolicy: store.shippingPolicy,
+      isActive: store.isActive,
+      createdAt: store.createdAt,
+      updatedAt: store.updatedAt,
+      vendor: {
+        id: user._id,
+        username: user.username,
+        displayName: user.displayName,
+        avatar: user.avatar,
+        isVerified: user.isVerified,
+        bio: user.bio,
+        followerCount: user.followerCount,
+        followingCount: user.followingCount,
+        createdAt: user.createdAt,
+        walletAddress: user.walletAddress
+      }
+    };
+
+    res.json({
+      success: true,
+      data: storeData
+    });
+  } catch (error) {
+    console.error('Get my store error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch store information'
+    });
+  }
+});
+
+// @route   GET /api/marketplace/vendors/me/payout-history
+// @desc    Get my payout history
+// @access  Private - Vendor only
+router.get('/vendors/me/payout-history', authenticateTokenStrict, async (req, res) => {
+  try {
+    const vendorId = req.user.userId;
+    const { limit = 50, status } = req.query;
+    
+    console.log('=== GET /vendors/me/payout-history ===');
+    console.log('Vendor ID from token:', vendorId);
+    console.log('Query parameters:', { limit, status });
+    console.log('Full user object:', req.user);
+    
+    if (!vendorId) {
+      console.log('ERROR: No vendorId in request');
+      return res.status(400).json({
+        success: false,
+        error: 'Vendor ID is required'
+      });
+    }
+    
+    // Validate limit parameter
+    const parsedLimit = parseInt(limit);
+    if (isNaN(parsedLimit) || parsedLimit <= 0 || parsedLimit > 100) {
+      console.log('Invalid limit parameter:', limit);
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid limit parameter. Must be between 1 and 100.'
+      });
+    }
+    
+    console.log('Fetching payout history for vendor:', vendorId, { limit: parsedLimit, status });
+    
+    const history = await vendorPayoutService.getVendorPayoutHistory(vendorId, {
+      limit: parsedLimit,
+      status
+    });
+    
+    console.log('Payout history fetched successfully for vendor:', vendorId, { historyLength: history.length });
+    
+    res.json({
+      success: true,
+      data: history
+    });
+  } catch (error) {
+    console.error('Get payout history error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch payout history',
+      message: error.message
+    });
+  }
+});
 
 module.exports = router;

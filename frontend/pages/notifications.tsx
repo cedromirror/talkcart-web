@@ -89,20 +89,6 @@ const NotificationsPage: React.FC = () => {
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
 
-  // Early return if notifications is not properly initialized
-  if (!Array.isArray(rawNotifications)) {
-    return (
-      <Layout>
-        <Container maxWidth="md" sx={{ py: 8, textAlign: 'center' }}>
-          <CircularProgress size={40} />
-          <Typography variant="h6" sx={{ mt: 2 }}>
-            Initializing...
-          </Typography>
-        </Container>
-      </Layout>
-    );
-  }
-
   // Handle tab change
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setActiveTab(newValue);
@@ -110,7 +96,13 @@ const NotificationsPage: React.FC = () => {
 
   // Format relative time
   const formatTimeAgo = (dateString: string) => {
+    // Handle invalid date strings
+    if (!dateString) return '';
+    
     const date = new Date(dateString);
+    // Check if date is valid
+    if (isNaN(date.getTime())) return '';
+    
     const now = new Date();
     const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
     
@@ -134,10 +126,25 @@ const NotificationsPage: React.FC = () => {
         return <MessageSquare size={20} color={theme.palette.info.main} />;
       case 'follow':
         return <UserPlus size={20} color={theme.palette.success.main} />;
+      case 'unfollow':
+        return <UserPlus size={20} color={theme.palette.warning.main} />;
       case 'share':
         return <Share size={20} color={theme.palette.warning.main} />;
       case 'achievement':
+      case 'product_approved':
+      case 'product_rejected':
         return <Award size={20} color={theme.palette.secondary.main} />;
+      case 'message':
+        return <MessageSquare size={20} color={theme.palette.info.main} />;
+      case 'order':
+      case 'payment':
+        return <Bell size={20} color={theme.palette.primary.main} />;
+      case 'mention':
+      case 'tag':
+        return <Bell size={20} color={theme.palette.primary.main} />;
+      case 'system':
+      case 'admin':
+        return <Bell size={20} color={theme.palette.primary.main} />;
       default:
         return <Bell size={20} color={theme.palette.primary.main} />;
     }
@@ -152,10 +159,25 @@ const NotificationsPage: React.FC = () => {
         return theme.palette.info.main;
       case 'follow':
         return theme.palette.success.main;
+      case 'unfollow':
+        return theme.palette.warning.main;
       case 'share':
         return theme.palette.warning.main;
       case 'achievement':
+      case 'product_approved':
+      case 'product_rejected':
         return theme.palette.secondary.main;
+      case 'message':
+        return theme.palette.info.main;
+      case 'order':
+      case 'payment':
+        return theme.palette.primary.main;
+      case 'mention':
+      case 'tag':
+        return theme.palette.primary.main;
+      case 'system':
+      case 'admin':
+        return theme.palette.primary.main;
       default:
         return theme.palette.primary.main;
     }
@@ -167,7 +189,26 @@ const NotificationsPage: React.FC = () => {
     const safeNotifications = Array.isArray(notifications) ? notifications : [];
     
     if (type === 'all') return safeNotifications;
-    return safeNotifications.filter(notification => notification.type === type);
+    
+    // Map tab types to actual notification types
+    switch (type) {
+      case 'like':
+        return safeNotifications.filter(n => n.type === 'like');
+      case 'comment':
+        return safeNotifications.filter(n => n.type === 'comment');
+      case 'follow':
+        return safeNotifications.filter(n => n.type === 'follow' || n.type === 'unfollow');
+      case 'share':
+        return safeNotifications.filter(n => n.type === 'share');
+      case 'achievement':
+        return safeNotifications.filter(n => 
+          n.type === 'achievement' || 
+          n.type === 'product_approved' || 
+          n.type === 'product_rejected'
+        );
+      default:
+        return safeNotifications;
+    }
   };
 
   // Get unread notifications count by type
@@ -176,7 +217,25 @@ const NotificationsPage: React.FC = () => {
     const safeNotifications = Array.isArray(notifications) ? notifications : [];
     
     if (type === 'all') return safeNotifications.filter(n => !n.isRead).length;
-    return safeNotifications.filter(n => n.type === type && !n.isRead).length;
+    
+    // Map tab types to actual notification types
+    switch (type) {
+      case 'like':
+        return safeNotifications.filter(n => n.type === 'like' && !n.isRead).length;
+      case 'comment':
+        return safeNotifications.filter(n => n.type === 'comment' && !n.isRead).length;
+      case 'follow':
+        return safeNotifications.filter(n => (n.type === 'follow' || n.type === 'unfollow') && !n.isRead).length;
+      case 'share':
+        return safeNotifications.filter(n => n.type === 'share' && !n.isRead).length;
+      case 'achievement':
+        return safeNotifications.filter(n => 
+          (n.type === 'achievement' || n.type === 'product_approved' || n.type === 'product_rejected') && 
+          !n.isRead
+        ).length;
+      default:
+        return safeNotifications.filter(n => !n.isRead).length;
+    }
   };
 
   // Handle mark as read with error handling
@@ -274,6 +333,20 @@ const NotificationsPage: React.FC = () => {
       </Layout>
     );
   }
+
+  // Determine which notifications to show based on active tab
+  const currentNotifications = filterNotifications(
+    activeTab === 0 ? 'all' : 
+    activeTab === 1 ? 'like' : 
+    activeTab === 2 ? 'comment' : 
+    activeTab === 3 ? 'follow' : 
+    activeTab === 4 ? 'share' : 
+    'achievement'
+  );
+
+  // Check if we have notifications but none match the current filter
+  const hasNotifications = notifications.length > 0;
+  const hasFilteredNotifications = currentNotifications.length > 0;
 
   return (
     <Layout>
@@ -466,102 +539,122 @@ const NotificationsPage: React.FC = () => {
               <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
                 <CircularProgress size={40} />
               </Box>
-            ) : filterNotifications(
-              activeTab === 0 ? 'all' : 
-              activeTab === 1 ? 'like' : 
-              activeTab === 2 ? 'comment' : 
-              activeTab === 3 ? 'follow' : 
-              activeTab === 4 ? 'share' : 
-              'achievement'
-            ).length === 0 ? (
-              <Box sx={{ textAlign: 'center', py: 8 }}>
-                <Bell size={48} color={alpha(theme.palette.text.secondary, 0.5)} style={{ marginBottom: 16 }} />
-                <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }}>
-                  No notifications yet
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  When you receive notifications, they'll appear here
-                </Typography>
-              </Box>
             ) : (
-              <List sx={{ p: 0 }}>
-                {filterNotifications(
-                  activeTab === 0 ? 'all' : 
-                  activeTab === 1 ? 'like' : 
-                  activeTab === 2 ? 'comment' : 
-                  activeTab === 3 ? 'follow' : 
-                  activeTab === 4 ? 'share' : 
-                  'achievement'
-                ).map((notification) => (
-                  <React.Fragment key={notification.id}>
-                    <ListItem 
+              <>
+                {!hasFilteredNotifications && hasNotifications ? (
+                  // Case: User has notifications but none match the current filter
+                  <Box sx={{ textAlign: 'center', py: 8 }}>
+                    <Filter size={48} color={alpha(theme.palette.text.secondary, 0.5)} style={{ marginBottom: 16 }} />
+                    <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }}>
+                      No {activeTab === 1 ? 'like' : activeTab === 2 ? 'comment' : activeTab === 3 ? 'follow' : activeTab === 4 ? 'share' : 'achievement'} notifications
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      You have {notifications.length} notification{notifications.length !== 1 ? 's' : ''} of other types.
+                    </Typography>
+                    <Button 
+                      variant="contained" 
+                      onClick={() => setActiveTab(0)}
                       sx={{ 
-                        py: 2, 
-                        px: 3,
-                        cursor: 'pointer',
-                        bgcolor: notification.isRead ? 'transparent' : alpha(theme.palette.primary.main, 0.05),
-                        '&:hover': {
-                          bgcolor: alpha(theme.palette.action.hover, 0.3)
-                        }
-                      }}
-                      onClick={() => {
-                        handleMarkAsRead(notification.id);
-                        if (notification.data?.url) {
-                          window.open(notification.data.url, '_blank');
-                        }
+                        borderRadius: 2, 
+                        textTransform: 'none',
+                        fontWeight: 600
                       }}
                     >
-                      <ListItemAvatar>
-                        <Avatar 
+                      View All Notifications
+                    </Button>
+                  </Box>
+                ) : !hasFilteredNotifications ? (
+                  // Case: User has no notifications at all
+                  <Box sx={{ textAlign: 'center', py: 8 }}>
+                    <Bell size={48} color={alpha(theme.palette.text.secondary, 0.5)} style={{ marginBottom: 16 }} />
+                    <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }}>
+                      No notifications yet
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      When you receive notifications, they'll appear here
+                    </Typography>
+                  </Box>
+                ) : (
+                  // Case: User has notifications that match the current filter
+                  <List sx={{ p: 0 }}>
+                    {currentNotifications.map((notification) => (
+                      <React.Fragment key={notification.id || Math.random()}>
+                        <ListItem 
                           sx={{ 
-                            bgcolor: alpha(getNotificationColor(notification.type), 0.1),
-                            color: getNotificationColor(notification.type)
+                            py: 2, 
+                            px: 3,
+                            cursor: 'pointer',
+                            bgcolor: notification.isRead ? 'transparent' : alpha(theme.palette.primary.main, 0.05),
+                            '&:hover': {
+                              bgcolor: alpha(theme.palette.action.hover, 0.3)
+                            }
+                          }}
+                          onClick={() => {
+                            handleMarkAsRead(notification.id);
+                            if (notification.data?.url) {
+                              window.open(notification.data.url, '_blank');
+                            }
                           }}
                         >
-                          {getNotificationIcon(notification.type)}
-                        </Avatar>
-                      </ListItemAvatar>
-                      
-                      <ListItemText
-                        primary={
-                          <Typography variant="body1" fontWeight={notification.isRead ? 400 : 600}>
-                            {notification.content}
-                          </Typography>
-                        }
-                        secondary={
-                          <Typography variant="body2" color="text.secondary">
-                            {formatTimeAgo(notification.createdAt)}
-                          </Typography>
-                        }
-                      />
-                      
-                      <ListItemSecondaryAction>
-                        {!notification.isRead && (
-                          <IconButton 
-                            edge="end" 
-                            size="small"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleMarkAsRead(notification.id);
-                            }}
-                            sx={{ 
-                              bgcolor: 'primary.main',
-                              color: 'white',
-                              '&:hover': {
-                                bgcolor: 'primary.dark'
+                          <ListItemAvatar>
+                            <Avatar 
+                              sx={{ 
+                                bgcolor: alpha(getNotificationColor(notification.type || ''), 0.1),
+                                color: getNotificationColor(notification.type || '')
+                              }}
+                            >
+                              {getNotificationIcon(notification.type || '')}
+                            </Avatar>
+                          </ListItemAvatar>
+                          
+                          <ListItemText
+                            primary={
+                              <Typography variant="body1" fontWeight={notification.isRead ? 400 : 600}>
+                                {notification.title || 'Notification'}
+                              </Typography>
+                            }
+                            secondary={
+                              <Typography variant="body2" color="text.secondary">
+                                {notification.content || ''}
+                              </Typography>
+                            }
+                            sx={{
+                              my: 0,
+                              '& .MuiListItemText-secondary': {
+                                mt: 0.5
                               }
                             }}
-                          >
-                            <Check size={16} />
-                          </IconButton>
-                        )}
-                      </ListItemSecondaryAction>
-                    </ListItem>
-                    
-                    <Divider variant="inset" component="li" sx={{ mx: 3 }} />
-                  </React.Fragment>
-                ))}
-              </List>
+                          />
+                          
+                          <ListItemSecondaryAction>
+                            {!notification.isRead && (
+                              <IconButton 
+                                edge="end" 
+                                size="small"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleMarkAsRead(notification.id);
+                                }}
+                                sx={{ 
+                                  bgcolor: 'primary.main',
+                                  color: 'white',
+                                  '&:hover': {
+                                    bgcolor: 'primary.dark'
+                                  }
+                                }}
+                              >
+                                <Check size={16} />
+                              </IconButton>
+                            )}
+                          </ListItemSecondaryAction>
+                        </ListItem>
+                        
+                        <Divider variant="inset" component="li" sx={{ mx: 3 }} />
+                      </React.Fragment>
+                    ))}
+                  </List>
+                )}
+              </>
             )}
           </CardContent>
         </Card>

@@ -52,6 +52,7 @@ import usePosts from '@/hooks/usePosts';
 import WhoToFollow from '@/components/social/new/WhoToFollow';
 import { CreatePostDialog } from '@/components/social/new/CreatePostDialog';
 import { PostCardEnhanced as PostCard } from '@/components/social/new/PostCardEnhanced';
+import { VideoFeedProvider } from '@/components/video/VideoFeedManager';
 import TrendingProducts from '@/components/social/new/TrendingProducts';
 import TrendingPostsSidebar from '@/components/social/new/TrendingPostsSidebar';
 import { useRouter } from 'next/router';
@@ -382,15 +383,30 @@ const SocialPage: React.FC = () => {
                   </Button>
                 </Box>
               ) : (
-                posts.map((post) => (
-                  <PostCard 
-                    key={post.id} 
-                    post={post} 
-                    onBookmark={handleBookmarkPost}
-                    onLike={likePost}
-                    onShare={sharePost}
-                  />
-                ))
+                <VideoFeedProvider
+                  initialSettings={{
+                    enabled: true,
+                    threshold: 0.6,
+                    pauseOnScroll: true,
+                    muteByDefault: true,
+                    preloadStrategy: 'metadata',
+                    maxConcurrentVideos: 2,
+                    scrollPauseDelay: 150,
+                    viewTrackingThreshold: 3,
+                    autoplayOnlyOnWifi: false,
+                    respectReducedMotion: true,
+                  }}
+                >
+                  {posts.map((post) => (
+                    <PostCard 
+                      key={post.id} 
+                      post={post} 
+                      onBookmark={handleBookmarkPost}
+                      onLike={likePost}
+                      onShare={sharePost}
+                    />
+                  ))}
+                </VideoFeedProvider>
               )}
             </Box>
           </Box>

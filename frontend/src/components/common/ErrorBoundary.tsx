@@ -1,6 +1,6 @@
 import React, { Component, ReactNode, ErrorInfo } from 'react';
 import { Box, Typography, Button, Card, CardContent, Stack } from '@mui/material';
-import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { AlertTriangle, RefreshCw, SearchX } from 'lucide-react';
 import { isAuthError } from '@/lib/authErrors';
 
 interface Props {
@@ -36,6 +36,58 @@ export class ErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       // Check if this is an authentication-related error
       const authLike = isAuthError(this.state.error);
+      
+      // Check if this is an HttpError with specific status codes
+      const isHttpError = this.state.error?.name === 'HttpError';
+      const httpStatus = (this.state.error as any)?.status;
+      const isNotFound = isHttpError && (httpStatus === 404 || httpStatus === 400);
+      
+      // For 404/400 errors, show "No result found" message
+      if (isNotFound) {
+        return (
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minHeight: '400px',
+              p: 4,
+            }}
+          >
+            <Card sx={{ maxWidth: 500, width: '100%' }}>
+              <CardContent>
+                <Stack spacing={3} alignItems="center" textAlign="center">
+                  <SearchX size={48} color="#6b7280" />
+
+                  <Box>
+                    <Typography variant="h6" gutterBottom>
+                      No result found
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      We couldn't find what you're looking for. Try adjusting your search or browse other content.
+                    </Typography>
+                  </Box>
+
+                  <Stack direction="row" spacing={2}>
+                    <Button
+                      variant="contained"
+                      onClick={this.handleRetry}
+                    >
+                      Try Again
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      onClick={() => window.location.reload()}
+                    >
+                      Refresh Page
+                    </Button>
+                  </Stack>
+                </Stack>
+              </CardContent>
+            </Card>
+          </Box>
+        );
+      }
 
       return (
         <Box
@@ -77,6 +129,13 @@ export class ErrorBoundary extends Component<Props, State> {
                     <Typography variant="caption" component="pre" sx={{ fontSize: '0.75rem' }}>
                       {this.state.error.message}
                     </Typography>
+                    {/* Also show error name and status if it's an HttpError */}
+                    {this.state.error.name === 'HttpError' && (
+                      <Typography variant="caption" component="pre" sx={{ fontSize: '0.75rem', mt: 1 }}>
+                        Error Type: {this.state.error.name}
+                        {(this.state.error as any).status && `, Status: ${(this.state.error as any).status}`}
+                      </Typography>
+                    )}
                   </Box>
                 )}
 

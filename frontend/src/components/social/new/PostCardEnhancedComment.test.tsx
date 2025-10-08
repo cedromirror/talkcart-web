@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { PostCardEnhanced } from './PostCardEnhanced';
+import { VideoFeedProvider } from '@/components/video/VideoFeedManager'; // Import VideoFeedProvider
 import { useAuth } from '@/contexts/AuthContext';
 import { useWebSocket } from '@/contexts/WebSocketContext';
 import { Post } from '@/types/social'; // Import the Post type
@@ -51,6 +52,59 @@ jest.mock('react-hot-toast', () => ({
   }
 }));
 
+// Mock VideoFeedProvider to avoid complex setup in tests
+jest.mock('@/components/video/VideoFeedManager', () => {
+  const actual = jest.requireActual('@/components/video/VideoFeedManager');
+  return {
+    ...actual,
+    useVideoFeed: () => ({
+      registerVideo: jest.fn(),
+      unregisterVideo: jest.fn(),
+      playVideo: jest.fn(),
+      pauseVideo: jest.fn(),
+      pauseAllVideos: jest.fn(),
+      currentPlayingVideo: null,
+      isScrolling: false,
+      settings: {
+        enabled: true,
+        threshold: 0.6,
+        pauseOnScroll: true,
+        muteByDefault: false,
+        preloadStrategy: 'metadata',
+        maxConcurrentVideos: 2,
+        scrollPauseDelay: 150,
+        viewTrackingThreshold: 3,
+        autoplayOnlyOnWifi: false,
+        respectReducedMotion: true,
+      },
+      updateSettings: jest.fn(),
+      getVideoStats: jest.fn(),
+    }),
+  };
+});
+
+// Wrapper component that provides the VideoFeedProvider for tests
+const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  return (
+    <VideoFeedProvider
+      initialSettings={{
+        enabled: true,
+        threshold: 0.6,
+        pauseOnScroll: true,
+        muteByDefault: false,
+        preloadStrategy: 'metadata',
+        maxConcurrentVideos: 2,
+        scrollPauseDelay: 150,
+        viewTrackingThreshold: 3,
+        autoplayOnlyOnWifi: false,
+        respectReducedMotion: true,
+      }}
+    >
+      {children}
+    </VideoFeedProvider>
+  );
+};
+
 describe('PostCardEnhanced Comment Handler', () => {
   const mockPost: Post = { // Use the Post type
     id: '1',
@@ -77,7 +131,11 @@ describe('PostCardEnhanced Comment Handler', () => {
 
   it('calls onComment handler when comment button is clicked', () => {
     const mockOnComment = jest.fn();
-    render(<PostCardEnhanced post={mockPost} onComment={mockOnComment} />);
+    render(
+      <TestWrapper>
+        <PostCardEnhanced post={mockPost} onComment={mockOnComment} />
+      </TestWrapper>
+    );
     
     // Find the comment button by its icon
     const commentButton = screen.getByRole('button', { name: 'Comment' });

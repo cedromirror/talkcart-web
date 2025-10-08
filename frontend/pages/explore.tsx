@@ -7,6 +7,7 @@ import WhoToFollow from '@/components/social/new/WhoToFollow';
 import { useRouter } from 'next/router';
 import useDebounce from '@/hooks/useDebounce';
 import { PostCardEnhanced as PostCard } from '@/components/social/new/PostCardEnhanced';
+import { VideoFeedProvider } from '@/components/video/VideoFeedManager';
 import api from '@/lib/api';
 import { Post } from '@/types/social';
 
@@ -313,11 +314,27 @@ const RecentPostsSection: React.FC<{ query?: string }> = ({ query }) => {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      {posts.map((post) => (
-        <Box key={post.id}>
-          <PostCard post={post} />
-        </Box>
-      ))}
+      {/* Wrap PostCard components with VideoFeedProvider */}
+      <VideoFeedProvider
+        initialSettings={{
+          enabled: true,
+          threshold: 0.6,
+          pauseOnScroll: true,
+          muteByDefault: true,
+          preloadStrategy: 'metadata',
+          maxConcurrentVideos: 2,
+          scrollPauseDelay: 150,
+          viewTrackingThreshold: 3,
+          autoplayOnlyOnWifi: false,
+          respectReducedMotion: true,
+        }}
+      >
+        {posts.map((post) => (
+          <Box key={post.id}>
+            <PostCard post={post} />
+          </Box>
+        ))}
+      </VideoFeedProvider>
     </Box>
   );
 };
@@ -415,11 +432,27 @@ const PopularPostsSection: React.FC<{ query?: string }> = ({ query }) => {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      {posts.map((post) => (
-        <Box key={post.id}>
-          <PostCard post={post} />
-        </Box>
-      ))}
+      {/* Wrap PostCard components with VideoFeedProvider */}
+      <VideoFeedProvider
+        initialSettings={{
+          enabled: true,
+          threshold: 0.6,
+          pauseOnScroll: true,
+          muteByDefault: true,
+          preloadStrategy: 'metadata',
+          maxConcurrentVideos: 2,
+          scrollPauseDelay: 150,
+          viewTrackingThreshold: 3,
+          autoplayOnlyOnWifi: false,
+          respectReducedMotion: true,
+        }}
+      >
+        {posts.map((post) => (
+          <Box key={post.id}>
+            <PostCard post={post} />
+          </Box>
+        ))}
+      </VideoFeedProvider>
     </Box>
   );
 };
@@ -532,11 +565,27 @@ const TrendingPostsSection: React.FC = () => {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      {trendingPosts.map((post) => (
-        <Box key={post.id}>
-          <PostCard post={post} />
-        </Box>
-      ))}
+      {/* Wrap PostCard components with VideoFeedProvider */}
+      <VideoFeedProvider
+        initialSettings={{
+          enabled: true,
+          threshold: 0.6,
+          pauseOnScroll: true,
+          muteByDefault: true,
+          preloadStrategy: 'metadata',
+          maxConcurrentVideos: 2,
+          scrollPauseDelay: 150,
+          viewTrackingThreshold: 3,
+          autoplayOnlyOnWifi: false,
+          respectReducedMotion: true,
+        }}
+      >
+        {trendingPosts.map((post) => (
+          <Box key={post.id}>
+            <PostCard post={post} />
+          </Box>
+        ))}
+      </VideoFeedProvider>
     </Box>
   );
 };

@@ -9,7 +9,7 @@ interface Product {
   description: string;
   price: number;
   currency: string;
-  images: string[];
+  images: Array<{ secure_url?: string; url: string; public_id: string; } | string>;
   category: string;
   vendor: {
     id: string;
@@ -22,14 +22,36 @@ interface Product {
   isNFT: boolean;
   createdAt: string;
   tags: string[];
-  stock?: number;
-  rating?: number;
-  reviewCount?: number;
-  sales?: number;
-  views?: number;
+  stock: number;
+  rating: number;
+  reviewCount: number;
+  sales: number;
+  views: number;
   featured?: boolean;
   contractAddress?: string;
   tokenId?: string;
+  // Additional fields needed by MarketplaceGrid
+  availability: string;
+  discount: number;
+  freeShipping: boolean;
+  fastDelivery: boolean;
+  prime: boolean;
+}
+
+interface Vendor {
+  id: string;
+  username: string;
+  displayName: string;
+  avatar: string;
+  isVerified: boolean;
+  walletAddress?: string;
+  productCount: number;
+  followerCount?: number;
+  followingCount?: number;
+  bio?: string;
+  location?: string;
+  website?: string;
+  createdAt: string;
 }
 
 interface Pagination {
@@ -48,10 +70,12 @@ interface MarketplaceFilters {
   isNFT?: boolean;
   featured?: boolean;
   sortBy?: 'priceAsc' | 'priceDesc' | 'newest' | 'sales' | 'views' | 'featured';
+  vendorId?: string;
 }
 
 const useMarketplace = () => {
   const [products, setProducts] = useState<Product[]>([]);
+  const [vendors, setVendors] = useState<Vendor[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [pagination, setPagination] = useState<Pagination>({
     page: 1,
@@ -87,6 +111,7 @@ const useMarketplace = () => {
         isNFT: filters.isNFT,
         featured: filters.featured,
         sortBy: filters.sortBy || 'newest',
+        vendorId: filters.vendorId,
       };
 
       // Remove undefined values
@@ -96,9 +121,12 @@ const useMarketplace = () => {
         }
       });
 
+      console.log('Fetching products with params:', params);
       const response: any = await api.marketplace.getProducts(params);
+      console.log('Products API response:', response);
 
       if (response.success) {
+        console.log('Products data from API:', response.data);
         const productsData = response.data.products.map((product: any) => ({
           id: product.id || product._id,
           name: product.name,
@@ -108,9 +136,9 @@ const useMarketplace = () => {
           images: product.images?.map((img: any) => img.secure_url || img.url || img) || [],
           category: product.category,
           vendor: {
-            id: product.vendor?.id || product.vendorId?._id || product.vendorId,
-            username: product.vendor?.username || product.vendorId?.username,
-            displayName: product.vendor?.displayName || product.vendorId?.displayName,
+            id: product.vendor?.id || product.vendorId?._id || product.vendorId || '',
+            username: product.vendor?.username || product.vendorId?.username || '',
+            displayName: product.vendor?.displayName || product.vendorId?.displayName || '',
             avatar: product.vendor?.avatar || product.vendorId?.avatar || '',
             isVerified: product.vendor?.isVerified || product.vendorId?.isVerified || false,
             walletAddress: product.vendor?.walletAddress || product.vendorId?.walletAddress,
@@ -118,16 +146,23 @@ const useMarketplace = () => {
           isNFT: product.isNFT || false,
           createdAt: product.createdAt,
           tags: product.tags || [],
-          stock: product.stock,
-          rating: product.rating || 0,
-          reviewCount: product.reviewCount || 0,
-          sales: product.sales || 0,
-          views: product.views || 0,
+          stock: product.stock !== undefined ? product.stock : 0,
+          rating: product.rating !== undefined ? product.rating : 0,
+          reviewCount: product.reviewCount !== undefined ? product.reviewCount : 0,
+          sales: product.sales !== undefined ? product.sales : 0,
+          views: product.views !== undefined ? product.views : 0,
           featured: product.featured || false,
           contractAddress: product.contractAddress,
           tokenId: product.tokenId,
+          // Additional fields needed by MarketplaceGrid
+          availability: product.stock !== undefined && product.stock > 0 ? 'In Stock' : 'Out of Stock',
+          discount: product.discount !== undefined ? product.discount : 0,
+          freeShipping: product.freeShipping || false,
+          fastDelivery: product.fastDelivery || false,
+          prime: product.prime || false,
         }));
 
+        console.log('Processed products data:', productsData);
         setProducts(productsData);
         setPagination({
           page: response.data.pagination.page,
@@ -158,7 +193,10 @@ const useMarketplace = () => {
         return;
       }
       
+      console.log('Fetching categories...');
       const response: any = await api.marketplace.getCategories();
+      console.log('Categories API response:', response);
+      
       if (response.success) {
         setCategories(response.data.categories || []);
       }
@@ -166,6 +204,56 @@ const useMarketplace = () => {
       console.error('Error fetching categories:', err);
       // On error, do not use hardcoded categories; leave empty so UI reflects real API state
       setCategories([]);
+    }
+  }, []);
+
+  // Fetch vendors
+  const fetchVendors = useCallback(async (params: { page?: number; limit?: number; search?: string } = {}) => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Add a check to ensure api and api.marketplace are defined
+      if (!api || !api.marketplace) {
+        throw new Error('Marketplace API is not available');
+      }
+
+      const response: any = await api.marketplace.getVendors(params);
+
+      if (response.success) {
+        const vendorsData = response.data.vendors.map((vendor: any) => ({
+          id: vendor.id || vendor._id,
+          username: vendor.username,
+          displayName: vendor.displayName,
+          avatar: vendor.avatar || '',
+          isVerified: vendor.isVerified || false,
+          walletAddress: vendor.walletAddress,
+          productCount: vendor.productCount || 0,
+          followerCount: vendor.followerCount,
+          followingCount: vendor.followingCount,
+          bio: vendor.bio,
+          location: vendor.location,
+          website: vendor.website,
+          createdAt: vendor.createdAt,
+        }));
+
+        setVendors(vendorsData);
+        setPagination({
+          page: response.data.pagination.page,
+          limit: response.data.pagination.limit,
+          pages: response.data.pagination.pages,
+          total: response.data.pagination.total,
+        });
+      } else {
+        throw new Error(response.error || 'Failed to fetch vendors');
+      }
+    } catch (err: any) {
+      console.error('Error fetching vendors:', err);
+      setError(err.message || 'Failed to fetch vendors');
+      setVendors([]);
+      setPagination({ page: 1, limit: 12, pages: 1, total: 0 });
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -329,6 +417,7 @@ const useMarketplace = () => {
 
   return {
     products,
+    vendors,
     categories,
     pagination,
     loading,
@@ -336,6 +425,7 @@ const useMarketplace = () => {
     fetchProducts,
     fetchProduct,
     fetchCategories,
+    fetchVendors,
     buyProduct,
     createProduct,
   };

@@ -1,4 +1,5 @@
 import CurrencyService from '@/services/currencyService';
+import { getUserCurrency } from '@/utils/userCurrencyDetector';
 
 // Create an instance of the currency service
 const currencyService = CurrencyService;
@@ -121,5 +122,6 @@ export default {
   convertCurrencyToUsd,
   formatCurrencyAmount,
   detectUserCurrency,
-  fetchLocationBasedCurrency
+  fetchLocationBasedCurrency,
+  getUserCurrency
 };

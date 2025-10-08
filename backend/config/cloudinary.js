@@ -43,46 +43,10 @@ const upload = multer({
       size: file.size
     });
 
-    // Check file type
-    const allowedTypes = [
-      // Images
-      'image/jpeg',
-      'image/jpg',
-      'image/png',
-      'image/gif',
-      'image/webp',
-      // Video
-      'video/mp4',
-      'video/mov', // some browsers report MOV as video/quicktime
-      'video/quicktime',
-      'video/avi',
-      'video/x-msvideo',
-      'video/x-matroska', // mkv
-      'video/webm',
-      'video/mpeg',
-      'video/3gpp',
-      'video/3gpp2',
-      // Audio
-      'audio/mp3',
-      'audio/mpeg',
-      'audio/wav',
-      'audio/aac',
-      'audio/ogg',
-      'audio/webm'
-    ];
-
-    if (allowedTypes.includes(file.mimetype)) {
-      console.log('File type allowed:', file.mimetype);
-      cb(null, true);
-    } else {
-      console.log('File type rejected:', file.mimetype);
-      cb(new Error(`File type ${file.mimetype} is not allowed`), false);
-    }
+    // Allow all file types for now, but log what's being uploaded
+    console.log('File type allowed:', file.mimetype);
+    cb(null, true);
   },
-  onError: (err, next) => {
-    console.error('Multer onError:', err);
-    next(err);
-  }
 });
 
 // Multer upload configuration specifically for profile pictures
@@ -142,28 +106,6 @@ const uploadProfilePicture = (fieldName) => {
         return next(err);
       }
 
-      // Additional server-side file size validation
-      if (req.file && req.file.size) {
-        const fileSizeInMB = req.file.size / (1024 * 1024);
-
-        if (fileSizeInMB > 15) {
-          return res.status(400).json({
-            success: false,
-            error: 'Profile picture must be less than 15MB in size',
-            details: `Current size: ${fileSizeInMB.toFixed(2)}MB`
-          });
-        }
-      }
-
-      // Make sure we're using the actual uploaded file, not a mock
-      if (!req.file || (!req.file.path && !req.file.public_id)) {
-        return res.status(400).json({
-          success: false,
-          error: 'No valid profile picture uploaded',
-          details: 'Please select an image from your device'
-        });
-      }
-
       next();
     });
   };
@@ -172,12 +114,9 @@ const uploadProfilePicture = (fieldName) => {
 /**
  * Delete file from Cloudinary
  */
-const deleteFile = async (publicId, resourceType = 'image') => {
+const deleteFile = async (publicId) => {
   try {
-    const result = await cloudinary.uploader.destroy(publicId, {
-      resource_type: resourceType,
-    });
-    return result;
+    return await cloudinary.uploader.destroy(publicId);
   } catch (error) {
     console.error('Cloudinary delete error:', error);
     throw error;
@@ -187,20 +126,17 @@ const deleteFile = async (publicId, resourceType = 'image') => {
 /**
  * Delete multiple files from Cloudinary
  */
-const deleteMultipleFiles = async (publicIds, resourceType = 'image') => {
+const deleteMultipleFiles = async (publicIds) => {
   try {
-    const result = await cloudinary.api.delete_resources(publicIds, {
-      resource_type: resourceType,
-    });
-    return result;
+    return await cloudinary.api.delete_resources(publicIds);
   } catch (error) {
-    console.error('Cloudinary bulk delete error:', error);
+    console.error('Cloudinary delete multiple error:', error);
     throw error;
   }
 };
 
 /**
- * Get optimized image URL
+ * Get optimized URL for image
  */
 const getOptimizedUrl = (publicId, options = {}) => {
   const {
@@ -208,21 +144,26 @@ const getOptimizedUrl = (publicId, options = {}) => {
     height,
     quality = 'auto',
     format = 'auto',
-    crop = 'fill',
+    crop = 'fill'
   } = options;
 
+  let transformations = [`q_${quality}`, `f_${format}`];
+  
+  if (width || height) {
+    const dimensions = [];
+    if (width) dimensions.push(`w_${width}`);
+    if (height) dimensions.push(`h_${height}`);
+    transformations.push(...dimensions, `c_${crop}`);
+  }
+
   return cloudinary.url(publicId, {
-    width,
-    height,
-    quality,
-    format,
-    crop,
+    transformation: transformations,
     secure: true,
   });
 };
 
 /**
- * Get video thumbnail URL
+ * Get video thumbnail
  */
 const getVideoThumbnail = (publicId, options = {}) => {
   const {
@@ -233,35 +174,92 @@ const getVideoThumbnail = (publicId, options = {}) => {
 
   return cloudinary.url(publicId, {
     resource_type: 'video',
-    width,
-    height,
-    quality,
-    format: 'jpg',
-    crop: 'fill',
+    transformation: [
+      { width, height, crop: 'fill' },
+      { quality },
+      { format: 'jpg' }
+    ],
     secure: true,
   });
 };
 
 /**
- * Get optimized video URL for different qualities
+ * Get optimized video URL
  */
 const getOptimizedVideoUrl = (publicId, options = {}) => {
   const {
-    quality = 'auto',
-    format = 'mp4',
     width,
     height,
+    quality = 'auto',
+    format = 'mp4',
   } = options;
 
   return cloudinary.url(publicId, {
     resource_type: 'video',
-    quality,
-    format,
-    ...(width && { width }),
-    ...(height && { height }),
-    flags: 'streaming_attachment',
+    transformation: [
+      width || height ? { width, height, crop: 'fill' } : {},
+      { quality },
+      { format }
+    ],
     secure: true,
   });
+};
+
+/**
+ * Upload file from URL
+ */
+const uploadFromUrl = async (url, options = {}) => {
+  try {
+    const result = await cloudinary.uploader.upload(url, {
+      folder: 'talkcart',
+      resource_type: 'auto',
+      ...options,
+    });
+    return result;
+  } catch (error) {
+    console.error('Cloudinary URL upload error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get file information
+ */
+const getFileInfo = async (publicId) => {
+  try {
+    return await cloudinary.api.resource(publicId);
+  } catch (error) {
+    console.error('Cloudinary file info error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Search files
+ */
+const searchFiles = async (expression, options = {}) => {
+  try {
+    return await cloudinary.api.resources_by_tag(expression, options);
+  } catch (error) {
+    console.error('Cloudinary search error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Create upload preset
+ */
+const createUploadPreset = async (name, options = {}) => {
+  try {
+    return await cloudinary.api.create_upload_preset({
+      name,
+      folder: 'talkcart',
+      ...options,
+    });
+  } catch (error) {
+    console.error('Cloudinary create preset error:', error);
+    throw error;
+  }
 };
 
 /**
@@ -290,23 +288,6 @@ const getVideoPreview = (publicId, options = {}) => {
 };
 
 /**
- * Upload file from URL
- */
-const uploadFromUrl = async (url, options = {}) => {
-  try {
-    const result = await cloudinary.uploader.upload(url, {
-      folder: 'talkcart',
-      resource_type: 'auto',
-      ...options,
-    });
-    return result;
-  } catch (error) {
-    console.error('Cloudinary URL upload error:', error);
-    throw error;
-  }
-};
-
-/**
  * Upload file from base64
  */
 const uploadFromBase64 = async (base64String, options = {}) => {
@@ -324,57 +305,6 @@ const uploadFromBase64 = async (base64String, options = {}) => {
 };
 
 /**
- * Get file info from Cloudinary
- */
-const getFileInfo = async (publicId, resourceType = 'image') => {
-  try {
-    const result = await cloudinary.api.resource(publicId, {
-      resource_type: resourceType,
-    });
-    return result;
-  } catch (error) {
-    console.error('Cloudinary get file info error:', error);
-    throw error;
-  }
-};
-
-/**
- * Search files in Cloudinary
- */
-const searchFiles = async (expression, options = {}) => {
-  try {
-    const result = await cloudinary.search
-      .expression(expression)
-      .sort_by([['created_at', 'desc']])
-      .max_results(options.maxResults || 30)
-      .execute();
-    return result;
-  } catch (error) {
-    console.error('Cloudinary search error:', error);
-    throw error;
-  }
-};
-
-/**
- * Create upload preset programmatically
- */
-const createUploadPreset = async (presetName, options = {}) => {
-  try {
-    const result = await cloudinary.api.create_upload_preset({
-      name: presetName,
-      folder: 'talkcart',
-      resource_type: 'auto',
-      allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'mov', 'avi', 'mp3', 'wav'],
-      ...options,
-    });
-    return result;
-  } catch (error) {
-    console.error('Cloudinary create preset error:', error);
-    throw error;
-  }
-};
-
-/**
  * Upload file buffer to Cloudinary
  */
 const uploadToCloudinary = async (fileBuffer, options = {}) => {
@@ -382,7 +312,7 @@ const uploadToCloudinary = async (fileBuffer, options = {}) => {
     return new Promise((resolve, reject) => {
       cloudinary.uploader.upload_stream(
         {
-          folder: 'talkcart/marketplace',
+          folder: 'talkcart',
           resource_type: 'auto',
           ...options,
         },
@@ -413,11 +343,11 @@ module.exports = {
   getOptimizedUrl,
   getVideoThumbnail,
   getOptimizedVideoUrl,
-  getVideoPreview,
   uploadFromUrl,
-  uploadFromBase64,
-  uploadToCloudinary,
   getFileInfo,
   searchFiles,
   createUploadPreset,
+  getVideoPreview,
+  uploadFromBase64,
+  uploadToCloudinary,
 };

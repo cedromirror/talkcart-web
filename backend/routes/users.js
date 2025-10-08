@@ -303,12 +303,12 @@ router.put('/profile', authenticateTokenStrict, async (req, res) => {
 
 // @route   POST /api/users/:id/follow
 // @desc    Follow a user
-// @access  Private
 router.post('/:id/follow', authenticateTokenStrict, async (req, res) => {
   try {
-    const { id: targetUserId } = req.params;
     const currentUserId = req.user.userId;
+    const targetUserId = req.params.id;
 
+    // Validate user IDs
     if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
       return res.status(400).json({
         success: false,
@@ -316,7 +316,8 @@ router.post('/:id/follow', authenticateTokenStrict, async (req, res) => {
       });
     }
 
-    if (targetUserId === currentUserId) {
+    // Prevent self-follow
+    if (currentUserId === targetUserId) {
       return res.status(400).json({
         success: false,
         error: 'Cannot follow yourself'
@@ -324,15 +325,6 @@ router.post('/:id/follow', authenticateTokenStrict, async (req, res) => {
     }
 
     console.log(`User ${currentUserId} attempting to follow user ${targetUserId}`);
-
-    // Check if target user exists
-    const targetUser = await User.findById(targetUserId);
-    if (!targetUser || !targetUser.isActive) {
-      return res.status(404).json({
-        success: false,
-        error: 'User not found'
-      });
-    }
 
     // Use Follow model with idempotency
     const existing = await Follow.findOne({ follower: currentUserId, following: targetUserId });
@@ -342,10 +334,31 @@ router.post('/:id/follow', authenticateTokenStrict, async (req, res) => {
 
     // Create or reactivate follow
     await Follow.createFollow(currentUserId, targetUserId);
-
-    // Update counters atomically and safely
     await User.findByIdAndUpdate(targetUserId, { $inc: { followerCount: 1 } });
     await User.findByIdAndUpdate(currentUserId, { $inc: { followingCount: 1 } });
+
+    // Create notification for the followed user using NotificationService
+    try {
+      await NotificationService.createFollowNotification(currentUserId, targetUserId);
+    } catch (notificationError) {
+      console.error('Error creating follow notification:', notificationError);
+    }
+
+    // Emit real-time update via Socket.IO
+    const io = req.app.get('io');
+    if (io) {
+      // Update follower count for the followed user
+      io.to(`user_${targetUserId}`).emit('user:followers-update', {
+        userId: targetUserId,
+        followerCount: (await User.findById(targetUserId)).followerCount
+      });
+
+      // Update following count for the follower
+      io.to(`user_${currentUserId}`).emit('user:following-update', {
+        userId: currentUserId,
+        followingCount: (await User.findById(currentUserId)).followingCount
+      });
+    }
 
     console.log(`User ${currentUserId} successfully followed user ${targetUserId}`);
 

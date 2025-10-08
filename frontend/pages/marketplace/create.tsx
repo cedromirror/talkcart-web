@@ -19,6 +19,9 @@ import {
   Stack,
   Alert,
   Divider,
+  CircularProgress,
+  IconButton,
+  InputAdornment,
 } from '@mui/material';
 import { ArrowLeft, Upload, Plus, X } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
@@ -53,7 +56,7 @@ interface ProductForm {
 
 const CreateProductPage: React.FC = () => {
   const router = useRouter();
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, loading: authLoading } = useAuth();
   const [loading, setLoading] = useState(false);
   const [tagInput, setTagInput] = useState('');
   const [uploadingImages, setUploadingImages] = useState(false);
@@ -78,6 +81,8 @@ const CreateProductPage: React.FC = () => {
   const [categories, setCategories] = useState<string[]>([]);
 
   useEffect(() => {
+    if (!router.isReady) return;
+    
     (async () => {
       try {
         const res: any = await api.marketplace.getCategories();
@@ -87,14 +92,21 @@ const CreateProductPage: React.FC = () => {
         setCategories([]); // do not fallback to hardcoded
       }
     })();
-  }, []);
+
+    // Cleanup function to revoke preview URLs when component unmounts
+    return () => {
+      imagePreview.forEach(url => URL.revokeObjectURL(url));
+    };
+  }, [imagePreview, router.isReady]);
 
   // Redirect if not authenticated
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!router.isReady) return;
+    
+    if (!isAuthenticated && !authLoading) {
       router.push('/auth/login?next=' + encodeURIComponent('/marketplace/create'));
     }
-  }, [isAuthenticated, router]);
+  }, [isAuthenticated, authLoading, router.isReady]);
 
   const handleInputChange = (field: keyof ProductForm) => (event: any) => {
     const value = event.target.value;
@@ -296,8 +308,9 @@ const CreateProductPage: React.FC = () => {
 
       if (response.success) {
         toast.success('Product created successfully!');
-        // Clean up preview URLs
+        // Clean up preview URLs before navigation
         imagePreview.forEach(url => URL.revokeObjectURL(url));
+        // Navigate to the new product page
         router.push(`/marketplace/${response.data.id}`);
       } else {
         throw new Error(response.error || 'Failed to create product');
@@ -311,21 +324,32 @@ const CreateProductPage: React.FC = () => {
   };
 
   const handleBack = () => {
-    router.back();
+    // Check if we're in the browser environment and if there's a previous page in history
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      router.back();
+    } else {
+      router.push('/marketplace');
+    }
   };
 
-  // Selling disabled: do not gate by auth; page shows disabled message for everyone
-  if (false && !isAuthenticated) {
+  // Show loading state while determining auth status or router not ready
+  if (authLoading || !router.isReady) {
     return (
       <Layout>
         <Container maxWidth="sm" sx={{ py: 4, textAlign: 'center' }}>
-          <Typography variant="h6">Please log in to create products</Typography>
+          <CircularProgress />
+          <Typography variant="h6" sx={{ mt: 2 }}>Loading...</Typography>
         </Container>
       </Layout>
     );
   }
 
-  // Selling disabled: replace form with info
+  // Redirect if not authenticated
+  if (!isAuthenticated) {
+    // Don't render anything while redirecting
+    return null;
+  }
+
   return (
     <Layout>
       <Container maxWidth="md" sx={{ py: 4 }}>
@@ -338,18 +362,266 @@ const CreateProductPage: React.FC = () => {
             Back to Marketplace
           </Button>
           <Typography variant="h4" component="h1" gutterBottom>
-            Marketplace Selling Unavailable
+            Create New Product
           </Typography>
           <Typography variant="body1" color="text.secondary">
-            User product listings are currently disabled. Please contact the administrators for partnerships.
+            List a new product in the marketplace
           </Typography>
         </Box>
 
         <Card variant="outlined" sx={{ borderRadius: 2 }}>
           <CardContent sx={{ p: 4 }}>
-            <Alert severity="info">
-              Product creation is restricted. Only admin-posted products are shown in the marketplace.
-            </Alert>
+            <form onSubmit={handleSubmit}>
+              <Grid container spacing={3}>
+                <Grid item xs={12}>
+                  <TextField
+                    fullWidth
+                    label="Product Name"
+                    value={form.name}
+                    onChange={handleInputChange('name')}
+                    error={!!errors.name}
+                    helperText={errors.name}
+                    required
+                  />
+                </Grid>
+
+                <Grid item xs={12}>
+                  <TextField
+                    fullWidth
+                    label="Description"
+                    multiline
+                    rows={4}
+                    value={form.description}
+                    onChange={handleInputChange('description')}
+                    error={!!errors.description}
+                    helperText={errors.description}
+                    required
+                  />
+                </Grid>
+
+                <Grid item xs={12} md={6}>
+                  <TextField
+                    fullWidth
+                    label="Price"
+                    type="number"
+                    value={form.price}
+                    onChange={handleInputChange('price')}
+                    error={!!errors.price}
+                    helperText={errors.price}
+                    required
+                    InputProps={{
+                      inputProps: { min: 0, step: '0.01' }
+                    }}
+                  />
+                </Grid>
+
+                <Grid item xs={12} md={6}>
+                  <FormControl fullWidth error={!!errors.currency}>
+                    <InputLabel>Currency</InputLabel>
+                    <Select
+                      value={form.currency}
+                      label="Currency"
+                      onChange={handleInputChange('currency')}
+                    >
+                      {currencies.map(currency => (
+                        <MenuItem key={currency.value} value={currency.value}>
+                          {currency.label}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+
+                <Grid item xs={12} md={6}>
+                  <FormControl fullWidth error={!!errors.category}>
+                    <InputLabel>Category</InputLabel>
+                    <Select
+                      value={form.category}
+                      label="Category"
+                      onChange={handleInputChange('category')}
+                    >
+                      {categories.map(category => (
+                        <MenuItem key={category} value={category}>
+                          {category}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+
+                <Grid item xs={12} md={6}>
+                  <TextField
+                    fullWidth
+                    label="Stock"
+                    type="number"
+                    value={form.stock}
+                    onChange={handleInputChange('stock')}
+                    error={!!errors.stock}
+                    helperText={errors.stock}
+                    disabled={form.isNFT}
+                    InputProps={{
+                      inputProps: { min: 0 }
+                    }}
+                  />
+                </Grid>
+
+                <Grid item xs={12}>
+                  <TextField
+                    fullWidth
+                    label="Tags (comma separated)"
+                    value={tagInput}
+                    onChange={(e) => setTagInput(e.target.value)}
+                    onKeyPress={handleTagKeyPress}
+                    helperText="Add tags to help users find your product"
+                    InputProps={{
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <Button
+                            onClick={addTag}
+                            startIcon={<Plus size={16} />}
+                            variant="outlined"
+                            size="small"
+                          >
+                            Add
+                          </Button>
+                        </InputAdornment>
+                      ),
+                    }}
+                  />
+                  <Box sx={{ mt: 1 }}>
+                    {form.tags.map(tag => (
+                      <Chip
+                        key={tag}
+                        label={tag}
+                        onDelete={() => removeTag(tag)}
+                        sx={{ mr: 1, mb: 1 }}
+                      />
+                    ))}
+                  </Box>
+                </Grid>
+
+                <Grid item xs={12}>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={form.isNFT}
+                        onChange={handleSwitchChange('isNFT')}
+                      />
+                    }
+                    label="This is an NFT"
+                  />
+                </Grid>
+
+                {form.isNFT && (
+                  <>
+                    <Grid item xs={12} md={6}>
+                      <TextField
+                        fullWidth
+                        label="Contract Address"
+                        value={form.contractAddress}
+                        onChange={handleInputChange('contractAddress')}
+                        error={!!errors.contractAddress}
+                        helperText={errors.contractAddress}
+                        required
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={6}>
+                      <TextField
+                        fullWidth
+                        label="Token ID"
+                        value={form.tokenId}
+                        onChange={handleInputChange('tokenId')}
+                        error={!!errors.tokenId}
+                        helperText={errors.tokenId}
+                        required
+                      />
+                    </Grid>
+                  </>
+                )}
+
+                <Grid item xs={12}>
+                  <Typography variant="h6" sx={{ mb: 2 }}>
+                    Product Images
+                  </Typography>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handleImageUpload}
+                    style={{ display: 'none' }}
+                    id="image-upload"
+                  />
+                  <label htmlFor="image-upload">
+                    <Button
+                      variant="outlined"
+                      component="span"
+                      startIcon={<Upload size={16} />}
+                      disabled={uploadingImages}
+                    >
+                      Upload Images
+                    </Button>
+                  </label>
+                  {uploadingImages && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', mt: 2 }}>
+                      <CircularProgress size={20} sx={{ mr: 2 }} />
+                      <Typography>Uploading images...</Typography>
+                    </Box>
+                  )}
+                  <Grid container spacing={2} sx={{ mt: 1 }}>
+                    {imagePreview.map((preview, index) => (
+                      <Grid item key={index}>
+                        <Box sx={{ position: 'relative' }}>
+                          <img
+                            src={preview}
+                            alt={`Preview ${index}`}
+                            style={{
+                              width: 100,
+                              height: 100,
+                              objectFit: 'cover',
+                              borderRadius: 4,
+                            }}
+                          />
+                          <IconButton
+                            size="small"
+                            onClick={() => removeImage(index)}
+                            sx={{
+                              position: 'absolute',
+                              top: -8,
+                              right: -8,
+                              bgcolor: 'background.paper',
+                              boxShadow: 2,
+                            }}
+                          >
+                            <X size={16} />
+                          </IconButton>
+                        </Box>
+                      </Grid>
+                    ))}
+                  </Grid>
+                </Grid>
+
+                <Grid item xs={12}>
+                  <Divider sx={{ my: 2 }} />
+                  <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 2 }}>
+                    <Button
+                      variant="outlined"
+                      onClick={handleBack}
+                      disabled={loading}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="submit"
+                      variant="contained"
+                      disabled={loading}
+                      startIcon={loading ? <CircularProgress size={16} /> : null}
+                    >
+                      {loading ? 'Creating...' : 'Create Product'}
+                    </Button>
+                  </Box>
+                </Grid>
+              </Grid>
+            </form>
           </CardContent>
         </Card>
       </Container>

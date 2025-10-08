@@ -1,9 +1,12 @@
 const express = require('express');
 const router = express.Router();
-const { Comment, Post, User } = require('../models');
+const { Comment, Post, User, Notification } = require('../models');
 const { authenticateToken, authenticateTokenStrict } = require('./auth');
 
 // MongoDB-only comment management
+
+// Add this after the imports at the top of the file
+const NotificationService = require('../services/notificationService');
 
 // Health check endpoint
 router.get('/health', (req, res) => {
@@ -303,6 +306,21 @@ router.post('/', authenticateToken, async (req, res) => {
     await newComment.populate('author', 'username displayName avatar isVerified');
 
     console.log(`Comment created successfully: ${newComment._id}`);
+
+    // Create notification for post author (if it's not the author themselves) using NotificationService
+    try {
+      const post = await Post.findById(postId).populate('author', 'username displayName');
+      if (post && post.author._id.toString() !== authorId.toString()) {
+        await NotificationService.createCommentNotification(
+          authorId.toString(),
+          post.author._id.toString(),
+          postId,
+          content.trim()
+        );
+      }
+    } catch (notificationError) {
+      console.error('Error creating comment notification:', notificationError);
+    }
 
     // Compute latest comment count for this post
     const commentCount = await Comment.countDocuments({ post: postId, isActive: true });

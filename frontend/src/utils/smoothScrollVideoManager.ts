@@ -35,6 +35,7 @@ class SmoothScrollVideoManager {
   private isScrolling = false;
   private scrollTimeout: NodeJS.Timeout | null = null;
   private rafId: number | null = null;
+  private scrollDirection: 'up' | 'down' | null = null; // Add scroll direction tracking
 
   // Callbacks
   private onVideoPlay: ((videoId: string) => void) | null = null;
@@ -44,10 +45,10 @@ class SmoothScrollVideoManager {
 
   constructor(config: Partial<ScrollVideoConfig> = {}) {
     this.config = {
-      scrollThreshold: 50,
-      velocityThreshold: 2,
-      debounceMs: 16,
-      preloadDistance: 200,
+      scrollThreshold: 30, // Reduced for more responsive detection
+      velocityThreshold: 1.5, // Adjusted for better sensitivity
+      debounceMs: 10, // Reduced for faster response
+      preloadDistance: 300, // Increased for better preload
       smoothTransition: true,
       adaptiveQuality: true,
       ...config,
@@ -80,13 +81,16 @@ class SmoothScrollVideoManager {
     const currentTime = performance.now();
     const timeDelta = currentTime - this.lastScrollTime;
 
+    // Calculate scroll direction
+    this.scrollDirection = currentScrollY > this.lastScrollY ? 'down' : 'up';
+
     if (timeDelta > 0) {
       const distance = Math.abs(currentScrollY - this.lastScrollY);
       this.scrollVelocity = distance / timeDelta;
 
-      // Only process if scroll distance is significant
-      if (distance >= this.config.scrollThreshold) {
-        this.handleScrollChange(currentScrollY > this.lastScrollY ? 'down' : 'up');
+      // Process if scroll distance is significant or velocity is high
+      if (distance >= this.config.scrollThreshold || this.scrollVelocity > this.config.velocityThreshold) {
+        this.handleScrollChange(this.scrollDirection);
       }
     }
 
@@ -99,10 +103,15 @@ class SmoothScrollVideoManager {
       clearTimeout(this.scrollTimeout);
     }
 
-    // Set scroll end timeout
+    // Set scroll end timeout with adaptive delay
+    const adaptiveDelay = Math.min(
+      this.config.debounceMs * 3,
+      Math.max(this.config.debounceMs, this.config.debounceMs - (this.scrollVelocity * 5))
+    );
+
     this.scrollTimeout = setTimeout(() => {
       this.handleScrollEnd();
-    }, this.config.debounceMs * 2);
+    }, adaptiveDelay);
 
     // Notify scroll state change
     this.onScrollStateChange?.(true, this.scrollVelocity);
@@ -147,13 +156,14 @@ class SmoothScrollVideoManager {
       }
     }
 
-    // Normal scroll - prefer center videos
+    // Normal scroll - prefer center videos with highest intersection ratio
     const centerVideos = videos.filter(v => v.viewportPosition === 'center');
     if (centerVideos.length > 0) {
-      return centerVideos[0];
+      // Sort by intersection ratio for better selection
+      return centerVideos.sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
     }
 
-    // Fallback to highest priority video
+    // Fallback to highest priority video (already sorted by intersection optimizer)
     return videos[0];
   }
 
@@ -199,7 +209,7 @@ class SmoothScrollVideoManager {
     }
 
     // Set up video for playback
-    element.muted = true; // Ensure autoplay works
+    element.muted = false; // Ensure autoplay works
     
     // Apply adaptive quality if enabled
     if (this.config.adaptiveQuality) {
@@ -220,6 +230,35 @@ class SmoothScrollVideoManager {
     // If still no source or browser reports it cannot play type, abort early
     if (!(element.currentSrc || element.src)) {
       throw new Error('No supported video source');
+    }
+
+    // Preload if needed for better performance
+    if (element.readyState < 2) {
+      element.load();
+      
+      // Wait for metadata to load
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          element.removeEventListener('loadedmetadata', onLoaded);
+          element.removeEventListener('error', onError);
+          reject(new Error('Timeout loading video metadata'));
+        }, 3000);
+        
+        const onLoaded = () => {
+          clearTimeout(timeout);
+          element.removeEventListener('error', onError);
+          resolve(null);
+        };
+        
+        const onError = () => {
+          clearTimeout(timeout);
+          element.removeEventListener('loadedmetadata', onLoaded);
+          reject(new Error('Failed to load video metadata'));
+        };
+        
+        element.addEventListener('loadedmetadata', onLoaded);
+        element.addEventListener('error', onError);
+      });
     }
 
     // Create play promise

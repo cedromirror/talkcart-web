@@ -36,12 +36,12 @@ export interface UseVideoAutoscrollOptions {
 
 const DEFAULT_SETTINGS: VideoAutoscrollSettings = {
   enabled: true,
-  threshold: 0.6,
+  threshold: 0.7,
   pauseOnScroll: true,
-  muteByDefault: true,
+  muteByDefault: false,
   preloadStrategy: 'metadata',
-  maxConcurrentVideos: 2,
-  scrollPauseDelay: 150,
+  maxConcurrentVideos: 1,
+  scrollPauseDelay: 100,
   viewTrackingThreshold: 3,
   autoplayOnlyOnWifi: false,
   respectReducedMotion: true,
@@ -227,10 +227,11 @@ export const useVideoAutoscroll = (options: UseVideoAutoscrollOptions = {}) => {
     });
   }, [currentPlayingVideo, onVideoPause, stopViewTracking]);
 
-  // Intelligent video playback evaluation
+  // Intelligent video playback evaluation with performance enhancements
   const evaluateVideoPlayback = useCallback(async () => {
     if (isScrolling || !settings.enabled) return;
 
+    // Use videosRef.current instead of videos state for better performance
     const visibleVideos = Array.from(videosRef.current.entries())
       .filter(([_, video]) => video.isIntersecting && video.element)
       .map(([id, video]) => ({
@@ -247,8 +248,9 @@ export const useVideoAutoscroll = (options: UseVideoAutoscrollOptions = {}) => {
         const bCenterDistance = Math.abs((b.rect!.top + b.rect!.height / 2) - viewportCenter);
         
         // Prioritize videos with higher intersection ratio and closer to center
-        const aScore = a.intersectionRatio * 100 - aCenterDistance * 0.1;
-        const bScore = b.intersectionRatio * 100 - bCenterDistance * 0.1;
+        // Give more weight to intersection ratio for better selection
+        const aScore = a.intersectionRatio * 100 - aCenterDistance * 0.05;
+        const bScore = b.intersectionRatio * 100 - bCenterDistance * 0.05;
         
         return bScore - aScore;
       });
@@ -256,7 +258,13 @@ export const useVideoAutoscroll = (options: UseVideoAutoscrollOptions = {}) => {
     if (visibleVideos.length === 0) {
       // No visible videos, pause current if any
       if (currentPlayingVideo) {
-        await pauseVideo(currentPlayingVideo);
+        const currentVideoState = videosRef.current.get(currentPlayingVideo);
+        if (currentVideoState?.element && !currentVideoState.element.paused) {
+          currentVideoState.element.pause();
+          onVideoPause?.(currentPlayingVideo);
+          stopViewTracking(currentPlayingVideo);
+          setCurrentPlayingVideo(null);
+        }
       }
       return;
     }
@@ -267,9 +275,9 @@ export const useVideoAutoscroll = (options: UseVideoAutoscrollOptions = {}) => {
     if (shouldSwitchVideo) {
       // Pause current video
       if (currentPlayingVideo) {
-        const currentVideo = videos.get(currentPlayingVideo);
-        if (currentVideo?.element && !currentVideo.element.paused) {
-          currentVideo.element.pause();
+        const currentVideoState = videosRef.current.get(currentPlayingVideo);
+        if (currentVideoState?.element && !currentVideoState.element.paused) {
+          currentVideoState.element.pause();
           onVideoPause?.(currentPlayingVideo);
           stopViewTracking(currentPlayingVideo);
         }
@@ -282,8 +290,17 @@ export const useVideoAutoscroll = (options: UseVideoAutoscrollOptions = {}) => {
           // Set mute state
           video.element.muted = settings.muteByDefault;
           
-          // Attempt to play
-          await video.element.play();
+          // Preload if needed
+          if (video.element.readyState < 2) {
+            video.element.load();
+          }
+          
+          // Attempt to play with error handling
+          const playPromise = video.element.play();
+          if (playPromise !== undefined) {
+            await playPromise;
+          }
+          
           setCurrentPlayingVideo(bestVideo.id);
           onVideoPlay?.(bestVideo.id);
           startViewTracking(bestVideo.id);
@@ -295,32 +312,63 @@ export const useVideoAutoscroll = (options: UseVideoAutoscrollOptions = {}) => {
             return updated;
           });
         }
-      } catch (error) {
-        console.warn(`Autoplay failed for video ${bestVideo.id}:`, error);
-        onVideoError?.(bestVideo.id, `Autoplay failed: ${error}`);
+      } catch (error: any) {
+        // Handle autoplay policy errors
+        if (error.name === 'NotAllowedError' || error.name === 'AbortError') {
+          console.warn(`Autoplay prevented for video ${bestVideo.id}:`, error.message);
+          // Try to play muted as fallback
+          try {
+            const video = bestVideo.video;
+            if (video.element) {
+              video.element.muted = true;
+              const playPromise = video.element.play();
+              if (playPromise !== undefined) {
+                await playPromise;
+              }
+              setCurrentPlayingVideo(bestVideo.id);
+              onVideoPlay?.(bestVideo.id);
+              startViewTracking(bestVideo.id);
+              
+              // Update video state
+              setVideos(prev => {
+                const updated = new Map(prev);
+                updated.set(bestVideo.id, { ...video, isPlaying: true, lastPlayTime: Date.now() });
+                return updated;
+              });
+            }
+          } catch (fallbackError) {
+            console.warn(`Autoplay fallback failed for video ${bestVideo.id}:`, fallbackError);
+            onVideoError?.(bestVideo.id, `Autoplay failed: ${fallbackError}`);
+          }
+        } else {
+          console.warn(`Autoplay failed for video ${bestVideo.id}:`, error);
+          onVideoError?.(bestVideo.id, `Autoplay failed: ${error}`);
+        }
       }
     }
 
     // Pause videos that are no longer optimal
-    visibleVideos.slice(settings.maxConcurrentVideos).forEach(({ id, video }) => {
+    visibleVideos.slice(1).forEach(({ id, video }) => {
       if (video.isPlaying && video.element && !video.element.paused) {
         video.element.pause();
         onVideoPause?.(id);
         stopViewTracking(id);
       }
     });
-  }, [isScrolling, settings, currentPlayingVideo, onVideoPlay, onVideoPause, onVideoError, pauseVideo, shouldAutoplay, startViewTracking, stopViewTracking]);
+  }, [isScrolling, settings, currentPlayingVideo, onVideoPlay, onVideoPause, onVideoError, shouldAutoplay, startViewTracking, stopViewTracking]);
 
   // Store the function in ref for use in scroll handler
   useEffect(() => {
     evaluateVideoPlaybackRef.current = evaluateVideoPlayback;
   }, [evaluateVideoPlayback]);
 
-  // Enhanced scroll detection with direction and velocity
+  // Enhanced scroll detection with better performance
   useEffect(() => {
     if (!settings.enabled) return;
 
     let ticking = false;
+    let lastScrollY = window.scrollY;
+    let scrollDirection: 'up' | 'down' | null = null;
 
     const handleScroll = () => {
       if (!ticking) {
@@ -330,14 +378,14 @@ export const useVideoAutoscroll = (options: UseVideoAutoscrollOptions = {}) => {
           const timeDelta = currentTime - lastScrollTime.current;
           
           // Calculate scroll direction
-          const direction = currentScrollY > lastScrollY ? 'down' : 'up';
-          setScrollDirection(direction);
+          scrollDirection = currentScrollY > lastScrollY ? 'down' : 'up';
+          setScrollDirection(scrollDirection);
           
           // Calculate scroll velocity (pixels per millisecond)
           const distance = Math.abs(currentScrollY - lastScrollY);
           scrollVelocity.current = timeDelta > 0 ? distance / timeDelta : 0;
           
-          setLastScrollY(currentScrollY);
+          lastScrollY = currentScrollY;
           lastScrollTime.current = currentTime;
           
           // Set scrolling state
@@ -348,10 +396,10 @@ export const useVideoAutoscroll = (options: UseVideoAutoscrollOptions = {}) => {
             clearTimeout(scrollTimeoutRef.current);
           }
           
-          // Adaptive delay based on scroll velocity
+          // Adaptive delay based on scroll velocity - more responsive
           const adaptiveDelay = Math.min(
             settings.scrollPauseDelay,
-            Math.max(50, settings.scrollPauseDelay - (scrollVelocity.current * 100))
+            Math.max(30, settings.scrollPauseDelay - (scrollVelocity.current * 50))
           );
           
           scrollTimeoutRef.current = setTimeout(() => {
@@ -362,6 +410,11 @@ export const useVideoAutoscroll = (options: UseVideoAutoscrollOptions = {}) => {
             // Trigger video evaluation after scroll stops
             evaluateVideoPlaybackRef.current?.();
           }, adaptiveDelay);
+          
+          // Immediate evaluation for fast scrolls
+          if (scrollVelocity.current > 3) {
+            evaluateVideoPlaybackRef.current?.();
+          }
           
           ticking = false;
         });

@@ -25,6 +25,48 @@ export const handleUploadError = (error: any): string => {
   return error?.message || 'Upload failed. Please try again.';
 };
 
+// Utility function to handle API errors and return user-friendly messages
+export const handleApiError = (error: any): string => {
+  if (error instanceof SessionExpiredError) {
+    return 'Your session has expired. Please log in again.';
+  }
+  
+  if (error instanceof HttpError) {
+    // Handle specific HTTP status codes with user-friendly messages
+    switch (error.status) {
+      case 404:
+        return 'No result found';
+      case 403:
+        return 'Access denied. You do not have permission to access this resource.';
+      case 401:
+        return 'Unauthorized. Please log in to continue.';
+      case 400:
+        return 'No result found';
+      case 500:
+        return 'An internal server error occurred. Please try again later.';
+      case 502:
+      case 503:
+        return 'Service temporarily unavailable. Please try again later.';
+      default:
+        // Use the error message if available, otherwise a generic message
+        return error.data?.message || error.message || 'An error occurred while processing your request.';
+    }
+  }
+  
+  // Handle network errors
+  if (error?.message?.includes('Network Error') || error?.message?.includes('fetch')) {
+    return 'Network error. Please check your connection and try again.';
+  }
+  
+  // Handle timeout errors
+  if (error?.message?.includes('timeout')) {
+    return 'Request timed out. Please try again.';
+  }
+  
+  // Fallback to the original error message or a generic one
+  return error?.message || 'An unexpected error occurred. Please try again.';
+};
+
 // Custom error type for session expiration to allow targeted handling without generic crashes
 export class SessionExpiredError extends Error {
   status = 401 as const;
@@ -39,10 +81,44 @@ export class HttpError extends Error {
   status: number;
   data?: any;
   constructor(status: number, message: string, data?: any) {
-    super(message);
+    // Ultimate defensive approach - ensure we never have undefined values
+    let validMessage = message || 'An unknown error occurred';
+    if (typeof validMessage !== 'string' || validMessage === 'undefined' || validMessage === '') {
+      validMessage = 'An unknown error occurred';
+    }
+    
+    // Ensure we never pass undefined as data - ultimate defensive check
+    let validData = data;
+    if (validData === undefined || validData === null) {
+      validData = { message: validMessage };
+    }
+    
+    // Additional defensive check - ensure it's a valid object
+    try {
+      // If it's not an object, wrap it in an object
+      if (typeof validData !== 'object' || Array.isArray(validData)) {
+        validData = { message: String(validData) };
+      }
+      
+      // Try to stringify and check if it's valid
+      const jsonString = JSON.stringify(validData);
+      if (!jsonString || jsonString === 'undefined' || jsonString === '{}') {
+        validData = { message: validMessage };
+      }
+    } catch (e) {
+      // If serialization fails, create a safe fallback
+      validData = { message: validMessage, error: 'Serialization error' };
+    }
+    
+    // Additional check to ensure we have a valid message for the Error constructor
+    const errorConstructorMessage = validMessage && typeof validMessage === 'string' 
+      ? validMessage 
+      : 'An error occurred during the request';
+    
+    super(errorConstructorMessage);
     this.name = 'HttpError';
-    this.status = status;
-    this.data = data;
+    this.status = status !== undefined && status !== null ? status : 500;
+    this.data = validData;
   }
 }
 
@@ -92,20 +168,32 @@ class ApiService {
       if (!text) return null;
 
       // Check if response looks like JSON
-      if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
-        return JSON.parse(text);
+      const trimmedText = text.trim();
+      if ((trimmedText.startsWith('{') || trimmedText.startsWith('[')) && 
+          (trimmedText.endsWith('}') || trimmedText.endsWith(']'))) {
+        try {
+          return JSON.parse(text);
+        } catch (parseError) {
+          console.error('JSON parsing failed:', parseError);
+          // Return a proper error object
+          return {
+            error: 'Invalid JSON response',
+            message: 'Server returned invalid JSON data'
+          };
+        }
       }
 
-      // If it's not JSON, return the text as an error message
-      return {
-        error: text.includes('Internal Server Error') ? 'Internal Server Error' : text,
-        message: text.includes('Internal Server Error') ? 'Server encountered an error. Please try again.' : text
-      };
-    } catch (error) {
-      console.error('Failed to parse response:', error);
+      // If it's not JSON, return a proper error object with the text content
       return {
         error: 'Invalid response format',
-        message: 'Server returned an invalid response. Please try again.'
+        message: text.includes('Internal Server Error') ? 'Server encountered an error. Please try again.' : 'Server returned invalid response format',
+        details: text.substring(0, 200) // Include first 200 characters of the response
+      };
+    } catch (error) {
+      console.error('Failed to read response:', error);
+      return {
+        error: 'Response read error',
+        message: 'Failed to read server response'
       };
     }
   }
@@ -135,18 +223,143 @@ class ApiService {
       if (token) headers.set('Authorization', `Bearer ${token}`);
 
       const retryResponse = await this.fetchWithTimeout(url, { ...init, headers }, timeout);
+      
+      // Check content type before parsing
+      const contentType = retryResponse.headers.get('content-type');
+      if (contentType && !contentType.includes('application/json')) {
+        // For non-JSON responses, return the response directly
+        return retryResponse as unknown as T;
+      }
+      
       const retryData = await this.safeJsonParse(retryResponse);
+      // Ensure data is valid before passing to HttpError constructor
+      let errorData = retryData && typeof retryData === 'object' ? retryData : { message: 'Unknown error' };
+      // Additional check to ensure errorData is never undefined or null
+      if (!errorData || typeof errorData !== 'object') {
+        errorData = { message: 'Unknown error' };
+      }
+      // Final defensive check to ensure we have a valid object
+      try {
+        // Try to stringify and parse to ensure it's a valid object
+        const jsonString = JSON.stringify(errorData);
+        if (!jsonString || jsonString === 'undefined') {
+          errorData = { message: 'Unknown error' };
+        }
+      } catch (e) {
+        errorData = { message: 'Unknown error' };
+      }
       if (!retryResponse.ok) {
-        throw new HttpError(retryResponse.status, (retryData && (retryData.message || retryData.error)) || `Request failed with status ${retryResponse.status}`, retryData);
+        const errorMessage = (errorData && (errorData.message || errorData.error)) || `Request failed with status ${retryResponse.status}`;
+        // Final defensive check right before throwing the error - ultimate protection
+        if (!errorData || typeof errorData !== 'object' || errorData === null || errorData === undefined) {
+          errorData = { message: `Request failed with status ${retryResponse.status}`, error: 'Unknown error' };
+        }
+        // One final check to ensure errorData is a valid object
+        if (typeof errorData !== 'object' || errorData === null) {
+          errorData = { message: `Request failed with status ${retryResponse.status}`, error: 'Unknown error' };
+        }
+        // Ultimate defensive check to ensure errorData is never undefined
+        if (errorData === undefined) {
+          errorData = { message: `Request failed with status ${retryResponse.status}`, error: 'Unknown error' };
+        }
+        
+        // Ensure status is always a valid number
+        const validStatus = retryResponse.status !== undefined && retryResponse.status !== null ? retryResponse.status : 500;
+        throw new HttpError(validStatus, errorMessage, errorData);
+      }
+      // Final defensive check to ensure we never return undefined
+      if (retryData === undefined) {
+        return null as unknown as T;
       }
       return retryData as T;
     }
 
-    const data = await this.safeJsonParse(response);
+    // Check content type before parsing
+    const contentType = response.headers.get('content-type');
+    let data: any;
+    if (contentType && !contentType.includes('application/json')) {
+      // For non-JSON responses, return the response directly
+      data = response;
+    } else {
+      data = await this.safeJsonParse(response);
+    }
+
     if (!response.ok) {
       console.error(`API Error: ${response.status} ${response.statusText}`, { url, status: response.status, data });
-      throw new HttpError(response.status, (data && (data.message || data.error)) || `Request failed with status ${response.status}`, data);
+      // For non-JSON error responses, create a generic error
+      if (data instanceof Response) {
+        const errorData = { message: `Request failed with status ${response.status}` };
+        // Defensive check to ensure errorData is never undefined
+        if (errorData === undefined) {
+          // Ensure status is always a valid number
+          const validStatus = response.status !== undefined && response.status !== null ? response.status : 500;
+          throw new HttpError(validStatus, `Request failed with status ${response.status}`, { message: `Request failed with status ${response.status}` });
+        }
+        // Ensure status is always a valid number
+        const validStatus = response.status !== undefined && response.status !== null ? response.status : 500;
+        throw new HttpError(validStatus, `Request failed with status ${response.status}`, errorData);
+      }
+      // Ensure data is valid before passing to HttpError constructor
+      let errorData = data && typeof data === 'object' ? data : { message: `Request failed with status ${response.status}` };
+      // Additional check to ensure errorData is never undefined or null
+      if (!errorData || typeof errorData !== 'object') {
+        errorData = { message: `Request failed with status ${response.status}` };
+      }
+      // Final defensive check to ensure we have a valid object
+      try {
+        // Try to stringify and parse to ensure it's a valid object
+        const jsonString = JSON.stringify(errorData);
+        if (!jsonString || jsonString === 'undefined') {
+          errorData = { message: `Request failed with status ${response.status}`, error: 'Unknown error' };
+        }
+      } catch (e) {
+        errorData = { message: `Request failed with status ${response.status}`, error: 'Unknown error' };
+      }
+      const errorMessage = (errorData && (errorData.message || errorData.error)) || `Request failed with status ${response.status}`;
+      // Final defensive check right before throwing the error
+      if (!errorData || typeof errorData !== 'object' || errorData === null || errorData === undefined) {
+        errorData = { message: `Request failed with status ${response.status}`, error: 'Unknown error' };
+      }
+      // Ultimate defensive check to ensure errorData is never undefined
+      if (errorData === undefined) {
+        errorData = { message: `Request failed with status ${response.status}`, error: 'Unknown error' };
+      }
+      
+      // User-friendly error messages based on status codes
+      let userFriendlyMessage = errorMessage;
+      if (response.status === 404) {
+        userFriendlyMessage = 'No result found';
+      } else if (response.status === 500) {
+        userFriendlyMessage = 'An internal server error occurred. Please try again later.';
+      } else if (response.status === 403) {
+        userFriendlyMessage = 'Access denied. You do not have permission to access this resource.';
+      } else if (response.status === 400) {
+        // For 400 errors, try to provide more specific error messages
+        if (errorData && errorData.message) {
+          userFriendlyMessage = errorData.message;
+        } else if (errorData && errorData.error) {
+          userFriendlyMessage = errorData.error;
+        } else {
+          userFriendlyMessage = 'Invalid request data. Please check your input and try again.';
+        }
+        console.log('400 Error Details:', errorData);
+      }
+      
+      // Ensure status is always a valid number
+      const validStatus = response.status !== undefined && response.status !== null ? response.status : 500;
+      throw new HttpError(validStatus, userFriendlyMessage, errorData);
     }
+    
+    // For non-JSON success responses, return the response directly
+    if (data instanceof Response) {
+      return data as unknown as T;
+    }
+    
+    // Final defensive check to ensure we never return undefined
+    if (data === undefined) {
+      return null as unknown as T;
+    }
+    
     return data as T;
   }
 
@@ -349,17 +562,23 @@ class ApiService {
       }, TIMEOUTS.AUTH_REQUEST);
     },
 
-    getProfile: async () => {
+    getProfile: async (forceRefresh = false) => {
       // Use backend /auth/me to fetch current authenticated user
       if (typeof window === 'undefined') {
         return { success: false } as any;
       }
+      
       const token = localStorage.getItem('token');
       if (!token) {
         return { success: false } as any;
       }
 
-      const res: any = await this.request(`${API_URL}/auth/me`, {
+      // If force refresh is requested, add a timestamp parameter to bypass cache
+      const url = forceRefresh 
+        ? `${API_URL}/auth/me?_t=${Date.now()}`
+        : `${API_URL}/auth/me`;
+
+      const res: any = await this.request(url, {
         method: 'GET',
         headers: this.getAuthHeaders(),
       }, TIMEOUTS.AUTH_REQUEST);
@@ -1211,6 +1430,43 @@ class ApiService {
       return this.get(`/marketplace/vendors/${vendorId}`);
     },
 
+    // Get current user's products
+    getMyProducts: async (params?: {
+      page?: number;
+      limit?: number;
+      category?: string;
+      search?: string;
+      sortBy?: string;
+      sortOrder?: 'asc' | 'desc';
+    }) => {
+      const queryParams = new URLSearchParams();
+      if (params) {
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            queryParams.append(key, value.toString());
+          }
+        });
+      }
+      return this.get(`/marketplace/my/products?${queryParams}`);
+    },
+
+    // Get all vendors
+    getVendors: async (params?: {
+      page?: number;
+      limit?: number;
+      search?: string;
+    }) => {
+      const queryParams = new URLSearchParams();
+      if (params) {
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            queryParams.append(key, value.toString());
+          }
+        });
+      }
+      return this.get(`/marketplace/vendors?${queryParams}`);
+    },
+
     // Search products
     searchProducts: async (query: string, filters?: any) => {
       const params: any = { q: query };
@@ -1299,7 +1555,7 @@ class ApiService {
       });
       
       // Use the existing media upload endpoint but with marketplace context
-      return this.request(`${API_URL}/marketplace/products/images`, {
+      return this.request(`${API_URL}/marketplace/products/upload-images`, {
         method: 'POST',
         headers: this.getAuthHeaders(false), // Don't include JSON content type for FormData
         body: formData,
@@ -1314,6 +1570,62 @@ class ApiService {
     // Get product by ID (alias for getProduct)
     getProductById: async (productId: string) => {
       return this.get(`/marketplace/products/${productId}`);
+    },
+
+    // Get vendor payment preferences
+    getVendorPaymentPreferences: async (vendorId: string) => {
+      return this.get(`/marketplace/vendors/${vendorId}/payment-preferences`);
+    },
+
+    // Get my payment preferences
+    getMyPaymentPreferences: async () => {
+      return this.get(`/marketplace/vendors/me/payment-preferences`);
+    },
+
+    // Update my payment preferences
+    updateMyPaymentPreferences: async (preferences: any) => {
+      return this.put(`/marketplace/vendors/me/payment-preferences`, preferences);
+    },
+
+    // Get my payout history
+    getMyPayoutHistory: async (params?: { limit?: number; status?: string }) => {
+      const queryParams = new URLSearchParams();
+      if (params) {
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            queryParams.append(key, value.toString());
+          }
+        });
+      }
+      return this.get(`/marketplace/vendors/me/payout-history?${queryParams}`);
+    },
+
+    // Vendor Store Endpoints
+    // Get my vendor store
+    getMyVendorStore: async () => {
+      return this.get(`/marketplace/vendors/me/store`);
+    },
+
+    // Create vendor store
+    createVendorStore: async (storeData: any) => {
+      console.log('API: Creating vendor store with data:', storeData);
+      return this.post(`/marketplace/vendors/me/store`, storeData);
+    },
+
+    // Update my vendor store
+    updateMyVendorStore: async (storeData: any) => {
+      console.log('API: Updating vendor store with data:', storeData);
+      return this.put(`/marketplace/vendors/me/store`, storeData);
+    },
+
+    // Delete my vendor store
+    deleteMyVendorStore: async () => {
+      return this.delete(`/marketplace/vendors/me/store`);
+    },
+
+    // Get vendor store by vendor ID
+    getVendorStore: async (vendorId: string) => {
+      return this.get(`/marketplace/vendors/${vendorId}/store`);
     }
   };
 
@@ -1397,6 +1709,39 @@ class ApiService {
   help = {
 
   };
+
+  // AI Voice API
+  ai = {
+    // Note: AI voice features have been disabled
+    // These methods are placeholders only
+    transcribeAudio: async () => {
+      throw new Error('AI voice features are disabled');
+    },
+    
+    processVoiceCommand: async () => {
+      throw new Error('AI voice features are disabled');
+    },
+    
+    processVoiceCommandAutomatic: async () => {
+      throw new Error('AI voice features are disabled');
+    },
+    
+    textToSpeech: async () => {
+      throw new Error('AI voice features are disabled');
+    },
+    
+    processTextCommand: async () => {
+      throw new Error('AI voice features are disabled');
+    },
+    
+    getSupportedLanguages: async () => {
+      throw new Error('AI voice features are disabled');
+    },
+    
+    getVoiceCommands: async () => {
+      throw new Error('AI voice features are disabled');
+    }
+  }
 }
 
 export const api = new ApiService();

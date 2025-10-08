@@ -30,6 +30,7 @@ import { api } from '@/lib/api';
 import { useVideoFeed } from './VideoFeedManager';
 import { getVolumeIcon, getVolumeTooltip } from '@/utils/videoUtils';
 import toast from 'react-hot-toast';
+import { useMediaMute } from '@/hooks/useMediaMute'; // Import the new hook
 
 interface VideoPostCardProps {
   post: any;
@@ -71,7 +72,6 @@ export const VideoPostCard: React.FC<VideoPostCardProps> = ({
   const [isFollowing, setIsFollowing] = useState(false);
   const [videoState, setVideoState] = useState({
     isPlaying: false,
-    isMuted: true,
     isLoading: true,
     hasError: false,
     errorMessage: null as string | null,
@@ -92,10 +92,24 @@ export const VideoPostCard: React.FC<VideoPostCardProps> = ({
     settings 
   } = useVideoFeed();
 
+  // Use the unified media mute hook - moved after settings is defined
+  const { isMuted, toggleMute, setMuted } = useMediaMute({
+    initialMuted: settings.muteByDefault,
+    globalMuteSetting: settings.muteByDefault,
+    userInteracted: videoState.userInteracted
+  });
+
   const postId = post._id || post.id;
   const videoItem = post.media?.[0];
   const videoUrl = videoItem?.secure_url || videoItem?.url;
   const isOwnPost = user?.id === post.author?.id;
+
+  // Handle comment click
+  const handleCommentClick = useCallback(() => {
+    if (onComment) {
+      onComment(postId);
+    }
+  }, [onComment, postId]);
 
   // Handle follow action
   const handleFollow = async () => {
@@ -226,75 +240,24 @@ export const VideoPostCard: React.FC<VideoPostCardProps> = ({
     if (videoState.isPlaying) {
       pauseVideo(postId);
     } else {
+      // Unmute when user initiates play
+      if (isMuted) {
+        setMuted(false);
+      }
       await playVideo(postId);
     }
-  }, [videoState.isPlaying, postId, playVideo, pauseVideo]);
+  }, [videoState.isPlaying, postId, playVideo, pauseVideo, isMuted, setMuted]);
 
-  // Toggle mute - unified mute control
-  const toggleMute = useCallback(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    const newMutedState = !videoState.isMuted;
-    video.muted = newMutedState;
-    setVideoState(prev => ({ 
-      ...prev, 
-      isMuted: newMutedState,
-      userInteracted: true // Mark as user interaction
-    }));
-  }, [videoState.isMuted]);
-
-  // Handle comment click
-  const handleCommentClick = useCallback(() => {
-    if (onComment) {
-      onComment(postId);
-    }
-  }, [onComment, postId]);
-
-  // Register video with feed manager
-  useEffect(() => {
-    if (!videoRef.current || !containerRef.current) return;
-
-    const cleanup = registerVideo(postId, videoRef.current, containerRef.current);
-    return cleanup;
-  }, [postId, registerVideo]);
-
-  // Set up video event listeners
+  // Synchronize video element muted state with hook state
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
-    video.addEventListener('play', handleVideoPlay);
-    video.addEventListener('pause', handleVideoPause);
-    video.addEventListener('ended', handleVideoEnded);
-    video.addEventListener('timeupdate', handleTimeUpdate);
-    video.addEventListener('progress', handleProgress);
-
-    return () => {
-      video.removeEventListener('play', handleVideoPlay);
-      video.removeEventListener('pause', handleVideoPause);
-      video.removeEventListener('ended', handleVideoEnded);
-      video.removeEventListener('timeupdate', handleTimeUpdate);
-      video.removeEventListener('progress', handleProgress);
-    };
-  }, [handleVideoPlay, handleVideoPause, handleVideoEnded, handleTimeUpdate, handleProgress]);
-
-  // Synchronize video element muted state with component state and global settings
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    // Ensure video element muted state matches component state
-    if (video.muted !== videoState.isMuted) {
-      video.muted = videoState.isMuted;
+    // Ensure video element muted state matches hook state
+    if (video.muted !== isMuted) {
+      video.muted = isMuted;
     }
-
-    // Also respect global mute settings
-    if (settings.muteByDefault && !videoState.userInteracted) {
-      video.muted = true;
-      setVideoState(prev => ({ ...prev, isMuted: true }));
-    }
-  }, [videoState.isMuted, settings.muteByDefault, videoState.userInteracted]);
+  }, [isMuted]);
 
   // Auto-hide controls on mouse movement
   useEffect(() => {
@@ -409,7 +372,7 @@ export const VideoPostCard: React.FC<VideoPostCardProps> = ({
           src={videoUrl}
           poster={videoItem.thumbnail_url || videoItem.thumbnail}
           preload={settings.preloadStrategy}
-          muted={videoState.isMuted}
+          muted={isMuted}
           loop={true}
           playsInline
           style={{
@@ -572,7 +535,7 @@ export const VideoPostCard: React.FC<VideoPostCardProps> = ({
                   <MessageSquare size={18} />
                 </IconButton>
               </Tooltip>
-              <Tooltip title={getVolumeTooltip(videoState.isMuted)}>
+              <Tooltip title={getVolumeTooltip(isMuted)}>
                 <IconButton
                   onClick={toggleMute}
                   size="small"
@@ -581,7 +544,7 @@ export const VideoPostCard: React.FC<VideoPostCardProps> = ({
                     '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.1)' },
                   }}
                 >
-                  {getVolumeIcon(videoState.isMuted, videoState.volume, 18)}
+                  {getVolumeIcon(isMuted, videoState.volume, 18)}
                 </IconButton>
               </Tooltip>
             </Box>
@@ -632,7 +595,7 @@ export const VideoPostCard: React.FC<VideoPostCardProps> = ({
           }}
           onClick={toggleMute}
         >
-          {videoState.isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+          {isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
         </Fab>
       </Box>
     </Card>

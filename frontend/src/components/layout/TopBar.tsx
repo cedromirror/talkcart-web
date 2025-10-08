@@ -50,6 +50,7 @@ import {
   LogOut,
   Award,
   Zap,
+  Sparkles,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useThemeToggle } from '@/hooks/useThemeToggle';
@@ -104,7 +105,8 @@ export const TopBar: React.FC<TopBarProps> = ({
     unreadCount: unreadNotifications,
     markAsRead,
     markAllAsRead,
-    fetchNotifications
+    fetchNotifications,
+    loading
   } = useNotifications();
 
   // State for notifications popover
@@ -299,49 +301,68 @@ export const TopBar: React.FC<TopBarProps> = ({
   return (
     <AppBar
       position="fixed"
-      elevation={0}
       sx={{
-        bgcolor: alpha(theme.palette.background.paper, 0.8),
-        backdropFilter: 'blur(20px)',
-        borderBottom: `1px solid ${theme.palette.divider}`,
+        bgcolor: theme.palette.background.paper,
         color: theme.palette.text.primary,
+        boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
         zIndex: theme.zIndex.drawer + 1,
       }}
     >
-      <Toolbar sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', minWidth: { xs: 'auto', md: '200px' } }}>
-          {showMenuButton && !mobileSearchOpen && (
+      <Toolbar sx={{ minHeight: 64 }}>
+        {/* Left Section - Menu and Logo */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          {showMenuButton && (
             <IconButton
               edge="start"
               color="inherit"
               aria-label="menu"
               onClick={onMenuClick}
-              sx={{ mr: 2 }}
+              sx={{ mr: 1 }}
             >
-              <MenuIcon size={24} />
+              <MenuIcon />
             </IconButton>
           )}
-
-          {!mobileSearchOpen && (
-            <Typography
-              variant="h6"
-              component="div"
+          
+          {/* Logo */}
+          <Box 
+            sx={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              cursor: 'pointer',
+              '&:hover': {
+                opacity: 0.8
+              }
+            }}
+            onClick={() => router.push('/')}
+          >
+            <Box
+              component="img"
+              src="/talkcart.logo.png"
+              alt="TalkCart Logo"
               sx={{
-                fontWeight: 700,
-                display: { xs: 'block', md: 'block' },
-                cursor: 'pointer'
+                height: 45,
+                width: 45,
+                borderRadius: '50%',
+                objectFit: 'cover',
+                mr: 1,
               }}
-              onClick={() => {
-                if (!isAuthenticated) {
-                  router.push('/auth/login');
-                } else {
-                  router.push('/social');
-                }
+            />
+            <Typography 
+              variant="h6" 
+              component="div" 
+              sx={{ 
+                fontWeight: 700,
+                background: 'linear-gradient(45deg, #2196F3 30%, #21CBF3 90%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                display: { xs: 'none', sm: 'block' }
               }}
             >
               TalkCart
             </Typography>
-          )}
+          </Box>
+          
+          {/* Removed AI Demo Link */}
         </Box>
 
         {/* Mobile Search Bar */}
@@ -667,9 +688,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                     }
                   }}
                 >
-                  <Badge badgeContent={2} color="primary">
-                    <MessageSquare size={20} />
-                  </Badge>
+                  <MessageSquare size={20} />
                 </IconButton>
               </Tooltip>
 
@@ -954,18 +973,22 @@ export const TopBar: React.FC<TopBarProps> = ({
         </Box>
         <Divider sx={{ mb: 1 }} />
 
-        {!notifications ? (
+        {loading ? (
           <Box sx={{ p: 3, textAlign: 'center' }}>
             <CircularProgress size={24} />
           </Box>
-        ) : Array.isArray(notifications) && notifications.length === 0 ? (
+        ) : !Array.isArray(notifications) ? (
+          <Box sx={{ p: 3, textAlign: 'center' }}>
+            <CircularProgress size={24} />
+          </Box>
+        ) : notifications.length === 0 ? (
           <Box sx={{ p: 3, textAlign: 'center' }}>
             <Typography variant="body2" color="text.secondary">
               No notifications yet
             </Typography>
           </Box>
         ) : (
-          Array.isArray(notifications) && notifications.map((notification) => {
+          notifications.map((notification) => {
             // Format relative time
             const timeAgo = (date: string) => {
               const now = new Date();

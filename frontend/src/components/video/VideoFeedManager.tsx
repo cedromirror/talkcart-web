@@ -12,6 +12,7 @@ import { useVideoAutoscroll, VideoAutoscrollSettings } from '@/hooks/useVideoAut
 import { getSmoothScrollVideoManager } from '@/utils/smoothScrollVideoManager';
 import { getVolumeIcon, getVolumeTooltip } from '@/utils/videoUtils';
 import toast from 'react-hot-toast';
+import VideoPerformanceMonitor from './VideoPerformanceMonitor'; // Import performance monitor
 
 interface VideoFeedContextValue {
   registerVideo: (videoId: string, element: HTMLVideoElement, container: HTMLElement) => () => void;
@@ -53,12 +54,12 @@ export const VideoFeedProvider: React.FC<VideoFeedProviderProps> = ({
 }) => {
   const [settings, setSettings] = useState<VideoAutoscrollSettings>({
     enabled: true,
-    threshold: 0.6,
+    threshold: 0.7,
     pauseOnScroll: true,
-    muteByDefault: true,
+    muteByDefault: false,
     preloadStrategy: 'metadata',
-    maxConcurrentVideos: 2,
-    scrollPauseDelay: 150,
+    maxConcurrentVideos: 1,
+    scrollPauseDelay: 100,
     viewTrackingThreshold: 3,
     autoplayOnlyOnWifi: false,
     respectReducedMotion: true,
@@ -68,10 +69,10 @@ export const VideoFeedProvider: React.FC<VideoFeedProviderProps> = ({
   const [isOnline, setIsOnline] = useState(true);
   const [globalMuted, setGlobalMuted] = useState(settings.muteByDefault);
   const [scrollVideoManager] = useState(() => getSmoothScrollVideoManager({
-    scrollThreshold: 50,
-    velocityThreshold: 2,
-    debounceMs: 16,
-    preloadDistance: 200,
+    scrollThreshold: 30,
+    velocityThreshold: 1.5,
+    debounceMs: 10,
+    preloadDistance: 300,
     smoothTransition: true,
     adaptiveQuality: true,
   }));
@@ -166,7 +167,7 @@ export const VideoFeedProvider: React.FC<VideoFeedProviderProps> = ({
     ]);
   }, [pauseAllVideosHook, scrollVideoManager]);
 
-  // Setup smooth scroll manager callbacks
+  // Setup smooth scroll manager callbacks with better error handling
   useEffect(() => {
     scrollVideoManager.onVideoPlayCallback(handleVideoPlay);
     scrollVideoManager.onVideoPauseCallback(handleVideoPause);
@@ -178,45 +179,57 @@ export const VideoFeedProvider: React.FC<VideoFeedProviderProps> = ({
     });
 
     return () => {
-      scrollVideoManager.destroy();
+      try {
+        scrollVideoManager.destroy();
+      } catch (error) {
+        console.warn('Error destroying scroll video manager:', error);
+      }
     };
   }, [scrollVideoManager, handleVideoPlay, handleVideoPause]);
 
-  // Monitor online status
+  // Monitor online status with better error handling
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
 
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('offline', handleOffline);
+    }
 
     return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+      }
     };
   }, []);
 
-  // Update settings
+  // Update settings with better error handling
   const updateSettings = useCallback((newSettings: Partial<VideoAutoscrollSettings>) => {
     setSettings(prev => ({ ...prev, ...newSettings }));
     
-    // Save to localStorage
+    // Save to localStorage with error handling
     if (typeof window !== 'undefined') {
-      localStorage.setItem('videoFeedSettings', JSON.stringify({ ...settings, ...newSettings }));
+      try {
+        localStorage.setItem('videoFeedSettings', JSON.stringify({ ...settings, ...newSettings }));
+      } catch (error) {
+        console.warn('Failed to save video settings to localStorage:', error);
+      }
     }
   }, [settings]);
 
-  // Load settings from localStorage
+  // Load settings from localStorage with better error handling
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('videoFeedSettings');
-      if (saved) {
-        try {
+      try {
+        const saved = localStorage.getItem('videoFeedSettings');
+        if (saved) {
           const parsedSettings = JSON.parse(saved);
           setSettings(prev => ({ ...prev, ...parsedSettings }));
-        } catch (error) {
-          console.warn('Failed to load video settings:', error);
         }
+      } catch (error) {
+        console.warn('Failed to load video settings from localStorage:', error);
       }
     }
   }, []);
@@ -285,6 +298,9 @@ export const VideoFeedProvider: React.FC<VideoFeedProviderProps> = ({
   return (
     <VideoFeedContext.Provider value={contextValue}>
       {children}
+      
+      {/* Video Performance Monitor */}
+      <VideoPerformanceMonitor />
       
       {/* Floating Controls */}
       {showControls && (

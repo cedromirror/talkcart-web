@@ -3,6 +3,7 @@ const router = express.Router();
 const { Post, User, Comment, Follow, Share, Notification } = require('../models');
 const { authenticateToken } = require('./auth');
 const { getVideoThumbnail } = require('../config/cloudinary');
+const NotificationService = require('../services/notificationService');
 
 // Helper function to get Socket.IO instance
 const getIo = (req) => req.app.get('io');
@@ -1134,7 +1135,7 @@ router.post('/', authenticateToken, async (req, res) => {
 });
 
 // @route   POST /api/posts/:id/like
-// @desc    Toggle like/unlike a post
+// @desc    Like a post
 // @access  Private
 router.post('/:id/like', authenticateToken, async (req, res) => {
   try {
@@ -1143,122 +1144,104 @@ router.post('/:id/like', authenticateToken, async (req, res) => {
 
     console.log(`POST /api/posts/${id}/like - User: ${userId}`);
 
-    // Validate inputs
-    if (!id) {
-      return res.status(400).json({
-        success: false,
-        error: 'Post ID is required',
-      });
-    }
-
-    // Handle anonymous user - they can't like posts
-    if (userId === 'anonymous-user' || req.user.isAnonymous) {
-      return res.status(401).json({
-        success: false,
-        error: 'Authentication required to like posts',
-        message: 'Please log in to like posts',
-      });
-    }
-
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        error: 'User authentication failed',
-      });
-    }
-
     // Validate ObjectId format
     if (!id.match(/^[0-9a-fA-F]{24}$/)) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid post ID format',
+        error: 'Invalid post ID format'
       });
     }
 
-    console.log(`Finding post with ID: ${id}`);
-    const post = await Post.findById(id);
+    // Find the post
+    const post = await Post.findById(id).populate('author', 'username displayName');
     if (!post) {
-      console.log(`Post not found with ID: ${id}`);
       return res.status(404).json({
         success: false,
-        error: 'Post not found',
+        error: 'Post not found'
       });
     }
 
-    // Check if already liked
-    const isAlreadyLiked = post.isLikedBy(userId);
-    console.log(`User ${userId} already liked post ${id}: ${isAlreadyLiked}`);
-
-    let action, newIsLiked;
+    // Check if user already liked the post
+    const alreadyLiked = post.isLikedBy(userId);
+    let action, updatedLikeCount;
     
-    if (isAlreadyLiked) {
+    if (alreadyLiked) {
       // Unlike the post
-      console.log(`Removing like for user ${userId} on post ${id}`);
       await post.removeLike(userId);
       action = 'unlike';
-      newIsLiked = false;
-      console.log(`Like removed successfully`);
+      console.log(`User ${userId} unliked post ${id}`);
     } else {
       // Like the post
-      console.log(`Adding like for user ${userId} on post ${id}`);
       await post.addLike(userId);
       action = 'like';
-      newIsLiked = true;
-      console.log(`Like added successfully`);
+      console.log(`User ${userId} liked post ${id}`);
+      
+      // Create notification for post owner (if not self-like and author exists)
+      if (post.author && post.author._id && post.author._id.toString() !== userId) {
+        try {
+          await NotificationService.createLikeNotification(
+            userId,
+            post.author._id.toString(),
+            id,
+            post.content ? post.content.substring(0, 100) : ''
+          );
+        } catch (notificationError) {
+          console.error('Failed to create like notification:', notificationError);
+          // Continue without notification if it fails
+        }
+      }
     }
 
-    // Broadcast like update via Socket.IO to all users viewing this post
+    // Get the updated like count after saving
+    // Refresh the post to get the updated like count
+    const updatedPost = await Post.findById(id);
+    updatedLikeCount = updatedPost.likes ? updatedPost.likes.length : 0;
+
+    // Broadcast like update via Socket.IO
     const io = getIo(req);
     if (io) {
       const updateData = {
         postId: post._id.toString(),
         type: 'like_update',
-        action: action, // 'like' or 'unlike'
-        likeCount: post.likeCount,
-        isLiked: newIsLiked,
+        action: action,
+        likeCount: updatedLikeCount,
         userId: userId,
         timestamp: new Date().toISOString()
       };
       
       // Broadcast to all users in the post room
-      io.to(`post_${post._id}`).emit('post-like-updated', updateData);
+      io.to(`post:${post._id}`).emit('post-like-updated', updateData);
       
       // Also broadcast to general post updates for feeds
       io.emit('post-updated', {
         postId: post._id.toString(),
         type: 'like',
-        likeCount: post.likeCount,
+        likeCount: updatedLikeCount,
         timestamp: new Date().toISOString()
       });
       
       console.log(`Broadcasted ${action} update for post ${id}`);
     }
 
-    console.log(`Returning response with likeCount: ${post.likeCount}`);
     res.json({
       success: true,
       data: {
         postId: post._id,
         action: action,
-        likeCount: post.likeCount,
-        isLiked: newIsLiked,
-        wasAlreadyLiked: isAlreadyLiked,
-      },
-      message: `Post ${action}d successfully`,
+        likeCount: updatedLikeCount,
+        message: `Post ${action}d successfully`
+      }
     });
   } catch (error) {
-    console.error('Like toggle error:', error);
-    console.error('Error stack:', error.stack);
+    console.error('Like/unlike post error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to toggle like',
-      message: error.message,
-      details: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+      error: 'Failed to like/unlike post',
+      message: error.message
     });
   }
 });
 
-// Note: Unlike functionality is now handled by the toggle endpoint above (POST /api/posts/:id/like)
 
 // @route   POST /api/posts/:id/bookmark
 // @desc    Toggle bookmark on a post

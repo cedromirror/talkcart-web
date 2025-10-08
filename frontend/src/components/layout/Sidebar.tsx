@@ -37,6 +37,8 @@ import {
   TrendingUp,
   Users,
   Bookmark,
+  Store,
+  CreditCard,
 } from 'lucide-react';
 import { useRouter } from 'next/router';
 import { useAuth } from '@/contexts/AuthContext';
@@ -87,6 +89,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     'Main': true,
     'Features': true,
     'Marketplace': true,
+    'AI Features': true,
   });
 
   // Toggle section expansion
@@ -98,95 +101,146 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   // Enhanced navigation sections with more pages
-  const navigationSections: NavigationSection[] = [
-    {
-      title: 'Main',
-      defaultExpanded: true,
-      items: [
-        {
-          label: 'Social Feed',
-          path: '/social',
-          icon: <Globe size={20} />,
-          tooltip: 'View your social feed',
-          badge: 'Hot',
-        },
-        {
-          label: 'Messages',
-          path: '/messages',
-          icon: <MessageCircle size={20} />,
-          tooltip: 'Private messages & conversations',
-          badge: totalUnread > 0 ? totalUnread.toString() : undefined,
-        },
-        {
-          label: 'Trending',
-          path: '/trending',
-          icon: <TrendingUp size={20} />,
-          tooltip: 'See what\'s trending',
-          new: true,
-        },
-        {
-          label: 'Who to Follow',
-          path: '/suggestions',
-          icon: <Users size={20} />,
-          tooltip: 'Find people to follow',
-        },
-      ],
-    },
-    {
-      title: 'Features',
-      defaultExpanded: true,
-      items: [
-        {
-          label: 'Marketplace',
-          path: '/marketplace',
-          icon: <ShoppingCart size={20} />,
-          tooltip: 'NFT Marketplace & Digital Assets',
-          badge: 'Hot',
-        },
-        {
-          label: 'Wallet',
-          path: '/wallet',
-          icon: <Wallet size={20} />,
-          tooltip: 'Manage your wallet',
-          requireAuth: true,
-        },
-        {
-          label: 'Bookmarks',
-          path: '/bookmarks',
-          icon: <Bookmark size={20} />,
-          tooltip: 'Your saved posts',
-          requireAuth: true,
-        },
-      ],
-    },
-    {
+  const getNavigationSections = (): NavigationSection[] => {
+    const sections: NavigationSection[] = [
+      {
+        title: 'Main',
+        defaultExpanded: true,
+        items: [
+          {
+            label: 'Social Feed',
+            path: '/social',
+            icon: <Globe size={20} />,
+            tooltip: 'View your social feed',
+            badge: 'Hot',
+          },
+          {
+            label: 'Messages',
+            path: '/messages',
+            icon: <MessageCircle size={20} />,
+            tooltip: 'Private messages & conversations',
+          },
+          {
+            label: 'Trending',
+            path: '/trending',
+            icon: <TrendingUp size={20} />,
+            tooltip: 'See what\'s trending',
+            new: true,
+          },
+          {
+            label: 'Who to Follow',
+            path: '/suggestions',
+            icon: <Users size={20} />,
+            tooltip: 'Find people to follow',
+          },
+        ],
+      },
+      {
+        title: 'Features',
+        defaultExpanded: true,
+        items: [
+          {
+            label: 'Marketplace',
+            path: '/marketplace',
+            icon: <ShoppingCart size={20} />,
+            tooltip: 'NFT Marketplace & Digital Assets',
+            badge: 'Hot',
+          },
+          {
+            label: 'Wallet',
+            path: '/wallet',
+            icon: <Wallet size={20} />,
+            tooltip: 'Manage your wallet',
+            requireAuth: true,
+          },
+          {
+            label: 'Bookmarks',
+            path: '/bookmarks',
+            icon: <Bookmark size={20} />,
+            tooltip: 'Your saved posts',
+            requireAuth: true,
+          },
+        ],
+      },
+    ];
+
+    // Check if user is a vendor
+    const isVendor = isAuthenticated && user?.role === 'vendor';
+
+    // Add marketplace navigation section
+    sections.push({
       title: 'Marketplace',
       defaultExpanded: true,
       items: [
-        {
-          label: 'Dashboard',
-          path: '/marketplace/dashboard',
-          icon: <ShoppingBag size={20} />,
-          tooltip: 'Manage your marketplace',
-          requireAuth: true,
-        },
-        {
-          label: 'My Orders',
-          path: '/marketplace/dashboard?tab=0',
-          icon: <Package size={20} />,
-          tooltip: 'View your orders',
-          requireAuth: true,
-        },
-        {
-          label: 'My Products',
-          path: '/marketplace/dashboard?tab=1',
-          icon: <Star size={20} />,
-          tooltip: 'Your listed products',
-          requireAuth: true,
-        },
+        // Vendor-specific items (visible only to vendors) - placed at the top
+        ...(isVendor ? [
+          {
+            label: 'My Store Dashboard',
+            path: '/marketplace/vendor-dashboard',
+            icon: <Store size={20} />,
+            tooltip: 'Manage your store dashboard',
+            requireAuth: true,
+          },
+          {
+            label: 'My Orders',
+            path: '/marketplace/dashboard?tab=0',
+            icon: <Package size={20} />,
+            tooltip: 'View your orders',
+            requireAuth: true,
+          },
+          {
+            label: 'Vendor Store',
+            path: '/marketplace/vendor-payment-settings',
+            icon: <ShoppingBag size={20} />,
+            tooltip: 'Manage your vendor store',
+            requireAuth: true,
+          }
+        ] : [
+          // Non-vendor specific items
+          {
+            label: 'My Orders',
+            path: '/marketplace/dashboard?tab=0',
+            icon: <Package size={20} />,
+            tooltip: 'View your orders',
+            requireAuth: true,
+          },
+          {
+            label: 'My Dashboard',
+            path: '/marketplace/my-dashboard',
+            icon: <ShoppingBag size={20} />,
+            tooltip: 'Manage your marketplace',
+            requireAuth: true,
+          },
+          {
+            label: 'My Products',
+            path: '/marketplace/dashboard?tab=1',
+            icon: <Star size={20} />,
+            tooltip: 'Your listed products',
+            requireAuth: true,
+          },
+          {
+            label: 'Payment History',
+            path: '/marketplace/dashboard?tab=2',
+            icon: <CreditCard size={20} />,
+            tooltip: 'View your payment history',
+            requireAuth: true,
+          },
+          {
+            label: 'Register Your Store',
+            path: '/marketplace/vendor-store-registration',
+            icon: <Store size={20} />,
+            tooltip: 'Register your store to start selling',
+            requireAuth: true,
+            new: true,
+          }
+        ])
       ],
-    },
-  ];
+    });
+
+    return sections;
+  };
+
+  const navigationSections = getNavigationSections();
 
   const handleNavigation = (path: string) => {
     // If user is not authenticated, redirect to login page

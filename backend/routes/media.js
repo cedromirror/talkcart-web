@@ -205,41 +205,55 @@ router.post('/upload/single', authenticateToken, (req, res) => {
 
       console.log('File uploaded successfully to Cloudinary');
 
-      // Extract Cloudinary information from the file object
-      // CloudinaryStorage sometimes doesn't populate all fields, so we extract from path/filename
-      const public_id = req.file.public_id || req.file.filename;
-      const secure_url = req.file.secure_url || req.file.path;
-      const url = req.file.url || req.file.path;
+      // Handle both Cloudinary and local storage responses
+      let fileData;
+      
+      if (req.file) {
+        // Check if this is a Cloudinary response or local storage response
+        if (req.file.public_id && req.file.secure_url) {
+          // Cloudinary response
+          const public_id = req.file.public_id || req.file.filename;
+          const secure_url = req.file.secure_url || req.file.path;
+          const url = req.file.url || req.file.path;
+          const format = req.file.format || req.file.originalname?.split('.').pop()?.toLowerCase();
+          const resource_type = req.file.resource_type ||
+            (req.file.mimetype?.startsWith('image/') ? 'image' :
+              req.file.mimetype?.startsWith('video/') ? 'video' :
+                req.file.mimetype?.startsWith('audio/') ? 'audio' : 'raw');
 
-      // Extract format from original filename or URL
-      const format = req.file.format || req.file.originalname?.split('.').pop()?.toLowerCase();
-
-      // Determine resource type from mimetype
-      const resource_type = req.file.resource_type ||
-        (req.file.mimetype?.startsWith('image/') ? 'image' :
-          req.file.mimetype?.startsWith('video/') ? 'video' :
-            req.file.mimetype?.startsWith('audio/') ? 'audio' : 'raw');
-
-      console.log('Cloudinary response:', {
-        public_id,
-        secure_url,
-        format,
-        resource_type,
-        bytes: req.file.bytes || req.file.size
-      });
-
-      const fileData = {
-        public_id,
-        secure_url,
-        url,
-        format,
-        resource_type,
-        bytes: req.file.bytes || req.file.size,
-        width: req.file.width,
-        height: req.file.height,
-        duration: req.file.duration,
-        created_at: req.file.created_at || new Date().toISOString(),
-      };
+          fileData = {
+            public_id,
+            secure_url,
+            url,
+            format,
+            resource_type,
+            bytes: req.file.bytes || req.file.size,
+            width: req.file.width,
+            height: req.file.height,
+            duration: req.file.duration,
+            created_at: req.file.created_at || new Date().toISOString(),
+          };
+        } else {
+          // Local storage response (fallback)
+          const filename = req.file.filename || req.file.originalname;
+          fileData = {
+            public_id: filename,
+            secure_url: `${req.protocol}://${req.get('host')}/uploads/${filename}`,
+            url: `${req.protocol}://${req.get('host')}/uploads/${filename}`,
+            format: req.file.originalname?.split('.').pop()?.toLowerCase() || 'unknown',
+            resource_type: req.file.mimetype?.startsWith('image/') ? 'image' :
+                          req.file.mimetype?.startsWith('video/') ? 'video' :
+                          req.file.mimetype?.startsWith('audio/') ? 'audio' : 'raw',
+            bytes: req.file.size,
+            created_at: new Date().toISOString(),
+          };
+        }
+      } else {
+        return res.status(400).json({
+          success: false,
+          error: 'No file uploaded',
+        });
+      }
 
       console.log('Sending response:', fileData);
       // Send the file data in the expected API response structure
@@ -345,38 +359,56 @@ router.post('/upload/profile-picture', authenticateToken, (req, res) => {
 
       console.log('Profile picture uploaded successfully to Cloudinary');
 
-      // Extract Cloudinary information from the file object
-      // CloudinaryStorage sometimes doesn't populate all fields, so we extract from path/filename
-      const public_id = req.file.public_id || req.file.filename;
-      const secure_url = req.file.secure_url || req.file.path;
-      const url = req.file.url || req.file.path;
+      // Handle both Cloudinary and local storage responses
+      let fileData;
+      
+      if (req.file) {
+        // Check if this is a Cloudinary response or local storage response
+        if (req.file.public_id && req.file.secure_url) {
+          // Cloudinary response
+          const public_id = req.file.public_id || req.file.filename;
+          const secure_url = req.file.secure_url || req.file.path;
+          const url = req.file.url || req.file.path;
+          const format = req.file.format || req.file.originalname?.split('.').pop()?.toLowerCase();
 
-      // Extract format from original filename or URL
-      const format = req.file.format || req.file.originalname?.split('.').pop()?.toLowerCase();
+          fileData = {
+            public_id,
+            secure_url,
+            url,
+            format,
+            resource_type: 'image',
+            bytes: req.file.bytes || req.file.size,
+            width: req.file.width,
+            height: req.file.height,
+            created_at: req.file.created_at || new Date().toISOString(),
+          };
+        } else {
+          // Local storage response (fallback)
+          const filename = req.file.filename || req.file.originalname;
+          fileData = {
+            public_id: filename,
+            secure_url: `${req.protocol}://${req.get('host')}/uploads/${filename}`,
+            url: `${req.protocol}://${req.get('host')}/uploads/${filename}`,
+            format: req.file.originalname?.split('.').pop()?.toLowerCase() || 'unknown',
+            resource_type: 'image',
+            bytes: req.file.size,
+            created_at: new Date().toISOString(),
+          };
+        }
+      } else {
+        return res.status(400).json({
+          success: false,
+          error: 'No profile picture uploaded',
+          details: 'Please select an image from your device'
+        });
+      }
 
-      console.log('File details:', {
-        public_id,
-        secure_url,
-        format,
-        bytes: req.file.bytes || req.file.size
-      });
-
-      const fileData = {
-        public_id,
-        secure_url,
-        url,
-        format,
-        resource_type: 'image',
-        bytes: req.file.bytes || req.file.size,
-        width: req.file.width,
-        height: req.file.height,
-        created_at: req.file.created_at || new Date().toISOString(),
-      };
+      console.log('File details:', fileData);
 
       res.status(200).json({
         success: true,
         data: fileData,
-        message: 'Profile picture uploaded successfully',
+        message: 'Profile picture uploaded successfully'
       });
     } catch (error) {
       console.error('Profile picture upload error:', error);

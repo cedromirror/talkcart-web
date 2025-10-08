@@ -7,8 +7,11 @@ const rateLimit = require('express-rate-limit');
 const path = require('path');
 const http = require('http');
 const { Server } = require('socket.io');
+// Load dotenv with explicit path to backend directory
+const dotenv = require('dotenv');
+const dotenvResult = dotenv.config({ path: path.resolve(__dirname, '.env') });
+
 const connectDB = require('./config/database');
-require('dotenv').config();
 const cron = require('node-cron');
 const jwt = require('jsonwebtoken');
 const { User } = require('./models');
@@ -305,6 +308,7 @@ app.use('/api/auth', require('./routes/auth').router);
 app.use('/api/users', require('./routes/users'));
 app.use('/api/posts', require('./routes/posts'));
 app.use('/api/comments', require('./routes/comments'));
+app.use('/api/chatbot', require('./routes/chatbot'));
 app.use('/api/marketplace', require('./routes/marketplace'));
 // Cart routes removed as part of cart functionality removal
 app.use('/api/orders', require('./routes/orders'));
@@ -321,6 +325,7 @@ app.use('/api/payments', require('./routes/payments'));
 app.use('/api/search', require('./routes/search'));
 app.use('/api/products', require('./routes/productComparison'));
 app.use('/api/notifications', require('./routes/notifications'));
+// AI routes removed as part of AI functionality removal
 // Admin routes
 const adminRouter = require('./routes/admin');
 const adminSignupRouter = require('./routes/adminSignup');
@@ -459,6 +464,7 @@ app.get('/', (req, res) => {
       comments: '/api/comments',
       marketplace: '/api/marketplace',
       messages: '/api/messages',
+      chatbot: '/api/chatbot',
       dao: '/api/dao',
       analytics: '/api/analytics',
       media: '/api/media',
@@ -539,255 +545,11 @@ app.use('/api/*', (req, res) => {
       '/api/payments',
       '/api/webhooks',
       '/api/search',
-      '/api/notifications'
+      '/api/notifications',
+      '/api/chatbot'
     ]
   });
 });
-
-// ============================================================================
-// WEBSOCKET HANDLERS - CONSOLIDATED
-// ============================================================================
-
-// Store connected clients and user presence
-const connectedClients = new Map();
-const connectedUsers = new Map();
-const userPresence = new Map();
-
-// SINGLE Socket connection handler - consolidated all functionality
-io.on('connection', (socket) => {
-  console.log('🔌 User connected:', socket.id);
-  console.log(`🔌 Connection details:`, {
-    id: socket.id,
-    transport: socket.conn.transport.name,
-    remoteAddress: socket.conn.remoteAddress
-  });
-  
-  connectedClients.set(socket.id, socket);
-
-  // User is already authenticated via JWT middleware
-  if (socket.userId) {
-    connectedUsers.set(socket.id, socket.userId);
-    socket.join(`user_${socket.userId}`);
-    console.log(`🔐 Socket auto-authenticated for user: ${socket.user?.username} (${socket.userId})`);
-
-    // Register socket with SocketService for messaging functionality
-    if (global.socketServiceInstance) {
-      global.socketServiceInstance.registerAuthenticatedSocket(socket);
-    }
-
-    // Emit authentication success
-    socket.emit('authenticated', { userId: socket.userId });
-  }
-
-  // Handle authentication (unified)
-  socket.on('authenticate', (data) => {
-    try {
-      const { token, userId } = data;
-      if (userId && socket.userId === userId) {
-        // Already authenticated via JWT, just confirm
-        socket.emit('authenticated', { userId: socket.userId, success: true });
-        console.log(`🔐 Legacy authenticate event confirmed for user: ${userId}`);
-      } else if (userId && socket.userId !== userId) {
-        // Mismatch between JWT user and requested user
-        socket.emit('error', { message: 'Authentication failed: User ID mismatch' });
-      } else {
-        socket.emit('error', { message: 'Authentication failed: No user ID provided' });
-      }
-    } catch (error) {
-      console.error('🔐 Authentication error:', error);
-      socket.emit('authenticated', { success: false, error: 'Authentication failed' });
-    }
-  });
-
-  // User joins their personal room
-  socket.on('join-user', (userId) => {
-    if (userId) {
-      socket.userId = userId;
-      connectedUsers.set(socket.id, userId);
-      socket.join(`user_${userId}`);
-      socket.join(`user-${userId}`);
-      console.log(`👤 User ${userId} joined personal room`);
-    }
-  });
-
-  // Join feed room for real-time updates
-  socket.on('join-feed', (feedType) => {
-    socket.join(`feed_${feedType}`);
-    socket.join(`feed-${feedType}`);
-    console.log(`📡 Socket joined feed: ${feedType}`);
-  });
-
-  // Leave feed room
-  socket.on('leave-feed', (feedType) => {
-    socket.leave(`feed_${feedType}`);
-    socket.leave(`feed-${feedType}`);
-    console.log(`📡 Socket left feed: ${feedType}`);
-  });
-
-  // Join/leave post rooms
-  socket.on('join-post', (data) => {
-    const postId = typeof data === 'string' ? data : data?.postId;
-    if (postId) {
-      socket.join(`post:${postId}`);
-      console.log(`📝 Socket joined post room: ${postId}`);
-    }
-  });
-
-  socket.on('leave-post', (data) => {
-    const postId = typeof data === 'string' ? data : data?.postId;
-    if (postId) {
-      socket.leave(`post:${postId}`);
-      console.log(`📝 Socket left post room: ${postId}`);
-    }
-  });
-
-  // Handle new post creation broadcast
-  socket.on('new-post', (postData) => {
-    socket.broadcast.to('feed_for-you').emit('post-created', postData);
-    socket.broadcast.to('feed_recent').emit('post-created', postData);
-    socket.broadcast.to('feed_trending').emit('post-created', postData);
-    updateAndEmitTrendingHashtags();
-  });
-
-  // Handle post interaction updates
-  socket.on('post-interaction', (data) => {
-    const { postId, type, count, userId, feedType } = data;
-    console.log(`📡 Post interaction received:`, data);
-    
-    // Broadcast to all users
-    io.emit('post-updated', {
-      postId,
-      type,
-      count,
-      userId,
-      timestamp: new Date().toISOString()
-    });
-    
-    // Broadcast to specific feed
-    socket.to(`feed-${feedType || 'for-you'}`).emit('post-updated', data);
-  });
-
-  // Handle presence updates
-  socket.on('presence-update', async (data) => {
-    const { userId, isOnline, showOnlineStatus, showLastSeen } = data;
-
-    try {
-      if (userId) {
-        const User = require('./models/User');
-        const updateData = { lastSeenAt: new Date() };
-        if (isOnline) updateData.lastLoginAt = new Date();
-        await User.findByIdAndUpdate(userId, updateData);
-      }
-
-      const presenceData = {
-        userId, isOnline,
-        lastSeen: new Date(),
-        showOnlineStatus, showLastSeen,
-        socketId: socket.id
-      };
-
-      userPresence.set(userId, presenceData);
-
-      if (showOnlineStatus) {
-        socket.broadcast.emit('presence-update', {
-          userId, isOnline,
-          lastSeen: showLastSeen ? presenceData.lastSeen : undefined,
-          showOnlineStatus, showLastSeen
-        });
-      }
-
-      console.log(`👤 Presence updated for user ${userId}: ${isOnline ? 'online' : 'offline'}`);
-    } catch (error) {
-      console.error('Error updating presence:', error);
-    }
-  });
-
-  // Handle follow updates
-  socket.on('follow_update', async (data) => {
-    const { userId, targetUserId, action, followerCount } = data;
-    try {
-      console.log(`👥 Follow update: ${userId} ${action}ed ${targetUserId}`);
-      
-      io.emit('follow_update', {
-        userId, targetUserId, action, followerCount,
-        timestamp: new Date().toISOString()
-      });
-      
-      io.to(`user-${targetUserId}`).emit('follower_change', {
-        followerId: userId, action, followerCount,
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      console.error('Error handling follow update:', error);
-    }
-  });
-
-  // Join trending topics room
-  socket.on('join-trending', () => {
-    socket.join('trending-topics');
-    console.log(`📊 Socket ${socket.id} joined trending-topics room`);
-  });
-
-  // Test message handler
-  socket.on('test-message', (data) => {
-    console.log(`🧪 Test message received:`, data);
-    socket.emit('test-response', {
-      ...data,
-      echo: true,
-      serverTime: new Date().toISOString()
-    });
-  });
-
-  // Handle user disconnect
-  socket.on('disconnect', async () => {
-    const userId = connectedUsers.get(socket.id);
-    if (userId) {
-      connectedUsers.delete(socket.id);
-      console.log(`👤 User ${userId} disconnected`);
-    }
-
-    connectedClients.delete(socket.id);
-
-    // Clean up SocketService data
-    if (global.socketServiceInstance) {
-      await global.socketServiceInstance.handleSocketDisconnect(socket.id);
-    }
-
-    console.log('❌ User disconnected:', socket.id);
-  });
-});
-
-// Helper functions for broadcasting
-const broadcastToAll = (event, data) => {
-  io.emit(event, data);
-};
-
-const broadcastToFeed = (feedType, event, data) => {
-  io.to(`feed_${feedType}`).emit(event, data);
-  io.to(`feed-${feedType}`).emit(event, data);
-};
-
-const broadcastToUser = (userId, event, data) => {
-  io.to(`user-${userId}`).emit(event, data);
-  io.to(`user_${userId}`).emit(event, data);
-};
-
-// Make broadcast functions available globally
-global.broadcastToAll = broadcastToAll;
-global.broadcastToFeed = broadcastToFeed;
-global.broadcastToUser = broadcastToUser;
-
-// Initialize socket service
-const SocketService = require('./services/socketService');
-const socketService = new SocketService(io);
-app.set('socketService', socketService);
-
-// Make socketService available globally for socket connection handler
-global.socketServiceInstance = socketService;
-
-// Make io and socketService available to routes
-app.set('io', io);
-app.set('socketService', socketService);
 
 // General 404 handler
 app.use('*', (req, res) => {
@@ -804,9 +566,9 @@ app.use('*', (req, res) => {
   });
 });
 
-
-
-
+// Global error handler middleware
+const { errorHandler } = require('./middleware/errorHandler');
+app.use(errorHandler);
 
 // Initialize MongoDB and start server
 const initializeApp = async () => {
@@ -821,6 +583,11 @@ const initializeApp = async () => {
     console.log('✅ MongoDB connection established');
     console.log('💾 Using MongoDB for all data storage');
 
+    // Start vendor payout job
+    const vendorPayoutJob = require('./jobs/vendorPayoutJob');
+    vendorPayoutJob.start();
+    console.log('💰 Vendor payout job started');
+
     // Start server
     server.listen(PORT, () => {
       console.log('');
@@ -832,6 +599,7 @@ const initializeApp = async () => {
       console.log(`🔌 WebSocket: ws://localhost:${PORT}`);
       console.log(`💾 Database: MongoDB (Required)`);
       console.log(`📡 Real-time: Socket.IO Ready`);
+      console.log(`💰 Vendor Payouts: Enabled`);
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log('');
     });

@@ -84,7 +84,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   }, [router, router.isReady]);
 
   // Fetch user profile from backend
-  const fetchUserProfile = async (token: string) => {
+  const fetchUserProfile = async (token: string, forceRefresh = false) => {
     // Only run on client side
     if (typeof window === 'undefined') {
       setLoading(false);
@@ -92,7 +92,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
 
     try {
-      const response = await api.auth.getProfile();
+      const response = await api.auth.getProfile(forceRefresh);
 
       if (response.success && response.data) {
         // Persist user for future profile fetches
@@ -231,13 +231,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   // Update user data locally (for immediate UI updates)
   const updateUser = (userData: Partial<User>) => {
+    console.log('Updating user with data:', userData);
     if (user) {
       const updatedUser = { ...user, ...userData };
       setUser(updatedUser);
+      console.log('User updated to:', updatedUser);
       // Persist user for future sessions
       if (typeof window !== 'undefined') {
         try {
           localStorage.setItem('user', JSON.stringify(updatedUser));
+        } catch (error) {
+          console.error('Failed to persist user data:', error);
+        }
+      }
+    } else {
+      console.log('No current user to update, creating new user object');
+      const newUser = userData as User;
+      setUser(newUser);
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('user', JSON.stringify(newUser));
         } catch (error) {
           console.error('Failed to persist user data:', error);
         }

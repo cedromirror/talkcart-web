@@ -1,6 +1,8 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { waitFor } from '@testing-library/dom';
 import { PostCardEnhanced } from './PostCardEnhanced';
+import { VideoFeedProvider } from '@/components/video/VideoFeedManager'; // Import VideoFeedProvider
 import * as api from '@/lib/api';
 
 // Mock the contexts
@@ -57,6 +59,17 @@ jest.mock('@/components/common/UserAvatar', () => {
   };
 });
 
+// Mock VideoFeedProvider to avoid complex setup in tests
+jest.mock('@/components/video/VideoFeedManager', () => {
+  const actual = jest.requireActual('@/components/video/VideoFeedManager');
+  const mockUseVideoFeed = jest.fn();
+  return {
+    ...actual,
+    useVideoFeed: mockUseVideoFeed,
+    mockUseVideoFeed,
+  };
+});
+
 const mockPost: any = {
   id: 'post-1',
   type: 'image',
@@ -85,13 +98,39 @@ const mockPost: any = {
   ]
 };
 
+// Wrapper component that provides the VideoFeedProvider for tests
+const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  return (
+    <VideoFeedProvider
+      initialSettings={{
+        enabled: true,
+        threshold: 0.6,
+        pauseOnScroll: true,
+        muteByDefault: false,
+        preloadStrategy: 'metadata',
+        maxConcurrentVideos: 2,
+        scrollPauseDelay: 150,
+        viewTrackingThreshold: 3,
+        autoplayOnlyOnWifi: false,
+        respectReducedMotion: true,
+      }}
+    >
+      {children}
+    </VideoFeedProvider>
+  );
+};
+
 describe('PostCardEnhanced', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
   it('renders the post card with all elements', () => {
-    render(<PostCardEnhanced post={mockPost} />);
+    render(
+      <TestWrapper>
+        <PostCardEnhanced post={mockPost} />
+      </TestWrapper>
+    );
 
     // Check that the post content is rendered
     expect(screen.getByText('Test post content with #hashtag')).toBeInTheDocument();
@@ -123,7 +162,11 @@ describe('PostCardEnhanced', () => {
       success: true,
     });
 
-    render(<PostCardEnhanced post={mockPost} />);
+    render(
+      <TestWrapper>
+        <PostCardEnhanced post={mockPost} />
+      </TestWrapper>
+    );
 
     // Click the like button (icon)
     const likeButton = screen.getByRole('button', { name: /heart/i });
@@ -141,7 +184,11 @@ describe('PostCardEnhanced', () => {
       success: true,
     });
 
-    render(<PostCardEnhanced post={mockPost} />);
+    render(
+      <TestWrapper>
+        <PostCardEnhanced post={mockPost} />
+      </TestWrapper>
+    );
 
     // Click the bookmark button (icon)
     const bookmarkButton = screen.getByRole('button', { name: /bookmark/i });
@@ -159,7 +206,11 @@ describe('PostCardEnhanced', () => {
       success: true,
     });
 
-    render(<PostCardEnhanced post={mockPost} />);
+    render(
+      <TestWrapper>
+        <PostCardEnhanced post={mockPost} />
+      </TestWrapper>
+    );
 
     // Click the follow icon (now in vertical action icons)
     const followButton = screen.getByRole('button', { name: /user/i });
@@ -179,7 +230,11 @@ describe('PostCardEnhanced', () => {
       },
     };
 
-    render(<PostCardEnhanced post={postWithFollowing} />);
+    render(
+      <TestWrapper>
+        <PostCardEnhanced post={postWithFollowing} />
+      </TestWrapper>
+    );
 
     // Check that the following button is rendered
     // Note: In a real implementation, this would depend on the user's following state
