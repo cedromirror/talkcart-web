@@ -1,10 +1,11 @@
-﻿﻿const express = require('express');
+﻿﻿﻿﻿﻿﻿const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 const Joi = require('joi');
-const { User, RefundEvent, Refund, Product, Order, Settings, EmailLog, WebhookEvent } = require('../models');
+const { User, RefundEvent, Refund, Product, Order, Settings, EmailLog, WebhookEvent, ChatbotConversation, ChatbotMessage } = require('../models');
 const { authenticateTokenStrict } = require('./auth');
 const emailService = require('../services/emailService');
+
 
 // Simple admin check middleware
 async function requireAdmin(req, res, next) {
@@ -3931,4 +3932,541 @@ router.get('/vendors/:id/payout-history', authenticateTokenStrict, requireAdmin,
   }
 });
 
+// ============================================================================
+// CHAT MANAGEMENT
+// ============================================================================
+
+// GET /api/admin/chat/conversations
+// Get all chatbot conversations with filters
+router.get('/chat/conversations', authenticateTokenStrict, requireAdmin, async (req, res) => {
+  try {
+    const {
+      page = 1,
+      limit = 20,
+      status,
+      search,
+      vendorId,
+      customerId,
+      sortBy = 'lastActivity',
+      sortOrder = 'desc'
+    } = req.query;
+
+    const pageN = Math.max(1, Number(page) || 1);
+    const limitN = Math.min(100, Math.max(1, Number(limit) || 20));
+
+    // Build query
+    const query = {};
+    
+    if (status === 'active') {
+      query.isActive = true;
+      query.isResolved = false;
+    } else if (status === 'resolved') {
+      query.isResolved = true;
+    } else if (status === 'closed') {
+      query.isActive = false;
+    }
+    
+    if (vendorId && mongoose.Types.ObjectId.isValid(vendorId)) {
+      query.vendorId = vendorId;
+    }
+    
+    if (customerId && mongoose.Types.ObjectId.isValid(customerId)) {
+      query.customerId = customerId;
+    }
+
+    // Search functionality
+    if (search) {
+      query.$or = [
+        { productName: new RegExp(String(search), 'i') }
+      ];
+    }
+
+    // Aggregation pipeline for enhanced data
+    const pipeline = [
+      { $match: query },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'customerId',
+          foreignField: '_id',
+          as: 'customer'
+        }
+      },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'vendorId',
+          foreignField: '_id',
+          as: 'vendor'
+        }
+      },
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'productId',
+          foreignField: '_id',
+          as: 'product'
+        }
+      },
+      {
+        $lookup: {
+          from: 'chatbotmessages',
+          localField: 'lastMessage',
+          foreignField: '_id',
+          as: 'lastMessageData'
+        }
+      },
+      {
+        $unwind: {
+          path: '$customer',
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      {
+        $unwind: {
+          path: '$vendor',
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      {
+        $unwind: {
+          path: '$product',
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      {
+        $unwind: {
+          path: '$lastMessageData',
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      {
+        $project: {
+          _id: 1,
+          customerId: 1,
+          vendorId: 1,
+          productId: 1,
+          productName: 1,
+          lastActivity: 1,
+          isActive: 1,
+          isResolved: 1,
+          botEnabled: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          customer: {
+            _id: '$customer._id',
+            username: '$customer.username',
+            displayName: '$customer.displayName',
+            avatar: '$customer.avatar',
+            isVerified: '$customer.isVerified'
+          },
+          vendor: {
+            _id: '$vendor._id',
+            username: '$vendor.username',
+            displayName: '$vendor.displayName',
+            avatar: '$vendor.avatar',
+            isVerified: '$vendor.isVerified'
+          },
+          product: {
+            _id: '$product._id',
+            name: '$product.name',
+            images: '$product.images'
+          },
+          lastMessage: {
+            content: '$lastMessageData.content',
+            senderId: '$lastMessageData.senderId',
+            createdAt: '$lastMessageData.createdAt'
+          }
+        }
+      }
+    ];
+
+    // Add sorting
+    const sortField = sortBy === 'createdAt' ? 'createdAt' : 'lastActivity';
+    const sortDirection = sortOrder === 'asc' ? 1 : -1;
+    pipeline.push({ $sort: { [sortField]: sortDirection } });
+
+    // Add pagination
+    pipeline.push(
+      { $skip: (pageN - 1) * limitN },
+      { $limit: limitN }
+    );
+
+    // Get total count
+    const countPipeline = [
+      { $match: query },
+      { $count: 'total' }
+    ];
+
+    const [conversations, totalCount] = await Promise.all([
+      ChatbotConversation.aggregate(pipeline),
+      ChatbotConversation.aggregate(countPipeline)
+    ]);
+
+    const total = totalCount[0]?.total || 0;
+
+    res.json({
+      success: true,
+      data: conversations,
+      pagination: {
+        page: pageN,
+        limit: limitN,
+        total,
+        pages: Math.ceil(total / limitN)
+      }
+    });
+  } catch (e) {
+    console.error('admin chat conversations error:', e);
+    res.status(500).json({ success: false, message: 'Failed to fetch chat conversations' });
+  }
+});
+
+// GET /api/admin/chat/conversations/:id
+// Get specific chatbot conversation with messages
+router.get('/chat/conversations/:id', authenticateTokenStrict, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid conversation ID' });
+    }
+
+    const conversation = await ChatbotConversation.findById(id)
+      .populate({
+        path: 'customerId',
+        select: 'username displayName avatar isVerified'
+      })
+      .populate({
+        path: 'vendorId',
+        select: 'username displayName avatar isVerified'
+      })
+      .populate({
+        path: 'productId',
+        select: 'name images price currency'
+      })
+      .populate({
+        path: 'lastMessage',
+        select: 'content senderId createdAt isBotMessage'
+      })
+      .lean();
+
+    if (!conversation) {
+      return res.status(404).json({ success: false, message: 'Conversation not found' });
+    }
+
+    res.json({ success: true, data: conversation });
+  } catch (e) {
+    console.error('admin chat conversation detail error:', e);
+    res.status(500).json({ success: false, message: 'Failed to fetch conversation details' });
+  }
+});
+
+// GET /api/admin/chat/conversations/:id/messages
+// Get messages for a specific conversation
+router.get('/chat/conversations/:id/messages', authenticateTokenStrict, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { limit = 50, page = 1, before } = req.query;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid conversation ID' });
+    }
+
+    // Check if conversation exists
+    const conversation = await ChatbotConversation.findById(id);
+    if (!conversation) {
+      return res.status(404).json({ success: false, message: 'Conversation not found' });
+    }
+
+    // Build query
+    let query = {
+      conversationId: id,
+      isDeleted: false
+    };
+
+    if (before) {
+      query.createdAt = { $lt: new Date(before) };
+    }
+
+    // Calculate pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Get messages
+    const messages = await ChatbotMessage.find(query)
+      .populate({
+        path: 'senderId',
+        select: 'username displayName avatar isVerified'
+      })
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip(skip)
+      .lean();
+
+    // Get total count
+    const total = await ChatbotMessage.countDocuments(query);
+
+    res.json({
+      success: true,
+      data: {
+        messages: messages.reverse(), // Reverse to show oldest first
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: Math.ceil(total / parseInt(limit)),
+          totalMessages: total,
+          hasMore: skip + messages.length < total
+        }
+      }
+    });
+  } catch (e) {
+    console.error('admin chat messages error:', e);
+    res.status(500).json({ success: false, message: 'Failed to fetch messages' });
+  }
+});
+
+// POST /api/admin/chat/conversations/:id/messages
+// Send message in chatbot conversation as admin
+router.post('/chat/conversations/:id/messages', authenticateTokenStrict, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { content } = req.body;
+
+    // Validation
+    if (!content || content.trim().length === 0) {
+      return res.status(400).json({ success: false, message: 'Message content is required' });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid conversation ID' });
+    }
+
+    // Find the conversation
+    const conversation = await ChatbotConversation.findById(id);
+    if (!conversation) {
+      return res.status(404).json({ success: false, message: 'Conversation not found' });
+    }
+
+    // Create new message from admin
+    const newMessage = new ChatbotMessage({
+      conversationId: id,
+      senderId: req.user.userId, // Admin is the sender
+      content: content.trim(),
+      isBotMessage: false,
+      type: 'text'
+    });
+
+    await newMessage.save();
+
+    // Update conversation's last message and activity
+    conversation.lastMessage = newMessage._id;
+    conversation.lastActivity = new Date();
+    await conversation.save();
+
+    // Populate sender data
+    await newMessage.populate('senderId', 'username displayName avatar isVerified');
+
+    res.json({
+      success: true,
+      data: {
+        message: newMessage
+      },
+      message: 'Message sent successfully'
+    });
+  } catch (e) {
+    console.error('admin send chat message error:', e);
+    res.status(500).json({ success: false, message: 'Failed to send message' });
+  }
+});
+
+// PUT /api/admin/chat/conversations/:id/resolve
+// Mark chatbot conversation as resolved
+router.put('/chat/conversations/:id/resolve', authenticateTokenStrict, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid conversation ID' });
+    }
+
+    // Find the conversation
+    const conversation = await ChatbotConversation.findById(id);
+    if (!conversation) {
+      return res.status(404).json({ success: false, message: 'Conversation not found' });
+    }
+
+    // Mark as resolved
+    conversation.isResolved = true;
+    conversation.lastActivity = new Date();
+    await conversation.save();
+
+    // Create resolution message
+    const resolutionMessage = new ChatbotMessage({
+      conversationId: id,
+      senderId: req.user.userId, // Admin is the sender
+      content: 'This conversation has been marked as resolved by an administrator.',
+      type: 'system',
+      isBotMessage: true
+    });
+
+    await resolutionMessage.save();
+
+    res.json({
+      success: true,
+      data: {
+        conversation
+      },
+      message: 'Conversation marked as resolved'
+    });
+  } catch (e) {
+    console.error('admin resolve chat conversation error:', e);
+    res.status(500).json({ success: false, message: 'Failed to resolve conversation' });
+  }
+});
+
+// DELETE /api/admin/chat/conversations/:id
+// Close/deactivate chatbot conversation
+router.delete('/chat/conversations/:id', authenticateTokenStrict, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid conversation ID' });
+    }
+
+    // Find the conversation
+    const conversation = await ChatbotConversation.findById(id);
+    if (!conversation) {
+      return res.status(404).json({ success: false, message: 'Conversation not found' });
+    }
+
+    // Mark as inactive
+    conversation.isActive = false;
+    conversation.lastActivity = new Date();
+    await conversation.save();
+
+    // Create closure message
+    const closureMessage = new ChatbotMessage({
+      conversationId: id,
+      senderId: req.user.userId, // Admin is the sender
+      content: 'This conversation has been closed by an administrator.',
+      type: 'system',
+      isBotMessage: true
+    });
+
+    await closureMessage.save();
+
+    res.json({
+      success: true,
+      message: 'Conversation closed successfully'
+    });
+  } catch (e) {
+    console.error('admin close chat conversation error:', e);
+    res.status(500).json({ success: false, message: 'Failed to close conversation' });
+  }
+});
+
+// GET /api/admin/chat/analytics
+// Get chat analytics
+router.get('/chat/analytics', authenticateTokenStrict, requireAdmin, async (req, res) => {
+  try {
+    const { timeRange = '30d' } = req.query;
+    const now = new Date();
+    let startDate;
+
+    switch (timeRange) {
+      case '7d': startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); break;
+      case '30d': startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000); break;
+      case '90d': startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000); break;
+      default: startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    }
+
+    // Get chat statistics
+    const [
+      totalConversations,
+      activeConversations,
+      resolvedConversations,
+      closedConversations,
+      totalMessages,
+      vendorResponseRate,
+      avgResponseTime
+    ] = await Promise.all([
+      ChatbotConversation.countDocuments({ createdAt: { $gte: startDate } }),
+      ChatbotConversation.countDocuments({ isActive: true, isResolved: false }),
+      ChatbotConversation.countDocuments({ isResolved: true }),
+      ChatbotConversation.countDocuments({ isActive: false }),
+      ChatbotMessage.countDocuments({ createdAt: { $gte: startDate } }),
+      // Calculate vendor response rate (messages sent by vendors vs total messages)
+      ChatbotMessage.aggregate([
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'senderId',
+            foreignField: '_id',
+            as: 'sender'
+          }
+        },
+        {
+          $unwind: '$sender'
+        },
+        {
+          $match: {
+            'sender.role': 'vendor',
+            createdAt: { $gte: startDate }
+          }
+        }
+      ]).then(vendorMessages => vendorMessages.length),
+      // Calculate average response time (simplified)
+      ChatbotMessage.aggregate([
+        {
+          $match: {
+            createdAt: { $gte: startDate }
+          }
+        },
+        {
+          $group: {
+            _id: '$conversationId',
+            messageCount: { $sum: 1 },
+            firstMessage: { $min: '$createdAt' },
+            lastMessage: { $max: '$createdAt' }
+          }
+        },
+        {
+          $project: {
+            duration: {
+              $subtract: ['$lastMessage', '$firstMessage']
+            },
+            messageCount: 1
+          }
+        },
+        {
+          $match: {
+            messageCount: { $gt: 1 }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            avgDuration: { $avg: '$duration' }
+          }
+        }
+      ]).then(result => result[0] ? result[0].avgDuration / (1000 * 60) : 0) // Convert to minutes
+    ]);
+
+    const analytics = {
+      total_conversations: totalConversations,
+      active_conversations: activeConversations,
+      resolved_conversations: resolvedConversations,
+      closed_conversations: closedConversations,
+      total_messages: totalMessages,
+      vendor_response_rate: totalMessages > 0 ? (vendorResponseRate / totalMessages) * 100 : 0,
+      avg_response_time: avgResponseTime || 0
+    };
+
+    res.json({ success: true, data: analytics });
+  } catch (e) {
+    console.error('admin chat analytics error:', e);
+    res.status(500).json({ success: false, message: 'Failed to fetch chat analytics' });
+  }
+});
+
 module.exports = router;
+

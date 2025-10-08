@@ -2,8 +2,7 @@ const mongoose = require('mongoose');
 
 const chatbotConversationSchema = new mongoose.Schema({
   customerId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
+    type: mongoose.Schema.Types.Mixed,
     required: true
   },
   vendorId: {

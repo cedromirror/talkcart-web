@@ -22,25 +22,12 @@ import {
 } from '@mui/icons-material';
 import { AdminApi } from '../src/services/api';
 
-interface UserAnalytics {
-  total_users: number;
-  active_users: number;
-  new_users: number;
-  suspended_users: number;
-  user_growth_rate: number;
-  kyc_distribution: Record<string, number>;
-  role_distribution: Record<string, number>;
-  growth_chart: Array<{ _id: string; count: number }>;
-  time_range: string;
-}
-
 interface UserSummary {
   total_users: number;
   active_users: number;
-  kyc_approved: number;
-  recent_signups: number;
+  suspended_users: number;
   vendor_users: number;
-  approval_rate: number;
+  recent_signups: number;
 }
 
 interface UserDashboardProps {
@@ -49,7 +36,6 @@ interface UserDashboardProps {
 }
 
 export default function UserDashboard({ timeRange = '30d', onRefresh }: UserDashboardProps) {
-  const [analytics, setAnalytics] = useState<UserAnalytics | null>(null);
   const [summary, setSummary] = useState<UserSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -59,17 +45,33 @@ export default function UserDashboard({ timeRange = '30d', onRefresh }: UserDash
       setLoading(true);
       setError('');
       
-      const [analyticsRes, summaryRes] = await Promise.all([
-        AdminApi.getUserAnalytics(timeRange),
-        AdminApi.getUserSummary()
+      // Fetch users with different filters to get summary data
+      const [allUsersRes, activeUsersRes, suspendedUsersRes, vendorUsersRes] = await Promise.all([
+        AdminApi.listUsers({}),
+        AdminApi.listUsers({ status: 'active' }),
+        AdminApi.listUsers({ status: 'suspended' }),
+        AdminApi.listUsers({ role: 'vendor' })
       ]);
 
-      if (analyticsRes?.success) {
-        setAnalytics(analyticsRes.data);
-      }
-      
-      if (summaryRes?.success) {
-        setSummary(summaryRes.data);
+      if (allUsersRes?.success && activeUsersRes?.success && suspendedUsersRes?.success && vendorUsersRes?.success) {
+        const totalUsers = allUsersRes.data?.length || 0;
+        const activeUsers = activeUsersRes.data?.length || 0;
+        const suspendedUsers = suspendedUsersRes.data?.length || 0;
+        const vendorUsers = vendorUsersRes.data?.length || 0;
+        
+        // Calculate recent signups (last 24 hours)
+        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const recentSignups = allUsersRes.data?.filter((user: any) => 
+          new Date(user.createdAt) > oneDayAgo
+        ).length || 0;
+
+        setSummary({
+          total_users: totalUsers,
+          active_users: activeUsers,
+          suspended_users: suspendedUsers,
+          vendor_users: vendorUsers,
+          recent_signups: recentSignups
+        });
       }
     } catch (err) {
       console.error('Failed to fetch user dashboard data:', err);
@@ -113,8 +115,7 @@ export default function UserDashboard({ timeRange = '30d', onRefresh }: UserDash
     );
   }
 
-  const data = analytics || summary;
-  if (!data) return null;
+  if (!summary) return null;
 
   return (
     <Box>
@@ -150,13 +151,11 @@ export default function UserDashboard({ timeRange = '30d', onRefresh }: UserDash
                     Total Users
                   </Typography>
                   <Typography variant="h4">
-                    {data.total_users || 0}
+                    {summary.total_users || 0}
                   </Typography>
-                  {analytics?.new_users !== undefined && (
-                    <Typography variant="caption" color="success.main">
-                      +{analytics.new_users} new ({timeRange})
-                    </Typography>
-                  )}
+                  <Typography variant="caption" color="success.main">
+                    +{summary.recent_signups} new (24h)
+                  </Typography>
                 </Box>
               </Stack>
             </CardContent>
@@ -183,11 +182,11 @@ export default function UserDashboard({ timeRange = '30d', onRefresh }: UserDash
                     Active Users
                   </Typography>
                   <Typography variant="h4">
-                    {data.active_users || 0}
+                    {summary.active_users || 0}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {data.total_users > 0 
-                      ? formatPercentage((data.active_users / data.total_users) * 100)
+                    {summary.total_users > 0 
+                      ? formatPercentage((summary.active_users / summary.total_users) * 100)
                       : '0%'} of total
                   </Typography>
                 </Box>
@@ -196,7 +195,7 @@ export default function UserDashboard({ timeRange = '30d', onRefresh }: UserDash
           </Card>
         </Grid>
 
-        {/* KYC Approved */}
+        {/* Vendors */}
         <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
@@ -213,17 +212,15 @@ export default function UserDashboard({ timeRange = '30d', onRefresh }: UserDash
                 </Box>
                 <Box sx={{ flex: 1 }}>
                   <Typography variant="body2" color="text.secondary">
-                    KYC Approved
+                    Vendors
                   </Typography>
                   <Typography variant="h4">
-                    {summary?.kyc_approved || analytics?.kyc_distribution?.approved || 0}
+                    {summary.vendor_users || 0}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {summary?.approval_rate !== undefined
-                      ? formatPercentage(summary.approval_rate)
-                      : data.total_users > 0
-                        ? formatPercentage(((summary?.kyc_approved || analytics?.kyc_distribution?.approved || 0) / data.total_users) * 100)
-                        : '0%'} approval rate
+                    {summary.total_users > 0 
+                      ? formatPercentage((summary.vendor_users / summary.total_users) * 100)
+                      : '0%'} of total
                   </Typography>
                 </Box>
               </Stack>
@@ -251,11 +248,11 @@ export default function UserDashboard({ timeRange = '30d', onRefresh }: UserDash
                     Suspended
                   </Typography>
                   <Typography variant="h4">
-                    {analytics?.suspended_users || 0}
+                    {summary.suspended_users || 0}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {data.total_users > 0 
-                      ? formatPercentage(((analytics?.suspended_users || 0) / data.total_users) * 100)
+                    {summary.total_users > 0 
+                      ? formatPercentage((summary.suspended_users / summary.total_users) * 100)
                       : '0%'} of total
                   </Typography>
                 </Box>
@@ -265,83 +262,28 @@ export default function UserDashboard({ timeRange = '30d', onRefresh }: UserDash
         </Grid>
 
         {/* User Growth Rate */}
-        {analytics?.user_growth_rate !== undefined && (
-          <Grid item xs={12} sm={6} md={4}>
-            <Card>
-              <CardContent>
-                <Stack spacing={2}>
-                  <Stack direction="row" alignItems="center" spacing={1}>
-                    <TrendingUpIcon color="primary" />
-                    <Typography variant="body2" color="text.secondary">
-                      User Growth Rate
-                    </Typography>
-                  </Stack>
-                  <Typography variant="h5">
-                    {formatPercentage(analytics.user_growth_rate)}
-                  </Typography>
-                  <LinearProgress 
-                    variant="determinate" 
-                    value={Math.min(Math.abs(analytics.user_growth_rate), 100)} 
-                    sx={{ height: 8, borderRadius: 4 }}
-                    color={analytics.user_growth_rate >= 0 ? 'success' : 'error'}
-                  />
-                </Stack>
-              </CardContent>
-            </Card>
-          </Grid>
-        )}
-
-        {/* Recent Signups */}
-        {summary?.recent_signups !== undefined && (
-          <Grid item xs={12} sm={6} md={4}>
-            <Card>
-              <CardContent>
-                <Stack spacing={2}>
-                  <Stack direction="row" alignItems="center" spacing={1}>
-                    <PersonAddIcon color="success" />
-                    <Typography variant="body2" color="text.secondary">
-                      Recent Signups (24h)
-                    </Typography>
-                  </Stack>
-                  <Typography variant="h5">
-                    {summary.recent_signups}
-                  </Typography>
-                  <Chip 
-                    label={summary.recent_signups > 0 ? 'Active Growth' : 'No New Signups'}
-                    color={summary.recent_signups > 0 ? 'success' : 'default'}
-                    size="small"
-                  />
-                </Stack>
-              </CardContent>
-            </Card>
-          </Grid>
-        )}
-
-        {/* Vendor Users */}
-        {summary?.vendor_users !== undefined && (
-          <Grid item xs={12} sm={6} md={4}>
-            <Card>
-              <CardContent>
-                <Stack spacing={2}>
-                  <Stack direction="row" alignItems="center" spacing={1}>
-                    <AssessmentIcon color="info" />
-                    <Typography variant="body2" color="text.secondary">
-                      Vendor Users
-                    </Typography>
-                  </Stack>
-                  <Typography variant="h5">
-                    {summary.vendor_users.toLocaleString()}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {data.total_users > 0 
-                      ? formatPercentage((summary.vendor_users / data.total_users) * 100)
-                      : '0%'} of all users
+        <Grid item xs={12} sm={6} md={4}>
+          <Card>
+            <CardContent>
+              <Stack spacing={2}>
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  <TrendingUpIcon color="primary" />
+                  <Typography variant="body2" color="text.secondary">
+                    Recent Signups (24h)
                   </Typography>
                 </Stack>
-              </CardContent>
-            </Card>
-          </Grid>
-        )}
+                <Typography variant="h5">
+                  {summary.recent_signups}
+                </Typography>
+                <Chip 
+                  label={summary.recent_signups > 0 ? 'Active Growth' : 'No New Signups'}
+                  color={summary.recent_signups > 0 ? 'success' : 'default'}
+                  size="small"
+                />
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
       </Grid>
     </Box>
   );

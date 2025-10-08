@@ -66,7 +66,7 @@ const AccountSettingsPage: React.FC = () => {
     const file = e.target.files?.[0];
     if (file) {
       // For demo purposes, we'll just show a placeholder
-      setAvatar('https://via.placeholder.com/150');
+      setAvatar('/images/placeholder-image.png');
     }
   };
 
@@ -285,14 +285,14 @@ const AccountSettingsPage: React.FC = () => {
                       Member Since
                     </Typography>
                     <Typography variant="body1" gutterBottom>
-                      {new Date(user.createdAt).toLocaleDateString()}
+                      {user.createdAt && !isNaN(new Date(user.createdAt).getTime()) ? new Date(user.createdAt).toLocaleDateString() : 'N/A'}
                     </Typography>
                     
                     <Typography variant="body2" color="text.secondary" gutterBottom sx={{ mt: 2 }}>
                       Last Login
                     </Typography>
                     <Typography variant="body1" gutterBottom>
-                      {user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : 'Never'}
+                      {user.lastLoginAt && !isNaN(new Date(user.lastLoginAt).getTime()) ? new Date(user.lastLoginAt).toLocaleString() : 'Never'}
                     </Typography>
                     
                     <Typography variant="body2" color="text.secondary" gutterBottom sx={{ mt: 2 }}>
@@ -306,7 +306,7 @@ const AccountSettingsPage: React.FC = () => {
                       Role
                     </Typography>
                     <Typography variant="body1" gutterBottom>
-                      {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+                      {user.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : 'User'}
                     </Typography>
                   </>
                 ) : (

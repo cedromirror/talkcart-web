@@ -1,34 +1,32 @@
 import React, { useEffect, useState } from 'react';
-import {
-  Container,
-  Paper,
-  Typography,
-  Stack,
-  TextField,
-  Button,
-  MenuItem,
-  Table,
-  TableHead,
-  TableRow,
-  TableCell,
-  TableBody,
-  Chip,
-  IconButton,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Box,
-  Card,
-  CardContent,
-  Grid,
-  Avatar,
-  Tabs,
-  Tab,
-  Pagination,
-  Tooltip,
-  CircularProgress
-} from '@mui/material';
+import Container from '@mui/material/Container';
+import Paper from '@mui/material/Paper';
+import Typography from '@mui/material/Typography';
+import Stack from '@mui/material/Stack';
+import TextField from '@mui/material/TextField';
+import Button from '@mui/material/Button';
+import MenuItem from '@mui/material/MenuItem';
+import Table from '@mui/material/Table';
+import TableHead from '@mui/material/TableHead';
+import TableRow from '@mui/material/TableRow';
+import TableCell from '@mui/material/TableCell';
+import TableBody from '@mui/material/TableBody';
+import Chip from '@mui/material/Chip';
+import IconButton from '@mui/material/IconButton';
+import Dialog from '@mui/material/Dialog';
+import DialogTitle from '@mui/material/DialogTitle';
+import DialogContent from '@mui/material/DialogContent';
+import DialogActions from '@mui/material/DialogActions';
+import Box from '@mui/material/Box';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import Grid from '@mui/material/Grid';
+import Avatar from '@mui/material/Avatar';
+import Tabs from '@mui/material/Tabs';
+import Tab from '@mui/material/Tab';
+import Pagination from '@mui/material/Pagination';
+import Tooltip from '@mui/material/Tooltip';
+import CircularProgress from '@mui/material/CircularProgress';
 import {
   Edit as EditIcon,
   TrendingUp as TrendingUpIcon,
@@ -36,11 +34,15 @@ import {
   Visibility as ViewIcon,
   PersonOff as SuspendIcon,
   PersonAdd as UnsuspendIcon,
-  Verified as VerifiedIcon
+  Verified as VerifiedIcon,
+  Chat as ChatIcon
 } from '@mui/icons-material';
+import { useRouter } from 'next/router';
 import { useAdminGuard } from '@/services/useAdminGuard';
 import { AdminApi } from '@/services/api';
+import { AdminExtraApi } from '@/services/adminExtra';
 import VendorDashboard from '../components/VendorDashboard';
+import VendorChatInterface from '../components/VendorChatInterface';
 
 interface Vendor {
   _id: string;
@@ -97,6 +99,7 @@ function TabPanel(props: { children?: React.ReactNode; index: number; value: num
 }
 
 export default function VendorsAdmin() {
+  const router = useRouter();
   const guard = useAdminGuard();
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [loading, setLoading] = useState(true);
@@ -108,6 +111,7 @@ export default function VendorsAdmin() {
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
   const [kycDialogOpen, setKycDialogOpen] = useState(false);
   const [suspendDialogOpen, setSuspendDialogOpen] = useState(false);
+  const [chatDialogOpen, setChatDialogOpen] = useState(false);
   const [newKycStatus, setNewKycStatus] = useState('');
   const [suspendReason, setSuspendReason] = useState('');
   const [vendorStats, setVendorStats] = useState<Record<string, VendorStats>>({});
@@ -118,12 +122,18 @@ export default function VendorsAdmin() {
   const fetchVendors = async () => {
     try {
       setLoading(true);
-      const res = await AdminApi.listVendors({
+      // Use listUsers with role filter instead of non-existent listVendors
+      if (!AdminApi || typeof AdminApi.listUsers !== 'function') {
+        console.error('AdminApi.listUsers is not available');
+        return;
+      }
+      const res = await AdminApi.listUsers({
         page,
         limit,
         search: search || undefined,
         kycStatus: kycFilter || undefined,
-        status: statusFilter || undefined
+        status: statusFilter || undefined,
+        role: 'vendor' // Filter for vendors only
       });
       if (res?.success) {
         setVendors(res.data || []);
@@ -137,18 +147,24 @@ export default function VendorsAdmin() {
   };
 
   useEffect(() => {
+    // Guard checks within useEffect
+    if (!guard || guard.loading || !guard.allowed) {
+      return;
+    }
+    
     fetchVendors();
-  }, [page, limit, search, kycFilter]);
-
-  // Guard checks after all hooks are defined
-  if (guard.loading) return <div style={{ padding: 20 }}>Checking access…</div>;
-  if (!guard.allowed) return <div style={{ padding: 20, color: 'crimson' }}>{guard.error || 'Access denied'}</div>;
+  }, [page, limit, search, kycFilter, guard]);
 
   const handleKycUpdate = async () => {
     if (!selectedVendor || !newKycStatus) return;
     
     try {
-      const res = await AdminApi.updateUserKyc(selectedVendor._id, newKycStatus);
+      // Use setKyc from AdminExtraApi instead of non-existent updateUserKyc
+      if (!AdminExtraApi || typeof AdminExtraApi.setKyc !== 'function') {
+        console.error('AdminExtraApi.setKyc is not available');
+        return;
+      }
+      const res = await AdminExtraApi.setKyc(selectedVendor._id, newKycStatus as 'approved'|'rejected'|'pending'|'none');
       if (res?.success) {
         setKycDialogOpen(false);
         setSelectedVendor(null);
@@ -162,9 +178,14 @@ export default function VendorsAdmin() {
 
   const handleSuspendToggle = async (vendor: Vendor) => {
     try {
+      // Use suspendUser/unsuspendUser from AdminExtraApi instead of non-existent suspend/unsuspend methods
+      if (!AdminExtraApi || typeof AdminExtraApi.suspendUser !== 'function' || typeof AdminExtraApi.unsuspendUser !== 'function') {
+        console.error('AdminExtraApi suspend/unsuspend methods are not available');
+        return;
+      }
       const res = vendor.isSuspended
-        ? await AdminApi.unsuspendVendor(vendor._id)
-        : await AdminApi.suspendVendor(vendor._id, suspendReason || 'Administrative action');
+        ? await AdminExtraApi.unsuspendUser(vendor._id)
+        : await AdminExtraApi.suspendUser(vendor._id);
 
       if (res?.success) {
         fetchVendors();
@@ -187,7 +208,19 @@ export default function VendorsAdmin() {
     setKycDialogOpen(true);
   };
 
+  const openChatDialog = (vendor: Vendor) => {
+    setSelectedVendor(vendor);
+    setChatDialogOpen(true);
+  };
 
+  const closeChatDialog = () => {
+    setChatDialogOpen(false);
+    setSelectedVendor(null);
+  };
+
+  const handleViewVendor = (vendorId: string) => {
+    router.push(`/vendors/${vendorId}`);
+  };
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -203,6 +236,19 @@ export default function VendorsAdmin() {
       day: 'numeric'
     });
   };
+
+  // Guard checks in the render function
+  if (!guard) {
+    return <div style={{ padding: 20 }}>Initializing...</div>;
+  }
+
+  if (guard.loading) {
+    return <div style={{ padding: 20 }}>Checking access…</div>;
+  }
+
+  if (!guard.allowed) {
+    return <div style={{ padding: 20, color: 'crimson' }}>{guard.error || 'Access denied'}</div>;
+  }
 
   // Calculate summary stats
   const totalVendors = pagination.total;
@@ -311,7 +357,7 @@ export default function VendorsAdmin() {
                           <Typography variant="body2" fontWeight="medium">
                             {vendor.username}
                           </Typography>
-                          <Typography variant="caption" color="textSecondary">
+                          <Typography variant="caption" color="text.secondary">
                             {vendor.email}
                           </Typography>
                         </Box>
@@ -348,8 +394,14 @@ export default function VendorsAdmin() {
                     </TableCell>
                     <TableCell align="right">
                       <Stack direction="row" spacing={1}>
+                        <IconButton size="small" onClick={() => handleViewVendor(vendor._id)}>
+                          <ViewIcon />
+                        </IconButton>
                         <IconButton size="small" onClick={() => openKycDialog(vendor)}>
                           <EditIcon />
+                        </IconButton>
+                        <IconButton size="small" onClick={() => openChatDialog(vendor)}>
+                          <ChatIcon />
                         </IconButton>
                         <Tooltip title={vendor.isSuspended ? 'Unsuspend' : 'Suspend'}>
                           <IconButton
@@ -445,6 +497,15 @@ export default function VendorsAdmin() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Chat Dialog */}
+      {selectedVendor && (
+        <VendorChatInterface
+          vendor={selectedVendor}
+          open={chatDialogOpen}
+          onClose={closeChatDialog}
+        />
+      )}
     </Container>
   );
 }

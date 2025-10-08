@@ -94,6 +94,7 @@ import Layout from '@/components/layout/Layout';
 import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
 import { toast } from 'react-hot-toast';
+import { SupportAgent as SupportAgentIcon } from '@mui/icons-material';
 
 interface Product {
   id: string;
@@ -335,7 +336,10 @@ const VendorDashboard: React.FC = () => {
     if (typeof firstImage === 'string') {
       return firstImage;
     }
-    return firstImage?.secure_url || firstImage?.url || '/images/placeholder-image.png';
+    const imageUrl = firstImage?.secure_url || firstImage?.url || '/images/placeholder-image.png';
+    
+    // Add error handling for Cloudinary images
+    return imageUrl;
   };
 
   const formatPrice = (price: number, currency: string) => {
@@ -495,6 +499,13 @@ const VendorDashboard: React.FC = () => {
                   Messaging
                 </Button>
                 <Button
+                  variant="outlined"
+                  startIcon={<SupportAgentIcon />}
+                  onClick={() => router.push('/marketplace/vendor-admin-chat')}
+                >
+                  Chat with Admin
+                </Button>
+                <Button
                   variant="contained"
                   startIcon={<Plus size={16} />}
                   onClick={handleCreateProduct}
@@ -601,16 +612,22 @@ const VendorDashboard: React.FC = () => {
                             variant="rounded"
                             src={getImageSrc(product.images)}
                             sx={{ width: 80, height: 80 }}
+                            onError={(e) => {
+                              // Handle image loading errors
+                              const target = e.target as HTMLImageElement;
+                              target.src = '/images/placeholder-image.png';
+                            }}
                           />
                         </ListItemAvatar>
                         <ListItemText
                           primary={
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }} component="div">
                               <Typography 
                                 variant="subtitle1" 
                                 fontWeight={600}
                                 sx={{ cursor: 'pointer' }}
                                 onClick={() => handleViewProduct(product.id)}
+                                component="div"
                               >
                                 {product.name}
                               </Typography>
@@ -626,41 +643,42 @@ const VendorDashboard: React.FC = () => {
                             </Box>
                           }
                           secondary={
-                            <React.Fragment>
-                              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                            <Box component="div">
+                              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }} component="div">
                                 {product.description.substring(0, 100)}...
                               </Typography>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-                                <Typography variant="h6" color="primary" fontWeight={600}>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }} component="div">
+                                <Typography variant="h6" color="primary" fontWeight={600} component="div">
                                   {formatPrice(product.price, product.currency)}
                                 </Typography>
-                                <Typography variant="body2" color="text.secondary">
+                                <Typography variant="body2" color="text.secondary" component="div">
                                   <span style={{ verticalAlign: 'middle', marginRight: 4 }}>
                                     <Package size={14} style={{ verticalAlign: 'middle' }} />
                                   </span>
                                   Stock: {product.stock}
                                 </Typography>
-                                <Typography variant="body2" color="text.secondary">
+                                <Typography variant="body2" color="text.secondary" component="div">
                                   <span style={{ verticalAlign: 'middle', marginRight: 4 }}>
                                     <TrendingUp size={14} style={{ verticalAlign: 'middle' }} />
                                   </span>
                                   Sales: {product.sales}
                                 </Typography>
-                                <Typography variant="body2" color="text.secondary">
+                                <Typography variant="body2" color="text.secondary" component="div">
                                   <span style={{ verticalAlign: 'middle', marginRight: 4 }}>
                                     <Eye size={14} style={{ verticalAlign: 'middle' }} />
                                   </span>
                                   Views: {product.views}
                                 </Typography>
-                                <Typography variant="body2" color="text.secondary">
+                                <Typography variant="body2" color="text.secondary" component="div">
                                   <span style={{ verticalAlign: 'middle', marginRight: 4 }}>
                                     <Star size={14} style={{ verticalAlign: 'middle' }} />
                                   </span>
                                   {product.rating.toFixed(1)} ({product.reviewCount} reviews)
                                 </Typography>
                               </Box>
-                            </React.Fragment>
+                            </Box>
                           }
+                          sx={{ mr: 10 }}
                         />
                         <ListItemSecondaryAction>
                           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
@@ -721,6 +739,24 @@ const VendorDashboard: React.FC = () => {
           </CardContent>
         </Paper>
       </Container>
+      
+      {/* Chat with Admin Floating Button */}
+      <Tooltip title="Chat with Admin Support" arrow>
+        <Fab
+          color="primary"
+          aria-label="chat with admin"
+          sx={{
+            position: 'fixed',
+            bottom: 24,
+            right: 24,
+            zIndex: 1000,
+            boxShadow: `0 4px 12px ${alpha(theme.palette.primary.main, 0.3)}`,
+          }}
+          onClick={() => router.push('/marketplace/vendor-admin-chat')}
+        >
+          <SupportAgentIcon />
+        </Fab>
+      </Tooltip>
     </Layout>
   );
 };

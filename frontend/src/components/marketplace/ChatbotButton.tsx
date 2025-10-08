@@ -22,7 +22,9 @@ const ChatbotButton: React.FC<ChatbotButtonProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
-  const handleOpen = () => {
+  const handleOpen = (e: React.MouseEvent) => {
+    // Prevent event propagation to parent elements
+    e.stopPropagation();
     setOpen(true);
     setError(null);
     setSuccess(false);
@@ -35,7 +37,11 @@ const ChatbotButton: React.FC<ChatbotButtonProps> = ({
     setSuccess(false);
   };
 
-  const handleStartChat = async () => {
+  const handleStartChat = async (e: React.FormEvent) => {
+    // Prevent default form submission behavior
+    e.preventDefault();
+    e.stopPropagation();
+    
     if (!message.trim()) {
       setError('Please enter a message to start the conversation');
       return;
@@ -69,10 +75,8 @@ const ChatbotButton: React.FC<ChatbotButtonProps> = ({
             onChatStarted();
           }
           
-          // Close dialog after short delay
-          setTimeout(() => {
-            handleClose();
-          }, 1500);
+          // Don't automatically close the dialog - let the user close it manually
+          // This prevents any potential refresh issues
         } else {
           setError(messageResponse.message || 'Failed to send message');
         }
@@ -111,59 +115,61 @@ const ChatbotButton: React.FC<ChatbotButtonProps> = ({
       </Button>
 
       <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <MessageCircle size={20} />
-            Chat with Vendor about {productName}
-          </Box>
-        </DialogTitle>
-        
-        <DialogContent>
-          <Box sx={{ mt: 1 }}>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Start a conversation with the vendor about this product. Our chatbot will assist you 
-              and connect you with a vendor representative.
-            </Typography>
-            
-            {error && (
-              <Alert severity="error" sx={{ mb: 2 }}>
-                {error}
-              </Alert>
-            )}
-            
-            {success && (
-              <Alert severity="success" sx={{ mb: 2 }}>
-                Conversation started successfully! A vendor representative will respond shortly.
-              </Alert>
-            )}
-            
-            <TextField
-              fullWidth
-              multiline
-              rows={4}
-              label="Your message"
-              placeholder="Ask a question about this product..."
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              disabled={loading || success}
-              helperText="This will start a new conversation with the vendor"
-            />
-          </Box>
-        </DialogContent>
-        
-        <DialogActions>
-          <Button onClick={handleClose} disabled={loading}>
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            onClick={handleStartChat}
-            disabled={loading || success || !message.trim()}
-            startIcon={loading ? <CircularProgress size={16} /> : <Send size={16} />}
-          >
-            {loading ? 'Sending...' : 'Start Chat'}
-          </Button>
-        </DialogActions>
+        <form onSubmit={handleStartChat}>
+          <DialogTitle>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <MessageCircle size={20} />
+              Chat with Vendor about {productName}
+            </Box>
+          </DialogTitle>
+          
+          <DialogContent>
+            <Box sx={{ mt: 1 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Start a conversation with the vendor about this product. Our chatbot will assist you 
+                and connect you with a vendor representative.
+              </Typography>
+              
+              {error && (
+                <Alert severity="error" sx={{ mb: 2 }}>
+                  {error}
+                </Alert>
+              )}
+              
+              {success && (
+                <Alert severity="success" sx={{ mb: 2 }}>
+                  Conversation started successfully! A vendor representative will respond shortly.
+                </Alert>
+              )}
+              
+              <TextField
+                fullWidth
+                multiline
+                rows={4}
+                label="Your message"
+                placeholder="Ask a question about this product..."
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                disabled={loading || success}
+                helperText="This will start a new conversation with the vendor"
+              />
+            </Box>
+          </DialogContent>
+          
+          <DialogActions>
+            <Button onClick={handleClose} disabled={loading}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="contained"
+              disabled={loading || success || !message.trim()}
+              startIcon={loading ? <CircularProgress size={16} /> : <Send size={16} />}
+            >
+              {loading ? 'Sending...' : 'Start Chat'}
+            </Button>
+          </DialogActions>
+        </form>
       </Dialog>
     </>
   );

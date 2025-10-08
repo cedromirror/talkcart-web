@@ -23,24 +23,12 @@ import {
 } from '@mui/icons-material';
 import { AdminApi } from '../src/services/api';
 
-interface VendorAnalytics {
-  total_vendors: number;
-  active_vendors: number;
-  kyc_approved: number;
-  suspended_vendors: number;
-  new_vendors: number;
-  total_revenue: number;
-  total_orders: number;
-  avg_revenue_per_vendor: number;
-  vendor_growth_rate: number;
-}
-
 interface VendorSummary {
   total_vendors: number;
   active_vendors: number;
   kyc_approved: number;
   recent_signups: number;
-  approval_rate: number;
+  suspended_vendors: number;
 }
 
 interface VendorDashboardProps {
@@ -49,7 +37,6 @@ interface VendorDashboardProps {
 }
 
 export default function VendorDashboard({ timeRange = '30d', onRefresh }: VendorDashboardProps) {
-  const [analytics, setAnalytics] = useState<VendorAnalytics | null>(null);
   const [summary, setSummary] = useState<VendorSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -59,17 +46,33 @@ export default function VendorDashboard({ timeRange = '30d', onRefresh }: Vendor
       setLoading(true);
       setError('');
       
-      const [analyticsRes, summaryRes] = await Promise.all([
-        AdminApi.getVendorAnalytics(timeRange),
-        AdminApi.getVendorSummary()
+      // Fetch vendors with different filters to get summary data
+      const [allVendorsRes, activeVendorsRes, suspendedVendorsRes, kycApprovedRes] = await Promise.all([
+        AdminApi.listUsers({ role: 'vendor' }),
+        AdminApi.listUsers({ role: 'vendor', status: 'active' }),
+        AdminApi.listUsers({ role: 'vendor', status: 'suspended' }),
+        AdminApi.listUsers({ role: 'vendor', kycStatus: 'approved' })
       ]);
 
-      if (analyticsRes?.success) {
-        setAnalytics(analyticsRes.data);
-      }
-      
-      if (summaryRes?.success) {
-        setSummary(summaryRes.data);
+      if (allVendorsRes?.success && activeVendorsRes?.success && suspendedVendorsRes?.success && kycApprovedRes?.success) {
+        const totalVendors = allVendorsRes.data?.length || 0;
+        const activeVendors = activeVendorsRes.data?.length || 0;
+        const suspendedVendors = suspendedVendorsRes.data?.length || 0;
+        const kycApproved = kycApprovedRes.data?.length || 0;
+        
+        // Calculate recent signups (last 24 hours)
+        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const recentSignups = allVendorsRes.data?.filter((vendor: any) => 
+          new Date(vendor.createdAt) > oneDayAgo
+        ).length || 0;
+
+        setSummary({
+          total_vendors: totalVendors,
+          active_vendors: activeVendors,
+          kyc_approved: kycApproved,
+          recent_signups: recentSignups,
+          suspended_vendors: suspendedVendors
+        });
       }
     } catch (err) {
       console.error('Failed to fetch vendor dashboard data:', err);
@@ -120,8 +123,7 @@ export default function VendorDashboard({ timeRange = '30d', onRefresh }: Vendor
     );
   }
 
-  const data = analytics || summary;
-  if (!data) return null;
+  if (!summary) return null;
 
   return (
     <Box>
@@ -157,13 +159,11 @@ export default function VendorDashboard({ timeRange = '30d', onRefresh }: Vendor
                     Total Vendors
                   </Typography>
                   <Typography variant="h4">
-                    {data.total_vendors || 0}
+                    {summary.total_vendors || 0}
                   </Typography>
-                  {analytics?.new_vendors !== undefined && (
-                    <Typography variant="caption" color="success.main">
-                      +{analytics.new_vendors} new ({timeRange})
-                    </Typography>
-                  )}
+                  <Typography variant="caption" color="success.main">
+                    +{summary.recent_signups} new (24h)
+                  </Typography>
                 </Box>
               </Stack>
             </CardContent>
@@ -190,11 +190,11 @@ export default function VendorDashboard({ timeRange = '30d', onRefresh }: Vendor
                     Active Vendors
                   </Typography>
                   <Typography variant="h4">
-                    {data.active_vendors || 0}
+                    {summary.active_vendors || 0}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {data.total_vendors > 0 
-                      ? formatPercentage((data.active_vendors / data.total_vendors) * 100)
+                    {summary.total_vendors > 0 
+                      ? formatPercentage((summary.active_vendors / summary.total_vendors) * 100)
                       : '0%'} of total
                   </Typography>
                 </Box>
@@ -223,14 +223,12 @@ export default function VendorDashboard({ timeRange = '30d', onRefresh }: Vendor
                     KYC Approved
                   </Typography>
                   <Typography variant="h4">
-                    {data.kyc_approved || 0}
+                    {summary.kyc_approved || 0}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {summary?.approval_rate !== undefined 
-                      ? formatPercentage(summary.approval_rate)
-                      : data.total_vendors > 0 
-                        ? formatPercentage((data.kyc_approved / data.total_vendors) * 100)
-                        : '0%'} approval rate
+                    {summary.total_vendors > 0 
+                      ? formatPercentage((summary.kyc_approved / summary.total_vendors) * 100)
+                      : '0%'} approval rate
                   </Typography>
                 </Box>
               </Stack>
@@ -238,7 +236,7 @@ export default function VendorDashboard({ timeRange = '30d', onRefresh }: Vendor
           </Card>
         </Grid>
 
-        {/* Revenue or Suspended */}
+        {/* Suspended Vendors */}
         <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
@@ -247,109 +245,53 @@ export default function VendorDashboard({ timeRange = '30d', onRefresh }: Vendor
                   sx={{
                     p: 1,
                     borderRadius: 1,
-                    backgroundColor: analytics?.total_revenue ? 'warning.main' : 'error.main',
+                    backgroundColor: 'error.main',
                     color: 'white'
                   }}
                 >
-                  {analytics?.total_revenue ? <MoneyIcon /> : <BlockIcon />}
+                  <BlockIcon />
                 </Box>
                 <Box sx={{ flex: 1 }}>
                   <Typography variant="body2" color="text.secondary">
-                    {analytics?.total_revenue ? 'Total Revenue' : 'Suspended'}
+                    Suspended
                   </Typography>
                   <Typography variant="h4">
-                    {analytics?.total_revenue 
-                      ? formatCurrency(analytics.total_revenue)
-                      : (analytics?.suspended_vendors || 0)}
+                    {summary.suspended_vendors || 0}
                   </Typography>
-                  {analytics?.avg_revenue_per_vendor && (
-                    <Typography variant="caption" color="text.secondary">
-                      {formatCurrency(analytics.avg_revenue_per_vendor)} avg/vendor
-                    </Typography>
-                  )}
+                  <Typography variant="caption" color="text.secondary">
+                    {summary.total_vendors > 0 
+                      ? formatPercentage((summary.suspended_vendors / summary.total_vendors) * 100)
+                      : '0%'} of total
+                  </Typography>
                 </Box>
               </Stack>
             </CardContent>
           </Card>
         </Grid>
 
-        {/* Vendor Growth Rate */}
-        {analytics?.vendor_growth_rate !== undefined && (
-          <Grid item xs={12} sm={6} md={4}>
-            <Card>
-              <CardContent>
-                <Stack spacing={2}>
-                  <Stack direction="row" alignItems="center" spacing={1}>
-                    <TrendingUpIcon color="primary" />
-                    <Typography variant="body2" color="text.secondary">
-                      Vendor Growth Rate
-                    </Typography>
-                  </Stack>
-                  <Typography variant="h5">
-                    {formatPercentage(analytics.vendor_growth_rate)}
-                  </Typography>
-                  <LinearProgress 
-                    variant="determinate" 
-                    value={Math.min(analytics.vendor_growth_rate, 100)} 
-                    sx={{ height: 8, borderRadius: 4 }}
-                  />
-                </Stack>
-              </CardContent>
-            </Card>
-          </Grid>
-        )}
-
         {/* Recent Activity */}
-        {summary?.recent_signups !== undefined && (
-          <Grid item xs={12} sm={6} md={4}>
-            <Card>
-              <CardContent>
-                <Stack spacing={2}>
-                  <Stack direction="row" alignItems="center" spacing={1}>
-                    <PersonAddIcon color="success" />
-                    <Typography variant="body2" color="text.secondary">
-                      Recent Signups (24h)
-                    </Typography>
-                  </Stack>
-                  <Typography variant="h5">
-                    {summary.recent_signups}
-                  </Typography>
-                  <Chip 
-                    label={summary.recent_signups > 0 ? 'Active Growth' : 'No New Signups'}
-                    color={summary.recent_signups > 0 ? 'success' : 'default'}
-                    size="small"
-                  />
-                </Stack>
-              </CardContent>
-            </Card>
-          </Grid>
-        )}
-
-        {/* Total Orders */}
-        {analytics?.total_orders !== undefined && (
-          <Grid item xs={12} sm={6} md={4}>
-            <Card>
-              <CardContent>
-                <Stack spacing={2}>
-                  <Stack direction="row" alignItems="center" spacing={1}>
-                    <AssessmentIcon color="info" />
-                    <Typography variant="body2" color="text.secondary">
-                      Total Orders ({timeRange})
-                    </Typography>
-                  </Stack>
-                  <Typography variant="h5">
-                    {analytics.total_orders.toLocaleString()}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {analytics.total_vendors > 0 
-                      ? (analytics.total_orders / analytics.total_vendors).toFixed(1)
-                      : '0'} orders per vendor
+        <Grid item xs={12} sm={6} md={4}>
+          <Card>
+            <CardContent>
+              <Stack spacing={2}>
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  <PersonAddIcon color="success" />
+                  <Typography variant="body2" color="text.secondary">
+                    Recent Signups (24h)
                   </Typography>
                 </Stack>
-              </CardContent>
-            </Card>
-          </Grid>
-        )}
+                <Typography variant="h5">
+                  {summary.recent_signups}
+                </Typography>
+                <Chip 
+                  label={summary.recent_signups > 0 ? 'Active Growth' : 'No New Signups'}
+                  color={summary.recent_signups > 0 ? 'success' : 'default'}
+                  size="small"
+                />
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
       </Grid>
     </Box>
   );

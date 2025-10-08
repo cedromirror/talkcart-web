@@ -30,6 +30,7 @@ import {
   DialogActions,
   Autocomplete,
   ButtonBase,
+  Badge,
 } from '@mui/material';
 import {
   ShoppingCart,
@@ -48,11 +49,14 @@ import {
   Add,
   Close,
 } from '@mui/icons-material';
+import { MessageCircle } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
 import { toast } from 'react-hot-toast';
 import useMessages from '@/hooks/useMessages';
+import useChatbot from '@/hooks/useChatbot';
+import { ChatbotConversation, ChatbotMessage } from '@/services/chatbotApi';
 
 interface Order {
   id: string;
@@ -70,19 +74,25 @@ interface Order {
   createdAt: string;
 }
 
+interface Product {
+  id: string;
+  name: string;
+  price: number;
+  currency: string;
+  vendorId?: string;
+  vendor?: {
+    id: string;
+  };
+  images: Array<{
+    secure_url?: string;
+    url: string;
+  }>;
+}
+
 interface WishlistItem {
   id: string;
   productId: string;
-  product: {
-    id: string;
-    name: string;
-    price: number;
-    currency: string;
-    images: Array<{
-      secure_url?: string;
-      url: string;
-    }>;
-  };
+  product: Product;
   addedAt: string;
 }
 
@@ -118,6 +128,22 @@ const MyDashboard: React.FC = () => {
   const [openVendorDialog, setOpenVendorDialog] = useState(false);
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
 
+  // Chatbot states
+  const {
+    conversations: chatbotConversations,
+    activeConversation: activeChatbotConversation,
+    messages: chatbotMessages,
+    loading: chatbotLoading,
+    error: chatbotError,
+    fetchConversations: fetchChatbotConversations,
+    setActiveConversation: setActiveChatbotConversation,
+    sendMessage: sendChatbotMessage,
+    createConversation: createChatbotConversation,
+  } = useChatbot();
+  
+  const [chatbotMessageText, setChatbotMessageText] = useState('');
+  const chatbotMessagesEndRef = React.useRef<HTMLDivElement>(null);
+
   // Redirect if not authenticated
   useEffect(() => {
     if (!isAuthenticated) {
@@ -131,6 +157,7 @@ const MyDashboard: React.FC = () => {
       fetchOrders();
       fetchWishlist();
       fetchConversations();
+      fetchChatbotConversations();
       fetchVendors();
     }
   }, [isAuthenticated, user]);
@@ -141,6 +168,13 @@ const MyDashboard: React.FC = () => {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages]);
+
+  // Scroll to bottom of chatbot messages
+  useEffect(() => {
+    if (chatbotMessagesEndRef.current) {
+      chatbotMessagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatbotMessages]);
 
   const fetchOrders = async () => {
     try {
@@ -166,7 +200,20 @@ const MyDashboard: React.FC = () => {
       const response: any = await api.marketplace.getWishlist();
       
       if (response.success) {
-        setWishlistItems(response.data.wishlist || []);
+        // Extract vendorId from product.vendor.id or product.vendorId
+        const wishlistWithVendorId = (response.data.wishlist || []).map((item: any) => {
+          if (item.product) {
+            return {
+              ...item,
+              product: {
+                ...item.product,
+                vendorId: item.product.vendor?.id || item.product.vendorId || ''
+              }
+            };
+          }
+          return item;
+        });
+        setWishlistItems(wishlistWithVendorId);
       } else {
         setError(response.error || 'Failed to load wishlist');
       }
@@ -295,6 +342,53 @@ const MyDashboard: React.FC = () => {
     }
   };
 
+  const handleChatbotSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!chatbotMessageText.trim() || !activeChatbotConversation) return;
+    
+    try {
+      const success = await sendChatbotMessage(chatbotMessageText);
+      if (success) {
+        setChatbotMessageText('');
+      } else {
+        toast.error('Failed to send message');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to send message');
+    }
+  };
+
+  const handleStartChatbotConversation = async (vendorId: string, productId: string, productName: string) => {
+    // Validate that we have a vendorId
+    if (!vendorId) {
+      toast.error('Unable to start chat - vendor information missing');
+      return;
+    }
+    
+    try {
+      // Check if conversation already exists
+      const existingConversation = chatbotConversations.find(conv => 
+        conv.vendorId === vendorId && conv.productId === productId
+      );
+      
+      if (existingConversation) {
+        setActiveChatbotConversation(existingConversation);
+      } else {
+        // Create new conversation
+        const newConversation = await createChatbotConversation(vendorId, productId);
+        if (newConversation) {
+          setActiveChatbotConversation(newConversation);
+        }
+      }
+      
+      // Switch to chatbot tab
+      setActiveTab(3);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to start conversation');
+    }
+  };
+
   const formatMessageTime = (timestamp: string) => {
     const date = new Date(timestamp);
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -335,6 +429,18 @@ const MyDashboard: React.FC = () => {
           <Tab icon={<ShoppingCart />} iconPosition="start" label="My Orders" />
           <Tab icon={<Favorite />} iconPosition="start" label="Wishlist" />
           <Tab icon={<Chat />} iconPosition="start" label="Vendor Chat" />
+          <Tab 
+            icon={
+              <Badge 
+                badgeContent={chatbotConversations.filter(c => !c.isResolved).length} 
+                color="primary"
+              >
+                <MessageCircle size={18} />
+              </Badge>
+            } 
+            iconPosition="start" 
+            label="Product Chat" 
+          />
         </Tabs>
 
         {error && (
@@ -492,6 +598,19 @@ const MyDashboard: React.FC = () => {
                               >
                                 Remove
                               </Button>
+                              {item.product.vendorId && (
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  onClick={() => handleStartChatbotConversation(
+                                    item.product.vendorId!, 
+                                    item.productId, 
+                                    item.product.name
+                                  )}
+                                >
+                                  Chat
+                                </Button>
+                              )}
                             </Box>
                           }
                         />
@@ -712,6 +831,232 @@ const MyDashboard: React.FC = () => {
                             </ButtonBase>
                           );
                         })}
+                      </List>
+                    </Box>
+                  )}
+                </Box>
+              )}
+            </CardContent>
+          </Paper>
+        )}
+
+        {/* Product Chatbot Tab */}
+        {activeTab === 3 && (
+          <Paper elevation={0} sx={{ borderRadius: 2, overflow: 'hidden' }}>
+            <CardHeader
+              title="Product Chat"
+              subheader="Chat with vendors about specific products"
+            />
+            <CardContent>
+              {activeChatbotConversation ? (
+                <Box sx={{ display: 'flex', flexDirection: 'column', height: '60vh' }}>
+                  {/* Chat header */}
+                  <Box sx={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'space-between',
+                    p: 2,
+                    borderBottom: 1,
+                    borderColor: 'divider'
+                  }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                      <Avatar>
+                        {activeChatbotConversation.productName?.[0] || 'P'}
+                      </Avatar>
+                      <Box>
+                        <Typography variant="subtitle1" fontWeight={600}>
+                          {activeChatbotConversation.productName}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Chat with vendor
+                        </Typography>
+                      </Box>
+                    </Box>
+                    <Button 
+                      size="small" 
+                      onClick={() => setActiveChatbotConversation(null)}
+                    >
+                      Close
+                    </Button>
+                  </Box>
+
+                  {/* Messages area */}
+                  <Box sx={{ 
+                    flexGrow: 1, 
+                    overflow: 'auto', 
+                    p: 2,
+                    display: 'flex',
+                    flexDirection: 'column'
+                  }}>
+                    {chatbotLoading.messages ? (
+                      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                        <CircularProgress />
+                      </Box>
+                    ) : chatbotError ? (
+                      <Box sx={{ textAlign: 'center', py: 4 }}>
+                        <Typography color="error">{chatbotError}</Typography>
+                      </Box>
+                    ) : chatbotMessages.length === 0 ? (
+                      <Box sx={{ textAlign: 'center', py: 4 }}>
+                        <MessageCircle size={48} color={theme.palette.text.secondary} />
+                        <Typography variant="h6" sx={{ mb: 1 }}>
+                          No messages yet
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Start a conversation about this product
+                        </Typography>
+                      </Box>
+                    ) : (
+                      chatbotMessages.map((message) => (
+                        <Box
+                          key={message._id}
+                          sx={{
+                            display: 'flex',
+                            justifyContent: message.senderId === user?.id ? 'flex-end' : 'flex-start',
+                            mb: 2
+                          }}
+                        >
+                          <Box
+                            sx={{
+                              maxWidth: '70%',
+                              p: 1.5,
+                              borderRadius: 2,
+                              bgcolor: message.senderId === user?.id 
+                                ? 'primary.main' 
+                                : message.isBotMessage 
+                                  ? 'secondary.light' 
+                                  : 'grey.200',
+                              color: message.senderId === user?.id 
+                                ? 'primary.contrastText' 
+                                : 'text.primary'
+                            }}
+                          >
+                            <Typography variant="body2">{message.content}</Typography>
+                            <Typography 
+                              variant="caption" 
+                              sx={{ 
+                                display: 'block', 
+                                textAlign: 'right',
+                                mt: 0.5,
+                                opacity: 0.7
+                              }}
+                            >
+                              {formatMessageTime(message.createdAt)}
+                              {message.isBotMessage && (
+                                <Chip 
+                                  label="Bot" 
+                                  size="small" 
+                                  sx={{ ml: 1, height: 16 }} 
+                                />
+                              )}
+                            </Typography>
+                          </Box>
+                        </Box>
+                      ))
+                    )}
+                    <div ref={chatbotMessagesEndRef} />
+                  </Box>
+
+                  {/* Message input */}
+                  <Box 
+                    component="form" 
+                    onSubmit={handleChatbotSendMessage}
+                    sx={{ 
+                      p: 2, 
+                      borderTop: 1, 
+                      borderColor: 'divider',
+                      display: 'flex',
+                      gap: 1
+                    }}
+                  >
+                    <TextField
+                      fullWidth
+                      size="small"
+                      placeholder="Ask a question about this product..."
+                      value={chatbotMessageText}
+                      onChange={(e) => setChatbotMessageText(e.target.value)}
+                      multiline
+                      maxRows={3}
+                      disabled={chatbotLoading.send}
+                    />
+                    <IconButton 
+                      type="submit"
+                      disabled={!chatbotMessageText.trim() || chatbotLoading.send}
+                      color="primary"
+                    >
+                      {chatbotLoading.send ? <CircularProgress size={20} /> : <Send />}
+                    </IconButton>
+                  </Box>
+                </Box>
+              ) : (
+                <Box sx={{ textAlign: 'center', py: 6 }}>
+                  <MessageCircle size={48} color={theme.palette.text.secondary} />
+                  <Typography variant="h6" sx={{ mb: 1 }}>
+                    Product Chat
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                    Select a conversation or start a new chat about a product
+                  </Typography>
+                  <Button
+                    variant="contained"
+                    startIcon={<Add />}
+                    onClick={() => router.push('/marketplace')}
+                  >
+                    Browse Products
+                  </Button>
+                  
+                  {/* List of recent chatbot conversations */}
+                  {chatbotConversations.length > 0 && (
+                    <Box sx={{ mt: 4, textAlign: 'left' }}>
+                      <Typography variant="h6" sx={{ mb: 2 }}>
+                        Recent Product Conversations
+                      </Typography>
+                      <List>
+                        {chatbotConversations.map((conversation) => (
+                          <ButtonBase 
+                            onClick={() => {
+                              setActiveChatbotConversation(conversation);
+                            }}
+                            sx={{
+                              width: '100%',
+                              borderRadius: 2,
+                              mb: 1,
+                              '&:hover': {
+                                bgcolor: 'action.hover'
+                              }
+                            }}
+                          >
+                            <ListItem 
+                              key={conversation._id}
+                              sx={{
+                                width: '100%',
+                                borderRadius: 2,
+                              }}
+                            >
+                              <Avatar sx={{ mr: 2 }}>
+                                {conversation.productName?.[0] || 'P'}
+                              </Avatar>
+                              <ListItemText
+                                primary={conversation.productName}
+                                secondary={
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <Typography variant="body2" color="text.secondary">
+                                      {conversation.lastMessage?.content?.substring(0, 30) || 'No messages yet'}
+                                    </Typography>
+                                    {!conversation.isResolved && (
+                                      <Chip label="Active" size="small" color="primary" />
+                                    )}
+                                  </Box>
+                                }
+                              />
+                              <Chip 
+                                label={conversation.isResolved ? 'Resolved' : 'Active'} 
+                                size="small" 
+                                color={conversation.isResolved ? 'default' : 'primary'} 
+                              />
+                            </ListItem>
+                          </ButtonBase>
+                        ))}
                       </List>
                     </Box>
                   )}

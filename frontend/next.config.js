@@ -15,7 +15,7 @@ const nextConfig = {
   },
 
   images: {
-    domains: ['localhost', 'talkcart.app', 'res.cloudinary.com'],
+    domains: ['localhost', 'talkcart.app', 'res.cloudinary.com', 'via.placeholder.com'],
     unoptimized: process.env.NODE_ENV === 'development',
   },
 

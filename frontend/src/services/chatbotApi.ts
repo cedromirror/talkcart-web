@@ -8,14 +8,71 @@ const chatbotApi = axios.create({
     timeout: 10000,
 });
 
-// Add auth token to requests
+// Add auth token to requests with enhanced debugging and error handling
 chatbotApi.interceptors.request.use((config) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
+    console.log('Chatbot API Request:', {
+        url: config.url,
+        method: config.method,
+        headers: { ...config.headers }
+    });
+    
+    // Ensure we're in browser environment
+    if (typeof window !== 'undefined' && localStorage) {
+        const token = localStorage.getItem('token');
+        if (token) {
+            config.headers.Authorization = `Bearer ${token}`;
+            console.log('Token added to request:', token.substring(0, 10) + '...');
+        } else {
+            console.warn('No auth token found in localStorage');
+        }
+    } else {
+        console.warn('Not in browser environment or localStorage not available');
     }
     return config;
+}, (error) => {
+    console.error('Chatbot API Request Error:', error);
+    return Promise.reject(error);
 });
+
+// Add response interceptor for debugging
+chatbotApi.interceptors.response.use(
+    (response) => {
+        console.log('Chatbot API Success Response:', {
+            status: response.status,
+            url: response.config.url,
+            data: response.data
+        });
+        return response;
+    },
+    (error) => {
+        console.error('Chatbot API Error Response:', {
+            message: error.message,
+            status: error.response?.status,
+            statusText: error.response?.statusText,
+            url: error.config?.url,
+            data: error.response?.data,
+            headers: error.response?.headers
+        });
+        
+        // Handle 401 errors by redirecting to login
+        if (error.response?.status === 401) {
+            if (typeof window !== 'undefined') {
+                // Clear tokens and redirect to login
+                localStorage.removeItem('token');
+                localStorage.removeItem('refreshToken');
+                localStorage.removeItem('user');
+                window.location.href = '/auth/login?expired=1';
+            }
+        }
+        
+        return Promise.reject(error);
+    }
+);
+
+// Helper function to validate ObjectId format
+const isValidObjectId = (id: string): boolean => {
+    return /^[0-9a-fA-F]{24}$/.test(id);
+};
 
 export interface ChatbotConversation {
     _id: string;
@@ -140,6 +197,24 @@ export interface SendMessageResponse {
     message: string;
 }
 
+// Vendor-Admin Conversation Response Types
+export interface GetVendorAdminConversationResponse {
+    success: boolean;
+    data: {
+        conversation: ChatbotConversation | null;
+    };
+    message?: string;
+}
+
+export interface CreateVendorAdminConversationResponse {
+    success: boolean;
+    data: {
+        conversation: ChatbotConversation;
+        isNew: boolean;
+    };
+    message: string;
+}
+
 /**
  * Get user chatbot conversations
  */
@@ -224,6 +299,11 @@ export const createConversation = async (
  */
 export const getConversation = async (conversationId: string): Promise<{ success: boolean; data: { conversation: ChatbotConversation } }> => {
     try {
+        // Validate conversation ID
+        if (!isValidObjectId(conversationId)) {
+            throw { success: false, error: 'Invalid conversation ID' };
+        }
+        
         const response = await chatbotApi.get(`/conversations/${conversationId}`);
         return response.data;
     } catch (error: any) {
@@ -252,6 +332,11 @@ export const getMessages = async (conversationId: string, options: {
     };
 }> => {
     try {
+        // Validate conversation ID
+        if (!isValidObjectId(conversationId)) {
+            throw { success: false, error: 'Invalid conversation ID' };
+        }
+        
         const params = new URLSearchParams();
         if (options.limit) params.append('limit', options.limit.toString());
         if (options.page) params.append('page', options.page.toString());
@@ -273,6 +358,11 @@ export const sendMessage = async (
     data: SendMessageRequest
 ): Promise<SendMessageResponse> => {
     try {
+        // Validate conversation ID
+        if (!isValidObjectId(conversationId)) {
+            throw { success: false, error: 'Invalid conversation ID' };
+        }
+        
         const response = await chatbotApi.post(`/conversations/${conversationId}/messages`, data);
         return response.data;
     } catch (error: any) {
@@ -290,6 +380,11 @@ export const editMessage = async (
     data: { content: string }
 ): Promise<SendMessageResponse> => {
     try {
+        // Validate IDs
+        if (!isValidObjectId(conversationId) || !isValidObjectId(messageId)) {
+            throw { success: false, error: 'Invalid conversation or message ID' };
+        }
+        
         const response = await chatbotApi.put(`/conversations/${conversationId}/messages/${messageId}`, data);
         return response.data;
     } catch (error: any) {
@@ -306,6 +401,11 @@ export const deleteMessage = async (
     messageId: string
 ): Promise<{ success: boolean; message: string }> => {
     try {
+        // Validate IDs
+        if (!isValidObjectId(conversationId) || !isValidObjectId(messageId)) {
+            throw { success: false, error: 'Invalid conversation or message ID' };
+        }
+        
         const response = await chatbotApi.delete(`/conversations/${conversationId}/messages/${messageId}`);
         return response.data;
     } catch (error: any) {
@@ -323,6 +423,11 @@ export const replyToMessage = async (
     data: SendMessageRequest
 ): Promise<SendMessageResponse> => {
     try {
+        // Validate IDs
+        if (!isValidObjectId(conversationId) || !isValidObjectId(messageId)) {
+            throw { success: false, error: 'Invalid conversation or message ID' };
+        }
+        
         const response = await chatbotApi.post(`/conversations/${conversationId}/messages/${messageId}/reply`, data);
         return response.data;
     } catch (error: any) {
@@ -336,6 +441,11 @@ export const replyToMessage = async (
  */
 export const resolveConversation = async (conversationId: string): Promise<{ success: boolean; data: { conversation: ChatbotConversation }; message: string }> => {
     try {
+        // Validate conversation ID
+        if (!isValidObjectId(conversationId)) {
+            throw { success: false, error: 'Invalid conversation ID' };
+        }
+        
         const response = await chatbotApi.put(`/conversations/${conversationId}/resolve`);
         return response.data;
     } catch (error: any) {
@@ -349,11 +459,106 @@ export const resolveConversation = async (conversationId: string): Promise<{ suc
  */
 export const closeConversation = async (conversationId: string): Promise<{ success: boolean; message: string }> => {
     try {
+        // Validate conversation ID
+        if (!isValidObjectId(conversationId)) {
+            throw { success: false, error: 'Invalid conversation ID' };
+        }
+        
         const response = await chatbotApi.delete(`/conversations/${conversationId}`);
         return response.data;
     } catch (error: any) {
         console.error('Close chatbot conversation error:', error);
         throw error.response?.data || { success: false, error: 'Failed to close conversation' };
+    }
+};
+
+/**
+ * Get vendor-admin conversation
+ */
+export const getVendorAdminConversation = async (): Promise<GetVendorAdminConversationResponse> => {
+    try {
+        // Check if we have a token before making the request
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) {
+            return {
+                success: false,
+                data: { conversation: null },
+                message: 'No authentication token found. Please log in again.'
+            };
+        }
+        
+        const response = await chatbotApi.get('/conversations/vendor-admin');
+        return response.data;
+    } catch (error: any) {
+        console.error('Get vendor-admin conversation error:', error);
+        // Return a structured error response instead of throwing
+        if (error.response) {
+            // Server responded with error status
+            return {
+                success: false,
+                data: { conversation: null },
+                message: error.response.data?.message || `Server error: ${error.response.status}`
+            };
+        } else if (error.request) {
+            // Request was made but no response received
+            return {
+                success: false,
+                data: { conversation: null },
+                message: 'Network error - please check your connection'
+            };
+        } else {
+            // Something else happened
+            return {
+                success: false,
+                data: { conversation: null },
+                message: error.message || 'Failed to get vendor-admin conversation'
+            };
+        }
+    }
+};
+
+/**
+ * Create vendor-admin conversation
+ */
+export const createVendorAdminConversation = async (): Promise<CreateVendorAdminConversationResponse> => {
+    try {
+        // Check if we have a token before making the request
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) {
+            return {
+                success: false,
+                data: { conversation: null as any, isNew: false },
+                message: 'No authentication token found. Please log in again.'
+            };
+        }
+        
+        const response = await chatbotApi.post('/conversations/vendor-admin');
+        return response.data;
+    } catch (error: any) {
+        console.error('Create vendor-admin conversation error:', error);
+        // Return a structured error response instead of throwing
+        if (error.response) {
+            // Server responded with error status
+            return {
+                success: false,
+                data: { conversation: null as any, isNew: false },
+                message: error.response.data?.message || `Server error: ${error.response.status}`
+            };
+        } else if (error.request) {
+            // Request was made but no response received
+            return {
+                success: false,
+                data: { conversation: null as any, isNew: false },
+                message: 'Network error - please check your connection'
+            };
+        } else {
+            // Something else happened
+            return {
+                success: false,
+                data: { conversation: null as any, isNew: false },
+                message: error.message || 'Failed to create vendor-admin conversation'
+            };
+        }
     }
 };
 
@@ -370,6 +575,6 @@ export default {
     replyToMessage,
     resolveConversation,
     closeConversation,
+    getVendorAdminConversation,
+    createVendorAdminConversation,
 };
-
-

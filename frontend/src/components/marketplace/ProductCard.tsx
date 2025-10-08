@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import Link from 'next/link';
+import { useRouter } from 'next/router';
 import {
   Card,
   CardContent,
@@ -70,6 +70,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
   console.log('ProductCard received product:', product);
   console.log('ProductCard loading state:', loading);
   
+  const router = useRouter();
   const theme = useTheme();
   const [imageError, setImageError] = useState(false);
   const [convertedPrice, setConvertedPrice] = useState<number | null>(null);
@@ -224,6 +225,22 @@ const ProductCard: React.FC<ProductCardProps> = ({
     return firstImage.secure_url || firstImage.url || '/images/placeholder-image.png';
   };
 
+  // Handle navigation to product detail page
+  const handleCardClick = (e: React.MouseEvent) => {
+    // Prevent navigation if the click originated from the chat button
+    if ((e.target as HTMLElement).closest('.chatbot-button-container')) {
+      e.stopPropagation();
+      return;
+    }
+    router.push(`/marketplace/${product.id}`);
+  };
+
+  // Handle chat button click
+  const handleChatClick = (e: React.MouseEvent) => {
+    // Stop propagation to prevent card click handler from firing
+    e.stopPropagation();
+  };
+
   return (
     <Card
       sx={{
@@ -243,8 +260,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
           boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
         },
       }}
-      component={Link}
-      href={`/marketplace/${product.id}`}
+      onClick={handleCardClick}
     >
       {/* Product Image - Fixed size container with exact dimensions */}
       <Box sx={{ 
@@ -307,7 +323,11 @@ const ProductCard: React.FC<ProductCardProps> = ({
         </Box>
         
         {/* Chatbot Button */}
-        <Box sx={{ position: 'absolute', top: 4, right: 4 }}>
+        <Box 
+          className="chatbot-button-container"
+          sx={{ position: 'absolute', top: 4, right: 4 }}
+          onClick={handleChatClick}
+        >
           <ChatbotButton 
             productId={product.id}
             vendorId={product.vendor.id}

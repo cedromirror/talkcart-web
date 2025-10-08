@@ -475,7 +475,8 @@ router.post('/conversations/:id/messages', authenticateTokenStrict, async (req, 
       _id: id,
       $or: [
         { customerId: userId },
-        { vendorId: userId }
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
       ],
       isActive: true
     });
@@ -484,11 +485,12 @@ router.post('/conversations/:id/messages', authenticateTokenStrict, async (req, 
       return sendError(res, 'Conversation not found or access denied', 404);
     }
 
-    // Determine if this is a customer or vendor message
+    // Determine if this is a customer, vendor, or admin message
     const isCustomer = userId === conversation.customerId.toString();
     const isVendor = userId === conversation.vendorId.toString();
+    const isAdmin = req.user.role === 'admin';
 
-    if (!isCustomer && !isVendor) {
+    if (!isCustomer && !isVendor && !isAdmin) {
       return sendError(res, 'Access denied', 403);
     }
 
@@ -507,8 +509,10 @@ router.post('/conversations/:id/messages', authenticateTokenStrict, async (req, 
     conversation.lastActivity = new Date();
     await conversation.save();
 
-    // Populate sender data
-    await newMessage.populate('senderId', 'username displayName avatar isVerified');
+    // Populate sender data (only if senderId is not 'admin')
+    if (newMessage.senderId !== 'admin') {
+      await newMessage.populate('senderId', 'username displayName avatar isVerified');
+    }
 
     // If this is a customer message and bot is enabled, generate bot response
     if (isCustomer && conversation.botEnabled) {
@@ -690,7 +694,10 @@ router.put('/conversations/:id/messages/:messageId', authenticateTokenStrict, as
     const message = await ChatbotMessage.findOne({
       _id: messageId,
       conversationId: id,
-      senderId: userId,
+      $or: [
+        { senderId: userId },
+        { senderId: 'admin' } // Allow admin to edit admin messages
+      ],
       isDeleted: false
     });
 
@@ -710,8 +717,10 @@ router.put('/conversations/:id/messages/:messageId', authenticateTokenStrict, as
     
     await message.save();
 
-    // Populate sender data
-    await message.populate('senderId', 'username displayName avatar isVerified');
+    // Populate sender data (only if senderId is not 'admin')
+    if (message.senderId !== 'admin') {
+      await message.populate('senderId', 'username displayName avatar isVerified');
+    }
 
     return sendSuccess(res, {
       message
@@ -758,7 +767,10 @@ router.delete('/conversations/:id/messages/:messageId', authenticateTokenStrict,
     const message = await ChatbotMessage.findOne({
       _id: messageId,
       conversationId: id,
-      senderId: userId
+      $or: [
+        { senderId: userId },
+        { senderId: 'admin' } // Allow admin to delete admin messages
+      ]
     });
 
     if (!message) {
@@ -852,8 +864,10 @@ router.post('/conversations/:id/messages/:messageId/reply', authenticateTokenStr
     conversation.lastActivity = new Date();
     await conversation.save();
 
-    // Populate sender data
-    await newMessage.populate('senderId', 'username displayName avatar isVerified');
+    // Populate sender data (only if senderId is not 'admin')
+    if (newMessage.senderId !== 'admin') {
+      await newMessage.populate('senderId', 'username displayName avatar isVerified');
+    }
 
     return sendSuccess(res, {
       message: newMessage
@@ -864,6 +878,139 @@ router.post('/conversations/:id/messages/:messageId/reply', authenticateTokenStr
   }
 });
 
+// @route   GET /api/chatbot/conversations/vendor-admin
+// @desc    Get vendor-admin conversation
+// @access  Private (Vendors only)
+router.get('/conversations/vendor-admin', authenticateTokenStrict, async (req, res) => {
+  try {
+    const vendorId = req.user.userId;
+
+    // Verify that the requesting user is a vendor
+    const user = await User.findById(vendorId);
+    if (!user || user.role !== 'vendor') {
+      return sendError(res, 'Access denied. Vendor access required.', 403);
+    }
+
+    // Find existing conversation between vendor and admin
+    const conversation = await ChatbotConversation.findOne({
+      vendorId: vendorId,
+      customerId: 'admin', // Special identifier for admin conversations
+      isActive: true
+    })
+      .populate({
+        path: 'customerId',
+        select: 'username displayName avatar isVerified'
+      })
+      .populate({
+        path: 'vendorId',
+        select: 'username displayName avatar isVerified'
+      })
+      .populate({
+        path: 'lastMessage',
+        select: 'content senderId createdAt isBotMessage'
+      })
+      .lean();
+
+    if (conversation) {
+      return sendSuccess(res, { conversation });
+    }
+
+    // No existing conversation found
+    return sendSuccess(res, { conversation: null });
+  } catch (error) {
+    console.error('Get vendor-admin conversation error:', error);
+    return sendError(res, 'Failed to get conversation', 500, error.message);
+  }
+});
+
+// @route   POST /api/chatbot/conversations/vendor-admin
+// @desc    Create vendor-admin conversation
+// @access  Private (Vendors only)
+router.post('/conversations/vendor-admin', authenticateTokenStrict, async (req, res) => {
+  try {
+    const vendorId = req.user.userId;
+
+    // Verify that the requesting user is a vendor
+    const vendor = await User.findById(vendorId);
+    if (!vendor || vendor.role !== 'vendor') {
+      return sendError(res, 'Access denied. Vendor access required.', 403);
+    }
+
+    // Check if conversation already exists
+    const existingConversation = await ChatbotConversation.findOne({
+      vendorId: vendorId,
+      customerId: 'admin', // Special identifier for admin conversations
+      isActive: true
+    });
+
+    if (existingConversation) {
+      return sendSuccess(res, {
+        conversation: existingConversation,
+        isNew: false
+      }, 'Conversation already exists');
+    }
+
+    // Create new conversation with admin
+    const newConversation = new ChatbotConversation({
+      customerId: 'admin', // Special identifier for admin conversations
+      vendorId: vendorId,
+      productId: null,
+      productName: 'Vendor Support',
+      isResolved: false,
+      botEnabled: false
+    });
+
+    await newConversation.save();
+
+    // Create welcome message from admin
+    const welcomeMessage = new ChatbotMessage({
+      conversationId: newConversation._id,
+      senderId: 'admin', // Special identifier for admin
+      content: `Hello ${vendor.displayName || vendor.username}! How can I help you with your vendor account today?`,
+      type: 'system',
+      isBotMessage: false
+    });
+
+    await welcomeMessage.save();
+
+    // Update conversation with last message
+    newConversation.lastMessage = welcomeMessage._id;
+    await newConversation.save();
+
+    // Populate the conversation
+    await newConversation.populate({
+      path: 'customerId',
+      select: 'username displayName avatar isVerified'
+    });
+    await newConversation.populate({
+      path: 'vendorId',
+      select: 'username displayName avatar isVerified'
+    });
+    await newConversation.populate({
+      path: 'lastMessage',
+      select: 'content senderId createdAt isBotMessage'
+    });
+
+    return sendSuccess(res, {
+      conversation: newConversation,
+      isNew: true
+    }, 'Vendor-admin conversation created successfully');
+  } catch (error) {
+    console.error('Create vendor-admin conversation error:', error);
+    return sendError(res, 'Failed to create conversation', 500, error.message);
+  }
+});
+
 module.exports = router;
+
+
+
+
+
+
+
+
+
+
 
 

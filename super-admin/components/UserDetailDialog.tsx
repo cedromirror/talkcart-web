@@ -1,3 +1,4 @@
+// Fixed syntax errors and type issues
 import React, { useEffect, useState } from 'react';
 import {
   Dialog,
@@ -110,9 +111,9 @@ export default function UserDetailDialog({ open, onClose, userId, onUserUpdated 
     
     try {
       setLoading(true);
-      const [userRes, activityRes, emailRes] = await Promise.all([
-        AdminApi.getUserDetails(userId),
-        AdminApi.getUserActivity(userId, 10),
+      // Use the available getUser method instead of getUserDetails
+      const [userRes, emailRes] = await Promise.all([
+        AdminApi.getUser(userId),
         AdminApi.getUserEmailHistory(userId, 10)
       ]);
 
@@ -121,13 +122,12 @@ export default function UserDetailDialog({ open, onClose, userId, onUserUpdated 
         setEditData(userRes.data);
       }
       
-      if (activityRes?.success) {
-        setActivity(activityRes.data || []);
-      }
-      
       if (emailRes?.success) {
         setEmailHistory(emailRes.data || []);
       }
+      
+      // Set activity to empty array since there's no getUserActivity method
+      setActivity([]);
     } catch (error) {
       console.error('Failed to fetch user details:', error);
     } finally {
@@ -150,11 +150,11 @@ export default function UserDetailDialog({ open, onClose, userId, onUserUpdated 
     }
   };
 
-  const handleDelete = async (permanent: boolean = false) => {
+  const handleDelete = async () => {
     if (!user) return;
     
     try {
-      const res = await AdminApi.deleteUser(user._id, permanent);
+      const res = await AdminApi.deleteUser(user._id);
       if (res?.success) {
         onUserUpdated?.();
         onClose();
@@ -221,7 +221,7 @@ export default function UserDetailDialog({ open, onClose, userId, onUserUpdated 
             </IconButton>
           </Box>
         </DialogTitle>
-        
+
         <DialogContent>
           {loading ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
@@ -275,7 +275,7 @@ export default function UserDetailDialog({ open, onClose, userId, onUserUpdated 
                         </Tooltip>
                       ) : (
                         <Tooltip title="Delete User">
-                          <IconButton onClick={() => handleDelete(false)} color="error">
+                          <IconButton onClick={() => handleDelete()} color="error">
                             <DeleteIcon />
                           </IconButton>
                         </Tooltip>

@@ -39,6 +39,7 @@ import {
   Bookmark,
   Store,
   CreditCard,
+  Headset,
 } from 'lucide-react';
 import { useRouter } from 'next/router';
 import { useAuth } from '@/contexts/AuthContext';
@@ -119,6 +120,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
             path: '/messages',
             icon: <MessageCircle size={20} />,
             tooltip: 'Private messages & conversations',
+          },
+          {
+            label: 'Chat with Admin',
+            path: '/marketplace/vendor-admin-chat',
+            icon: <Headset size={20} />,
+            tooltip: 'Get help from admin support',
+            requireAuth: true,
           },
           {
             label: 'Trending',

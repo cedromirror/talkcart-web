@@ -31,6 +31,7 @@ import {
   Settings as SettingsIcon,
   TrendingUp,
   Notifications,
+  Chat as ChatIcon,
 } from '@mui/icons-material';
 import { gradients } from '../../theme';
 
@@ -96,6 +97,13 @@ const navigationItems: NavigationItem[] = [
     icon: <VendorsIcon />,
     path: '/vendors',
     color: 'info',
+  },
+  {
+    id: 'chat',
+    label: 'Chat Management',
+    icon: <ChatIcon />,
+    path: '/chat',
+    color: 'success',
   },
   {
     id: 'media',

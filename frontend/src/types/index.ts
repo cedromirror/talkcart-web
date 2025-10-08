@@ -22,6 +22,7 @@ export interface User {
   isActive?: boolean;
   role?: 'user' | 'moderator' | 'admin' | 'vendor';
   lastSeenAt?: string;
+  lastLoginAt?: string;
   emailVerifiedAt?: string;
   socialLinks?: {
     twitter?: string;

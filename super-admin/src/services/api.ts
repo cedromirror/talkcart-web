@@ -56,6 +56,58 @@ const healthCheck = async () => {
   }
 };
 
+// Chat Management Types
+interface ChatConversation {
+  _id: string;
+  customerId: string;
+  vendorId: string;
+  productId: string;
+  productName: string;
+  lastMessage?: {
+    content: string;
+    senderId: string;
+    createdAt: string;
+  };
+  lastActivity: string;
+  isActive: boolean;
+  isResolved: boolean;
+  customer: {
+    username: string;
+    displayName?: string;
+    avatar?: string;
+  };
+  vendor: {
+    username: string;
+    displayName?: string;
+    avatar?: string;
+  };
+}
+
+interface ChatMessage {
+  _id: string;
+  conversationId: string;
+  senderId: string;
+  content: string;
+  type: 'text' | 'system';
+  isBotMessage: boolean;
+  createdAt: string;
+  sender?: {
+    username: string;
+    displayName?: string;
+    avatar?: string;
+  };
+}
+
+interface ChatAnalytics {
+  total_conversations: number;
+  active_conversations: number;
+  resolved_conversations: number;
+  closed_conversations: number;
+  total_messages: number;
+  vendor_response_rate: number;
+  avg_response_time: number;
+}
+
 export const AdminApi = {
   // Health and connection
   healthCheck,
@@ -138,6 +190,27 @@ export const AdminApi = {
     Object.entries(query || {}).forEach(([k,v]) => { if (v != null && v !== '') params.set(k, String(v)); });
     return `${API_BASE}/admin/products/export.csv?${params.toString()}`;
   },
+  
+  // Orders
+  listOrders: async (query: Record<string, any>) => {
+    const params = new URLSearchParams();
+    Object.entries(query || {}).forEach(([k,v]) => { if (v != null && v !== '') params.set(k, String(v)); });
+    const res = await fetchWithConfig(`${API_BASE}/admin/orders?${params.toString()}`);
+    return res.json();
+  },
+  getOrder: async (id: string) => {
+    const res = await fetchWithConfig(`${API_BASE}/admin/orders/${id}`);
+    return res.json();
+  },
+  updateOrderStatus: async (id: string, status: string) => {
+    const res = await fetchWithConfig(`${API_BASE}/admin/orders/${id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    return res.json();
+  },
+
   // Marketplace (create)
   createMarketplaceProduct: async (body: any) => {
     // Create products via marketplace route (admin-only, strict auth)
@@ -165,6 +238,33 @@ export const AdminApi = {
     });
     return res.json();
   },
+  // Analytics
+  getAnalyticsOverview: async () => {
+    const res = await fetchWithConfig(`${API_BASE}/admin/analytics/overview`);
+    return res.json();
+  },
+
+  getSalesTrends: async (query: Record<string, any> = {}) => {
+    const params = new URLSearchParams();
+    Object.entries(query || {}).forEach(([k,v]) => { if (v != null && v !== '') params.set(k, String(v)); });
+    const res = await fetchWithConfig(`${API_BASE}/admin/analytics/sales-trends?${params.toString()}`);
+    return res.json();
+  },
+
+  getTopProducts: async (query: Record<string, any> = {}) => {
+    const params = new URLSearchParams();
+    Object.entries(query || {}).forEach(([k,v]) => { if (v != null && v !== '') params.set(k, String(v)); });
+    const res = await fetchWithConfig(`${API_BASE}/admin/analytics/top-products?${params.toString()}`);
+    return res.json();
+  },
+
+  getVendorPerformance: async (query: Record<string, any> = {}) => {
+    const params = new URLSearchParams();
+    Object.entries(query || {}).forEach(([k,v]) => { if (v != null && v !== '') params.set(k, String(v)); });
+    const res = await fetchWithConfig(`${API_BASE}/admin/analytics/vendor-performance?${params.toString()}`);
+    return res.json();
+  },
+
   // Refunds
   refundsRecent: async (query: Record<string, any>) => {
     const params = new URLSearchParams();
@@ -199,386 +299,36 @@ export const AdminApi = {
     const res = await fetchWithConfig(`${API_BASE}/admin/refunds/management?${params.toString()}`);
     return res.json();
   },
-  getRefund: async (id: string) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/refunds/${id}`);
-    return res.json();
-  },
-  createRefund: async (data: any) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/refunds/create`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    return res.json();
-  },
-  updateRefundStatus: async (id: string, data: { status: string; notes?: string; externalRefundId?: string }) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/refunds/${id}/status`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    return res.json();
-  },
-  addRefundCommunication: async (id: string, data: { type: string; content: string; recipient?: string }) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/refunds/${id}/communicate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    return res.json();
-  },
-  getComprehensiveRefundAnalytics: async (query: Record<string, any> = {}) => {
-    const params = new URLSearchParams();
-    Object.entries(query || {}).forEach(([k,v]) => { if (v != null && v !== '') params.set(k, String(v)); });
-    const res = await fetchWithConfig(`${API_BASE}/admin/refunds/analytics/comprehensive?${params.toString()}`);
-    return res.json();
-  },
-  bulkRefundAction: async (data: { refundIds: string[]; action: string; data?: any }) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/refunds/bulk-action`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    return res.json();
-  },
 
-  // Categories Management
-  getCategories: async () => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/categories`);
-    return res.json();
-  },
-
-  // Orders Management
-  listOrders: async (query: Record<string, any>) => {
-    const params = new URLSearchParams();
-    Object.entries(query || {}).forEach(([k,v]) => { if (v != null && v !== '') params.set(k, String(v)); });
-    const res = await fetchWithConfig(`${API_BASE}/admin/orders?${params.toString()}`);
-    return res.json();
-  },
-  updateOrderStatus: async (id: string, status: string) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/orders/${id}/status`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status }),
-    });
-    return res.json();
-  },
-
-  // Analytics
-  getAnalyticsOverview: async (query: Record<string, any> = {}) => {
-    const params = new URLSearchParams();
-    Object.entries(query || {}).forEach(([k,v]) => { if (v != null && v !== '') params.set(k, String(v)); });
-    const res = await fetchWithConfig(`${API_BASE}/admin/analytics/overview?${params.toString()}`);
-    return res.json();
-  },
-  getSalesTrends: async (query: Record<string, any> = {}) => {
-    const params = new URLSearchParams();
-    Object.entries(query || {}).forEach(([k,v]) => { if (v != null && v !== '') params.set(k, String(v)); });
-    const res = await fetchWithConfig(`${API_BASE}/admin/analytics/sales-trends?${params.toString()}`);
-    return res.json();
-  },
-  getTopProducts: async (query: Record<string, any> = {}) => {
-    const params = new URLSearchParams();
-    Object.entries(query || {}).forEach(([k,v]) => { if (v != null && v !== '') params.set(k, String(v)); });
-    const res = await fetchWithConfig(`${API_BASE}/admin/analytics/top-products?${params.toString()}`);
-    return res.json();
-  },
-  getVendorPerformance: async (query: Record<string, any> = {}) => {
-    const params = new URLSearchParams();
-    Object.entries(query || {}).forEach(([k,v]) => { if (v != null && v !== '') params.set(k, String(v)); });
-    const res = await fetchWithConfig(`${API_BASE}/admin/analytics/vendor-performance?${params.toString()}`);
-    return res.json();
-  },
-
-  // Media Management
-  getImages: async (query: Record<string, any> = {}) => {
-    const params = new URLSearchParams();
-    Object.entries(query || {}).forEach(([k,v]) => { if (v != null && v !== '') params.set(k, String(v)); });
-    const res = await fetchWithConfig(`${API_BASE}/admin/media/images?${params.toString()}`);
-    return res.json();
-  },
-  deleteImage: async (productId: string, imageId: string) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/media/images/${productId}/${imageId}`, {
-      method: 'DELETE',
-    });
-    return res.json();
-  },
-
-  // Settings Management
-  getMarketplaceSettings: async () => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/settings/marketplace`);
-    return res.json();
-  },
-
-  updateMarketplaceSettings: async (settings: any) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/settings/marketplace`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(settings),
-    });
-    return res.json();
-  },
-
-  getSystemSettings: async () => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/settings/system`);
-    return res.json();
-  },
-
-  updateSystemSettings: async (settings: any) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/settings/system`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(settings),
-    });
-    return res.json();
-  },
-
-  getSecuritySettings: async () => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/settings/security`);
-    return res.json();
-  },
-
-  updateSecuritySettings: async (settings: any) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/settings/security`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(settings),
-    });
-    return res.json();
-  },
-
-  getPaymentSettings: async () => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/settings/payment`);
-    return res.json();
-  },
-
-  updatePaymentSettings: async (settings: any) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/settings/payment`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(settings),
-    });
-    return res.json();
-  },
-
-  getAllSettings: async () => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/settings/all`);
-    return res.json();
-  },
-
-  resetSettings: async (type: string) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/settings/reset/${type}`, {
-      method: 'POST',
-    });
-    return res.json();
-  },
-
-  // Users/Vendors Management (enhanced)
+  // Users
   listUsers: async (query: Record<string, any>) => {
     const params = new URLSearchParams();
     Object.entries(query || {}).forEach(([k,v]) => { if (v != null && v !== '') params.set(k, String(v)); });
     const res = await fetchWithConfig(`${API_BASE}/admin/users?${params.toString()}`);
     return res.json();
   },
-  getUserDetails: async (userId: string) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/users/${userId}`);
+  getUser: async (id: string) => {
+    const res = await fetchWithConfig(`${API_BASE}/admin/users/${id}`);
     return res.json();
   },
-  updateUserRole: async (userId: string, role: string) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/users/${userId}/role`, {
-      method: 'PUT',
+  getUserDetails: async (id: string) => {
+    const res = await fetchWithConfig(`${API_BASE}/admin/users/${id}`);
+    return res.json();
+  },
+  updateUser: async (id: string, data: Record<string, any>) => {
+    const res = await fetchWithConfig(`${API_BASE}/admin/users/${id}`, {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role })
+      body: JSON.stringify(data),
     });
     return res.json();
   },
-  updateUserVerification: async (userId: string, isVerified: boolean) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/users/${userId}/verify`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isVerified })
+  deleteUser: async (id: string) => {
+    const res = await fetchWithConfig(`${API_BASE}/admin/users/${id}`, {
+      method: 'DELETE',
     });
     return res.json();
   },
-  getUserActivity: async (userId: string, limit: number = 50) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/users/${userId}/activity?limit=${limit}`);
-    return res.json();
-  },
-  getUserAnalytics: async (timeRange: string = '30d') => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/users/analytics/overview?timeRange=${timeRange}`);
-    return res.json();
-  },
-  getUserSummary: async () => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/users/summary`);
-    return res.json();
-  },
-
-  // Vendor Management
-  listVendors: async (query: Record<string, any>) => {
-    const params = new URLSearchParams();
-    Object.entries(query || {}).forEach(([k,v]) => { if (v != null && v !== '') params.set(k, String(v)); });
-    const res = await fetchWithConfig(`${API_BASE}/admin/vendors?${params.toString()}`);
-    return res.json();
-  },
-  getVendorDetails: async (vendorId: string) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/vendors/${vendorId}`);
-    return res.json();
-  },
-  getUserSales: async (vendorId: string, period: string = '30d') => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/vendors/${vendorId}/sales?period=${period}`);
-    return res.json();
-  },
-  getUserFees: async (vendorId: string, period: string = '30d') => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/vendors/${vendorId}/fees?period=${period}`);
-    return res.json();
-  },
-  suspendVendor: async (vendorId: string, reason: string) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/vendors/${vendorId}/suspend`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason })
-    });
-    return res.json();
-  },
-  unsuspendVendor: async (vendorId: string) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/vendors/${vendorId}/unsuspend`, {
-      method: 'POST'
-    });
-    return res.json();
-  },
-  updateVendorKyc: async (vendorId: string, kycStatus: string, notes?: string) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/vendors/${vendorId}/kyc`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ kycStatus, notes })
-    });
-    return res.json();
-  },
-  getVendorAnalytics: async (timeRange: string = '30d') => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/vendors/analytics/overview?timeRange=${timeRange}`);
-    return res.json();
-  },
-  getVendorSummary: async () => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/vendors/summary`);
-    return res.json();
-  },
-  suspendUser: async (id: string) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/users/${id}/suspend`, {
-      method: 'POST',
-    });
-    return res.json();
-  },
-  unsuspendUser: async (id: string) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/users/${id}/unsuspend`, {
-      method: 'POST',
-    });
-    return res.json();
-  },
-  updateUserKyc: async (id: string, status: string) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/users/${id}/kyc?status=${status}`, {
-      method: 'POST',
-    });
-    return res.json();
-  },
-
-
-  // Payouts Management
-  listPayouts: async (query: Record<string, any> = {}) => {
-    const params = new URLSearchParams();
-    Object.entries(query || {}).forEach(([k,v]) => { if (v != null && v !== '') params.set(k, String(v)); });
-    const res = await fetchWithConfig(`${API_BASE}/admin/payouts?${params.toString()}`);
-    return res.json();
-  },
-  getPayoutDetails: async (id: string) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/payouts/${id}`);
-    return res.json();
-  },
-  createPayout: async (data: { amount: number; currency: string; destination?: string; description?: string; metadata?: Record<string, any> }) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/payouts`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    });
-    return res.json();
-  },
-  cancelPayout: async (id: string) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/payouts/${id}/cancel`, {
-      method: 'POST',
-    });
-    return res.json();
-  },
-  getPayoutsAnalytics: async (timeRange: string = '30d') => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/payouts/analytics/overview?timeRange=${timeRange}`);
-    return res.json();
-  },
-  getDetailedPayoutsAnalytics: async (timeRange: string = '90d') => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/payouts/analytics/detailed?timeRange=${timeRange}`);
-    return res.json();
-  },
-  getPayoutsSummary: async () => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/payouts/summary`);
-    return res.json();
-  },
-  exportPayoutsUrl: (query: Record<string, any>) => {
-    const params = new URLSearchParams();
-    Object.entries(query || {}).forEach(([k,v]) => { if (v != null && v !== '') params.set(k, String(v)); });
-    return `${API_BASE}/admin/payouts/export.csv?${params.toString()}`;
-  },
-
-  // Disputes Management
-  listDisputes: async (query: Record<string, any> = {}) => {
-    const params = new URLSearchParams();
-    Object.entries(query || {}).forEach(([k,v]) => { if (v != null && v !== '') params.set(k, String(v)); });
-    const res = await fetchWithConfig(`${API_BASE}/admin/disputes?${params.toString()}`);
-    return res.json();
-  },
-  getDisputeDetails: async (id: string) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/disputes/${id}`);
-    return res.json();
-  },
-  getDisputesAnalytics: async (timeRange: string = '30d') => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/disputes/analytics/overview?timeRange=${timeRange}`);
-    return res.json();
-  },
-  submitDisputeEvidence: async (id: string, evidence: Record<string, any>) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/disputes/${id}/submit-evidence`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ evidence }),
-    });
-    return res.json();
-  },
-  addDisputeNote: async (id: string, note: string, priority: string = 'medium') => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/disputes/${id}/notes`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ note, priority }),
-    });
-    return res.json();
-  },
-  exportDisputesUrl: (query: Record<string, any>) => {
-    const params = new URLSearchParams();
-    Object.entries(query || {}).forEach(([k,v]) => { if (v != null && v !== '') params.set(k, String(v)); });
-    return `${API_BASE}/admin/disputes/export.csv?${params.toString()}`;
-  },
-
-  // Enhanced User Management
-  updateUser: async (userId: string, userData: any) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/users/${userId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(userData)
-    });
-    return res.json();
-  },
-
-  deleteUser: async (userId: string, permanent: boolean = false) => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/users/${userId}?permanent=${permanent}`, {
-      method: 'DELETE'
-    });
-    return res.json();
-  },
-
   restoreUser: async (userId: string) => {
     const res = await fetchWithConfig(`${API_BASE}/admin/users/${userId}/restore`, {
       method: 'POST'
@@ -618,6 +368,85 @@ export const AdminApi = {
 
   getUserEmailHistory: async (userId: string, limit: number = 50) => {
     const res = await fetchWithConfig(`${API_BASE}/admin/users/${userId}/email-history?limit=${limit}`);
+    return res.json();
+  },
+
+  // Chat Management
+  getChatConversations: async (query: Record<string, any> = {}) => {
+    const params = new URLSearchParams();
+    Object.entries(query || {}).forEach(([k,v]) => { if (v != null && v !== '') params.set(k, String(v)); });
+    const res = await fetchWithConfig(`${API_BASE}/admin/chat/conversations?${params.toString()}`);
+    return res.json();
+  },
+
+  getChatConversation: async (id: string) => {
+    const res = await fetchWithConfig(`${API_BASE}/admin/chat/conversations/${id}`);
+    return res.json();
+  },
+
+  getChatMessages: async (conversationId: string, query: Record<string, any> = {}) => {
+    const params = new URLSearchParams();
+    Object.entries(query || {}).forEach(([k,v]) => { if (v != null && v !== '') params.set(k, String(v)); });
+    const res = await fetchWithConfig(`${API_BASE}/admin/chat/conversations/${conversationId}/messages?${params.toString()}`);
+    return res.json();
+  },
+
+  sendChatMessage: async (conversationId: string, data: { content: string }) => {
+    const res = await fetchWithConfig(`${API_BASE}/admin/chat/conversations/${conversationId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    return res.json();
+  },
+
+  resolveChatConversation: async (id: string) => {
+    const res = await fetchWithConfig(`${API_BASE}/admin/chat/conversations/${id}/resolve`, {
+      method: 'PUT',
+    });
+    return res.json();
+  },
+
+  closeChatConversation: async (id: string) => {
+    const res = await fetchWithConfig(`${API_BASE}/admin/chat/conversations/${id}`, {
+      method: 'DELETE',
+    });
+    return res.json();
+  },
+
+  getChatAnalytics: async (query: Record<string, any> = {}) => {
+    const params = new URLSearchParams();
+    Object.entries(query || {}).forEach(([k,v]) => { if (v != null && v !== '') params.set(k, String(v)); });
+    const res = await fetchWithConfig(`${API_BASE}/admin/chat/analytics?${params.toString()}`);
+    return res.json();
+  },
+
+  // Vendor-Admin Chat
+  getVendorAdminConversations: async (query: Record<string, any> = {}) => {
+    const params = new URLSearchParams();
+    Object.entries(query || {}).forEach(([k,v]) => { if (v != null && v !== '') params.set(k, String(v)); });
+    const res = await fetchWithConfig(`${API_BASE}/admin/chat/vendor-admin?${params.toString()}`);
+    return res.json();
+  },
+
+  createVendorAdminConversation: async (vendorId: string) => {
+    const res = await fetchWithConfig(`${API_BASE}/admin/chat/vendor-admin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vendorId }),
+    });
+    return res.json();
+  },
+
+  // Vendor-Admin Chat (from chatbot API)
+  getVendorAdminChatConversations: async (vendorId: string) => {
+    const res = await fetchWithConfig(`${API_BASE}/chatbot/conversations/vendor-admin?vendorId=${vendorId}`);
+    return res.json();
+  },
+
+  // Categories
+  getCategories: async () => {
+    const res = await fetchWithConfig(`${API_BASE}/admin/categories`);
     return res.json();
   },
 };
