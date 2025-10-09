@@ -1039,14 +1039,14 @@ const MyDashboard: React.FC = () => {
                               <ListItemText
                                 primary={conversation.productName}
                                 secondary={
-                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                    <Typography variant="body2" color="text.secondary">
+                                  <React.Fragment>
+                                    <Typography variant="body2" color="text.secondary" component="span">
                                       {conversation.lastMessage?.content?.substring(0, 30) || 'No messages yet'}
                                     </Typography>
                                     {!conversation.isResolved && (
-                                      <Chip label="Active" size="small" color="primary" />
+                                      <Chip label="Active" size="small" color="primary" sx={{ ml: 1 }} />
                                     )}
-                                  </Box>
+                                  </React.Fragment>
                                 }
                               />
                               <Chip 

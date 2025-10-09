@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   AppBar,
   Toolbar,
@@ -28,9 +28,11 @@ import {
   Brightness7 as LightModeIcon,
   Fullscreen as FullscreenIcon,
   FullscreenExit as FullscreenExitIcon,
+  Chat as ChatIcon,
 } from '@mui/icons-material';
 import { useRouter } from 'next/router';
 import { gradients } from '../../theme';
+import { AdminApi } from '../../services/api';
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -43,6 +45,27 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick, title }) => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [notificationAnchor, setNotificationAnchor] = useState<null | HTMLElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [activeConversations, setActiveConversations] = useState(0);
+
+  // Fetch active conversations count
+  useEffect(() => {
+    const fetchChatAnalytics = async () => {
+      try {
+        const res = await AdminApi.getChatAnalytics();
+        if (res?.success && res.data) {
+          setActiveConversations(res.data.active_conversations || 0);
+        }
+      } catch (error) {
+        console.error('Failed to fetch chat analytics:', error);
+      }
+    };
+
+    fetchChatAnalytics();
+    
+    // Refresh every 30 seconds
+    const interval = setInterval(fetchChatAnalytics, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleProfileMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -204,6 +227,23 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick, title }) => {
               }}
             >
               {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+            </IconButton>
+          </Tooltip>
+
+          {/* Chat */}
+          <Tooltip title="Chat Management">
+            <IconButton
+              color="inherit"
+              onClick={() => router.push('/chat')}
+              sx={{
+                '&:hover': {
+                  backgroundColor: alpha(theme.palette.primary.main, 0.1),
+                },
+              }}
+            >
+              <Badge badgeContent={activeConversations} color="error" max={99}>
+                <ChatIcon />
+              </Badge>
             </IconButton>
           </Tooltip>
 

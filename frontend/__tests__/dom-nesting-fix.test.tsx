@@ -15,6 +15,7 @@ describe('DOM Nesting Fix Tests', () => {
     const { container } = render(
       <ThemeProvider theme={theme}>
         <ListItemText
+          component="div"
           primary={
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }} component="div">
               <Typography 

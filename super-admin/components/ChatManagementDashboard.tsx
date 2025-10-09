@@ -22,6 +22,7 @@ import Avatar from '@mui/material/Avatar';
 import Divider from '@mui/material/Divider';
 import TextField from '@mui/material/TextField';
 import CircularProgress from '@mui/material/CircularProgress';
+import Autocomplete from '@mui/material/Autocomplete';
 import {
   Chat as ChatIcon,
   Refresh as RefreshIcon,
@@ -29,7 +30,9 @@ import {
   Business as BusinessIcon,
   TrendingUp as TrendingUpIcon,
   Assessment as AssessmentIcon,
-  Send as SendIcon
+  Send as SendIcon,
+  Search as SearchIcon,
+  Add as AddIcon
 } from '@mui/icons-material';
 import { AdminApi } from '../src/services/api';
 
@@ -38,16 +41,82 @@ interface ChatManagementDashboardProps {
   onRefresh?: () => void;
 }
 
+interface Vendor {
+  id: string;
+  username: string;
+  displayName: string;
+  avatar: string;
+  isVerified: boolean;
+  productCount: number;
+}
+
+interface ChatConversation {
+  _id: string;
+  customerId: string;
+  vendorId: string;
+  productId: string;
+  productName: string;
+  lastMessage?: {
+    content: string;
+    senderId: string;
+    createdAt: string;
+  };
+  lastActivity: string;
+  isActive: boolean;
+  isResolved: boolean;
+  customer: {
+    username: string;
+    displayName?: string;
+    avatar?: string;
+  };
+  vendor: {
+    username: string;
+    displayName?: string;
+    avatar?: string;
+  };
+}
+
+interface ChatMessage {
+  _id: string;
+  conversationId: string;
+  senderId: string;
+  content: string;
+  type: 'text' | 'system';
+  isBotMessage: boolean;
+  createdAt: string;
+  sender?: {
+    username: string;
+    displayName?: string;
+    avatar?: string;
+  };
+}
+
+interface ChatAnalytics {
+  total_conversations: number;
+  active_conversations: number;
+  resolved_conversations: number;
+  closed_conversations: number;
+  total_messages: number;
+  vendor_response_rate: number;
+  avg_response_time: number;
+}
+
 export default function ChatManagementDashboard({ timeRange = '30d', onRefresh }: ChatManagementDashboardProps) {
-  const [conversations, setConversations] = useState<any[]>([]);
-  const [selectedConversation, setSelectedConversation] = useState<any>(null);
-  const [messages, setMessages] = useState<any[]>([]);
+  const [conversations, setConversations] = useState<ChatConversation[]>([]);
+  const [selectedConversation, setSelectedConversation] = useState<ChatConversation | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
-  const [analytics, setAnalytics] = useState<any>(null);
+  const [analytics, setAnalytics] = useState<ChatAnalytics | null>(null);
   const [chatDialogOpen, setChatDialogOpen] = useState(false);
+  
+  // Vendor search states
+  const [vendorSearchOpen, setVendorSearchOpen] = useState(false);
+  const [vendorSearchTerm, setVendorSearchTerm] = useState('');
+  const [vendorSearchResults, setVendorSearchResults] = useState<Vendor[]>([]);
+  const [vendorSearchLoading, setVendorSearchLoading] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -87,7 +156,7 @@ export default function ChatManagementDashboard({ timeRange = '30d', onRefresh }
     onRefresh?.();
   };
 
-  const handleOpenChat = async (conversation: any) => {
+  const handleOpenChat = async (conversation: ChatConversation) => {
     try {
       setSelectedConversation(conversation);
       
@@ -120,7 +189,7 @@ export default function ChatManagementDashboard({ timeRange = '30d', onRefresh }
       
       if (sendRes?.success) {
         // Add the new message to the messages list
-        const newMsg: any = sendRes.data.message;
+        const newMsg: ChatMessage = sendRes.data.message;
         setMessages([...messages, newMsg]);
         setNewMessage('');
         
@@ -161,6 +230,55 @@ export default function ChatManagementDashboard({ timeRange = '30d', onRefresh }
     return `${diffDays}d ago`;
   };
 
+  // Vendor search functions
+  const handleSearchVendors = async (searchTerm: string) => {
+    if (!searchTerm.trim()) {
+      setVendorSearchResults([]);
+      return;
+    }
+    
+    try {
+      setVendorSearchLoading(true);
+      const res = await AdminApi.searchVendorsForChat({
+        search: searchTerm,
+        limit: 10
+      });
+      
+      if (res?.success) {
+        setVendorSearchResults(res.data.vendors || []);
+      }
+    } catch (err) {
+      console.error('Failed to search vendors:', err);
+      setError('Failed to search vendors');
+    } finally {
+      setVendorSearchLoading(false);
+    }
+  };
+
+  const handleCreateVendorConversation = async (vendor: Vendor) => {
+    try {
+      const res = await AdminApi.createVendorAdminConversation(vendor.id);
+      
+      if (res?.success) {
+        // Close the search dialog
+        setVendorSearchOpen(false);
+        setVendorSearchTerm('');
+        setVendorSearchResults([]);
+        
+        // Open the conversation (whether new or existing)
+        if (res.data.conversation) {
+          handleOpenChat(res.data.conversation);
+        }
+        
+        // Refresh the conversations list
+        fetchData();
+      }
+    } catch (err) {
+      console.error('Failed to create vendor conversation:', err);
+      setError('Failed to create conversation with vendor');
+    }
+  };
+
   if (loading) {
     return (
       <Box sx={{ p: 3 }}>
@@ -188,11 +306,18 @@ export default function ChatManagementDashboard({ timeRange = '30d', onRefresh }
         <Typography variant="h6">
           Chat Management Dashboard
         </Typography>
-        <Tooltip title="Refresh Data">
-          <IconButton onClick={handleRefresh} size="small">
-            <RefreshIcon />
-          </IconButton>
-        </Tooltip>
+        <Box>
+          <Tooltip title="Start New Conversation">
+            <IconButton onClick={() => setVendorSearchOpen(true)} size="small">
+              <AddIcon />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Refresh Data">
+            <IconButton onClick={handleRefresh} size="small">
+              <RefreshIcon />
+            </IconButton>
+          </Tooltip>
+        </Box>
       </Box>
 
       <Grid container spacing={3}>
@@ -291,7 +416,7 @@ export default function ChatManagementDashboard({ timeRange = '30d', onRefresh }
                           secondary={
                             <React.Fragment>
                               <Typography component="span" variant="body2" color="text.primary">
-                                {conversation.customer.displayName || conversation.customer.username}
+                                {conversation.customer?.displayName || conversation.customer?.username || 'Vendor'}
                               </Typography>
                               {' — '}
                               {conversation.lastMessage?.content}
@@ -329,7 +454,7 @@ export default function ChatManagementDashboard({ timeRange = '30d', onRefresh }
         fullWidth
       >
         <DialogTitle>
-          Chat with {selectedConversation?.customer.displayName || selectedConversation?.customer.username}
+          Chat with {selectedConversation?.customer?.displayName || selectedConversation?.customer?.username || 'Vendor'}
           <Typography variant="body2" color="text.secondary">
             About: {selectedConversation?.productName}
           </Typography>
@@ -398,6 +523,143 @@ export default function ChatManagementDashboard({ timeRange = '30d', onRefresh }
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setChatDialogOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Vendor Search Dialog */}
+      <Dialog 
+        open={vendorSearchOpen} 
+        onClose={() => {
+          setVendorSearchOpen(false);
+          setVendorSearchTerm('');
+          setVendorSearchResults([]);
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          Start Conversation with Vendor
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ py: 2 }}>
+            <Autocomplete
+              freeSolo
+              options={vendorSearchResults}
+              getOptionLabel={(option) => 
+                typeof option === 'string' ? option : (option.displayName || option.username)
+              }
+              loading={vendorSearchLoading}
+              onInputChange={(event, newInputValue) => {
+                setVendorSearchTerm(newInputValue);
+                if (newInputValue.length > 2) {
+                  handleSearchVendors(newInputValue);
+                } else {
+                  setVendorSearchResults([]);
+                }
+              }}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Search Vendors"
+                  placeholder="Type to search vendors..."
+                  InputProps={{
+                    ...params.InputProps,
+                    startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />,
+                    endAdornment: (
+                      <React.Fragment>
+                        {vendorSearchLoading ? <CircularProgress color="inherit" size={20} /> : null}
+                        {params.InputProps.endAdornment}
+                      </React.Fragment>
+                    ),
+                  }}
+                />
+              )}
+              renderOption={(props, option) => {
+                const { key, ...otherProps } = props;
+                return (
+                  <li 
+                    key={key} 
+                    {...otherProps}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (typeof option !== 'string') {
+                        handleCreateVendorConversation(option);
+                      }
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+                      <Avatar 
+                        src={typeof option !== 'string' ? option.avatar : undefined} 
+                        sx={{ width: 32, height: 32, mr: 2 }}
+                      >
+                        <PersonIcon />
+                      </Avatar>
+                      <Box sx={{ flexGrow: 1 }}>
+                        <Typography variant="body1">
+                          {typeof option !== 'string' ? (option.displayName || option.username) : option}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {typeof option !== 'string' ? `${option.productCount} products` : ''}
+                        </Typography>
+                      </Box>
+                      {typeof option !== 'string' && option.isVerified && (
+                        <Chip label="Verified" size="small" color="primary" variant="outlined" />
+                      )}
+                    </Box>
+                  </li>
+                );
+              }}
+              onChange={(event, value) => {
+                // Handle selection from dropdown
+                if (value && typeof value !== 'string') {
+                  handleCreateVendorConversation(value);
+                }
+              }}
+              // Close the popup on selection
+              onClose={() => setVendorSearchOpen(false)}
+            />
+            
+            {vendorSearchResults.length > 0 && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  Search Results
+                </Typography>
+                <List>
+                  {vendorSearchResults.map((vendor) => (
+                    <ListItem
+                      key={vendor.id}
+                      onClick={() => handleCreateVendorConversation(vendor)}
+                      sx={{ borderRadius: 1, mb: 1, '&:hover': { bgcolor: 'action.hover', cursor: 'pointer' } }}
+                    >
+                      <ListItemAvatar>
+                        <Avatar src={vendor.avatar}>
+                          <PersonIcon />
+                        </Avatar>
+                      </ListItemAvatar>
+                      <ListItemText
+                        primary={vendor.displayName || vendor.username}
+                        secondary={`${vendor.productCount} products`}
+                      />
+                      {vendor.isVerified && (
+                        <Chip label="Verified" size="small" color="primary" variant="outlined" />
+                      )}
+                    </ListItem>
+                  ))}
+                </List>
+              </Box>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setVendorSearchOpen(false);
+            setVendorSearchTerm('');
+            setVendorSearchResults([]);
+          }}>
+            Cancel
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>

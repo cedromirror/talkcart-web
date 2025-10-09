@@ -17,14 +17,36 @@ import {
   DialogContent,
   DialogActions,
   Alert,
-  Tooltip
+  Tooltip,
+  Badge,
+  Divider,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText as MenuItemText,
+  Fab,
+  styled
 } from '@mui/material';
 import { 
   Send as SendIcon,
   Close as CloseIcon,
   SupportAgent as SupportAgentIcon,
   Person as PersonIcon,
-  Refresh as RefreshIcon
+  Refresh as RefreshIcon,
+  PushPin as PinIcon,
+  Notifications as NotificationsIcon,
+  NotificationsOff as NotificationsOffIcon,
+  MoreVert as MoreVertIcon,
+  Reply as ReplyIcon,
+  Forward as ForwardIcon,
+  Mood as MoodIcon,
+  AttachFile as AttachFileIcon,
+  EmojiEmotions as EmojiEmotionsIcon,
+  Fullscreen as FullscreenIcon,
+  FullscreenExit as FullscreenExitIcon,
+  Settings as SettingsIcon,
+  Star as StarIcon,
+  StarBorder as StarBorderIcon
 } from '@mui/icons-material';
 import { useAuth } from '@/contexts/AuthContext';
 import chatbotApiModule from '@/services/chatbotApi';
@@ -37,6 +59,66 @@ interface VendorAdminChatInterfaceProps {
   onClose: () => void;
 }
 
+// Styled components for enhanced UI
+const MessageContainer = styled(Box)(({ theme }) => ({
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'flex-start',
+  marginBottom: theme.spacing(2),
+  maxWidth: '80%',
+  position: 'relative',
+}));
+
+const MessageBubble = styled(Box)(({ theme }) => ({
+  borderRadius: '18px',
+  padding: theme.spacing(1.5, 2),
+  position: 'relative',
+  boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+  wordBreak: 'break-word',
+}));
+
+const UserMessageBubble = styled(MessageBubble)(({ theme }) => ({
+  backgroundColor: theme.palette.primary.main,
+  color: theme.palette.primary.contrastText,
+  alignSelf: 'flex-end',
+  borderRadius: '18px 4px 18px 18px',
+}));
+
+const AdminMessageBubble = styled(MessageBubble)(({ theme }) => ({
+  backgroundColor: theme.palette.grey[200],
+  color: theme.palette.text.primary,
+  alignSelf: 'flex-start',
+  borderRadius: '4px 18px 18px 18px',
+}));
+
+const MessageHeader = styled(Box)(({ theme }) => ({
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  marginBottom: theme.spacing(0.5),
+}));
+
+const MessageActions = styled(Box)(({ theme }) => ({
+  display: 'flex',
+  gap: theme.spacing(1),
+  opacity: 0,
+  transition: 'opacity 0.2s',
+  position: 'absolute',
+  top: theme.spacing(-2),
+  right: theme.spacing(2),
+  backgroundColor: theme.palette.background.paper,
+  padding: theme.spacing(0.5),
+  borderRadius: theme.shape.borderRadius,
+  boxShadow: theme.shadows[2],
+  '&:hover': {
+    opacity: 1,
+  },
+}));
+
+const MessageContent = styled(Typography)(({ theme }) => ({
+  whiteSpace: 'pre-wrap',
+}));
+
 const VendorAdminChatInterface: React.FC<VendorAdminChatInterfaceProps> = ({ open, onClose }) => {
   const { user } = useAuth();
   const [messages, setMessages] = useState<ChatbotMessage[]>([]);
@@ -45,6 +127,13 @@ const VendorAdminChatInterface: React.FC<VendorAdminChatInterfaceProps> = ({ ope
   const [sending, setSending] = useState(false);
   const [conversation, setConversation] = useState<ChatbotConversation | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isPinned, setIsPinned] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [messageActionsAnchor, setMessageActionsAnchor] = useState<null | HTMLElement>(null);
+  const [selectedMessage, setSelectedMessage] = useState<ChatbotMessage | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const fetchConversation = async () => {
@@ -62,6 +151,8 @@ const VendorAdminChatInterface: React.FC<VendorAdminChatInterfaceProps> = ({ ope
       if (response?.data?.conversations?.length > 0) {
         const conversation = response.data.conversations[0];
         setConversation(conversation);
+        setIsPinned(conversation.isPinned || false);
+        setIsMuted(conversation.isMuted || false);
         
         // Fetch messages for this conversation
         const messagesResponse = await chatbotApiModule.getMessages(conversation._id, { limit: 50 });
@@ -97,6 +188,8 @@ const VendorAdminChatInterface: React.FC<VendorAdminChatInterfaceProps> = ({ ope
       if (response?.data?.conversation) {
         setConversation(response.data.conversation);
         setMessages([]);
+        setIsPinned(false);
+        setIsMuted(false);
       }
     } catch (err: any) {
       console.error('Failed to create conversation:', err);
@@ -113,6 +206,8 @@ const VendorAdminChatInterface: React.FC<VendorAdminChatInterfaceProps> = ({ ope
       setNewMessage('');
       setConversation(null);
       setError(null);
+      setIsPinned(false);
+      setIsMuted(false);
       
       fetchConversation();
     }
@@ -157,17 +252,88 @@ const VendorAdminChatInterface: React.FC<VendorAdminChatInterfaceProps> = ({ ope
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  const handlePinConversation = async () => {
+    if (!conversation) return;
+    
+    try {
+      const response = await chatbotApiModule.pinConversation(conversation._id, !isPinned);
+      if (response?.data?.conversation) {
+        setIsPinned(response.data.conversation.isPinned);
+        setConversation(response.data.conversation);
+      }
+    } catch (err: any) {
+      console.error('Failed to pin conversation:', err);
+      setError('Failed to update conversation pin status');
+    }
+  };
+
+  const handleMuteConversation = async () => {
+    if (!conversation) return;
+    
+    try {
+      const response = await chatbotApiModule.muteConversation(conversation._id, !isMuted);
+      if (response?.data?.conversation) {
+        setIsMuted(response.data.conversation.isMuted);
+        setConversation(response.data.conversation);
+      }
+    } catch (err: any) {
+      console.error('Failed to mute conversation:', err);
+      setError('Failed to update conversation mute status');
+    }
+  };
+
+  const handleOpenMenu = (event: React.MouseEvent<HTMLElement>) => {
+    setAnchorEl(event.currentTarget);
+  };
+
+  const handleCloseMenu = () => {
+    setAnchorEl(null);
+  };
+
+  const handleOpenMessageActions = (event: React.MouseEvent<HTMLElement>, message: ChatbotMessage) => {
+    event.stopPropagation();
+    setMessageActionsAnchor(event.currentTarget);
+    setSelectedMessage(message);
+  };
+
+  const handleCloseMessageActions = () => {
+    setMessageActionsAnchor(null);
+    setSelectedMessage(null);
+  };
+
+  const handleReplyToMessage = () => {
+    if (!selectedMessage) return;
+    // In a real implementation, you would add a reply reference to the message
+    handleCloseMessageActions();
+  };
+
+  const handleForwardMessage = () => {
+    if (!selectedMessage) return;
+    // In a real implementation, you would show a forward dialog
+    handleCloseMessageActions();
+  };
+
+  const toggleFullscreen = () => {
+    setIsFullscreen(!isFullscreen);
+  };
+
   return (
     <Dialog
       open={open}
       onClose={onClose}
       maxWidth="md"
       fullWidth
+      fullScreen={isFullscreen}
       PaperProps={{
-        sx: { height: '80vh', maxHeight: 600, display: 'flex', flexDirection: 'column' }
+        sx: { 
+          height: isFullscreen ? '100%' : '80vh', 
+          maxHeight: 600, 
+          display: 'flex', 
+          flexDirection: 'column' 
+        }
       }}
     >
-      <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <Avatar>
             <SupportAgentIcon />
@@ -181,14 +347,53 @@ const VendorAdminChatInterface: React.FC<VendorAdminChatInterfaceProps> = ({ ope
             </Typography>
           </Box>
         </Box>
-        <IconButton onClick={onClose}>
-          <CloseIcon />
-        </IconButton>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Tooltip title={isPinned ? "Unpin conversation" : "Pin conversation"}>
+            <IconButton onClick={handlePinConversation} color={isPinned ? "primary" : "default"}>
+              <PinIcon />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title={isMuted ? "Unmute conversation" : "Mute conversation"}>
+            <IconButton onClick={handleMuteConversation} color={isMuted ? "default" : "primary"}>
+              {isMuted ? <NotificationsOffIcon /> : <NotificationsIcon />}
+            </IconButton>
+          </Tooltip>
+          <Tooltip title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}>
+            <IconButton onClick={toggleFullscreen}>
+              {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+            </IconButton>
+          </Tooltip>
+          <IconButton onClick={handleOpenMenu}>
+            <MoreVertIcon />
+          </IconButton>
+          <IconButton onClick={onClose}>
+            <CloseIcon />
+          </IconButton>
+        </Box>
       </DialogTitle>
+      
+      <Menu
+        anchorEl={anchorEl}
+        open={Boolean(anchorEl)}
+        onClose={handleCloseMenu}
+      >
+        <MenuItem onClick={handleCloseMenu}>
+          <ListItemIcon>
+            <SettingsIcon fontSize="small" />
+          </ListItemIcon>
+          <MenuItemText>Chat Settings</MenuItemText>
+        </MenuItem>
+        <MenuItem onClick={handleCloseMenu}>
+          <ListItemIcon>
+            <RefreshIcon fontSize="small" />
+          </ListItemIcon>
+          <MenuItemText>Refresh</MenuItemText>
+        </MenuItem>
+      </Menu>
       
       <DialogContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', p: 0 }}>
         {/* Messages area */}
-        <Box sx={{ flexGrow: 1, overflow: 'auto', p: 2 }}>
+        <Box sx={{ flexGrow: 1, overflow: 'auto', p: 2, bgcolor: 'grey.50' }}>
           {loading ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
               <CircularProgress />
@@ -216,32 +421,41 @@ const VendorAdminChatInterface: React.FC<VendorAdminChatInterfaceProps> = ({ ope
               </Button>
             </Box>
           ) : (
-            <List>
+            <List sx={{ display: 'flex', flexDirection: 'column' }}>
               {messages.map((message) => (
-                <ListItem
+                <Box
                   key={message._id}
                   sx={{
+                    display: 'flex',
                     justifyContent: message.senderId === user?.id ? 'flex-end' : 'flex-start',
-                    flexDirection: 'column',
-                    alignItems: message.senderId === user?.id ? 'flex-end' : 'flex-start',
+                    mb: 1,
                   }}
                 >
-                  <Box
-                    sx={{
-                      maxWidth: '80%',
-                      backgroundColor: message.senderId === user?.id ? 'primary.main' : 'grey.200',
-                      color: message.senderId === user?.id ? 'white' : 'text.primary',
-                      borderRadius: 2,
-                      p: 2,
-                      mb: 1,
-                    }}
-                  >
-                    <Typography variant="body1">{message.content}</Typography>
-                    <Typography variant="caption" sx={{ display: 'block', mt: 1, opacity: 0.7 }}>
-                      {message.senderId === user?.id ? 'You' : 'Admin Support'} • {formatTime(message.createdAt)}
-                    </Typography>
-                  </Box>
-                </ListItem>
+                  <MessageContainer>
+                    <MessageHeader>
+                      <Typography variant="caption" sx={{ fontWeight: 'bold' }}>
+                        {message.senderId === user?.id ? 'You' : 'Admin Support'}
+                      </Typography>
+                      <Typography variant="caption" sx={{ ml: 1 }}>
+                        {formatTime(message.createdAt)}
+                      </Typography>
+                    </MessageHeader>
+                    {message.senderId === user?.id ? (
+                      <UserMessageBubble>
+                        <MessageContent>{message.content}</MessageContent>
+                      </UserMessageBubble>
+                    ) : (
+                      <AdminMessageBubble>
+                        <MessageContent>{message.content}</MessageContent>
+                      </AdminMessageBubble>
+                    )}
+                    <MessageActions>
+                      <IconButton size="small" onClick={(e) => handleOpenMessageActions(e, message)}>
+                        <MoreVertIcon fontSize="small" />
+                      </IconButton>
+                    </MessageActions>
+                  </MessageContainer>
+                </Box>
               ))}
               <div ref={messagesEndRef} />
             </List>
@@ -250,8 +464,14 @@ const VendorAdminChatInterface: React.FC<VendorAdminChatInterfaceProps> = ({ ope
         
         {/* Input area - only show if conversation exists */}
         {conversation && (
-          <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
-            <Box sx={{ display: 'flex', gap: 1 }}>
+          <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end' }}>
+              <IconButton size="small" color="primary">
+                <AttachFileIcon />
+              </IconButton>
+              <IconButton size="small" color="primary">
+                <EmojiEmotionsIcon />
+              </IconButton>
               <TextField
                 fullWidth
                 variant="outlined"
@@ -266,13 +486,14 @@ const VendorAdminChatInterface: React.FC<VendorAdminChatInterfaceProps> = ({ ope
                 }}
                 disabled={sending}
                 multiline
-                maxRows={3}
+                maxRows={4}
+                size="small"
               />
               <IconButton
                 color="primary"
                 onClick={handleSendMessage}
                 disabled={sending || !newMessage.trim()}
-                sx={{ alignSelf: 'flex-end' }}
+                sx={{ p: 1 }}
               >
                 {sending ? <CircularProgress size={24} /> : <SendIcon />}
               </IconButton>
@@ -293,6 +514,26 @@ const VendorAdminChatInterface: React.FC<VendorAdminChatInterfaceProps> = ({ ope
         )}
         <Button onClick={onClose}>Close</Button>
       </DialogActions>
+      
+      {/* Message actions menu */}
+      <Menu
+        anchorEl={messageActionsAnchor}
+        open={Boolean(messageActionsAnchor)}
+        onClose={handleCloseMessageActions}
+      >
+        <MenuItem onClick={handleReplyToMessage}>
+          <ListItemIcon>
+            <ReplyIcon fontSize="small" />
+          </ListItemIcon>
+          <MenuItemText>Reply</MenuItemText>
+        </MenuItem>
+        <MenuItem onClick={handleForwardMessage}>
+          <ListItemIcon>
+            <ForwardIcon fontSize="small" />
+          </ListItemIcon>
+          <MenuItemText>Forward</MenuItemText>
+        </MenuItem>
+      </Menu>
     </Dialog>
   );
 };

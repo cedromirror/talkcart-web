@@ -438,6 +438,14 @@ export const AdminApi = {
     return res.json();
   },
 
+  // Vendor search for chat
+  searchVendorsForChat: async (query: Record<string, any> = {}) => {
+    const params = new URLSearchParams();
+    Object.entries(query || {}).forEach(([k,v]) => { if (v != null && v !== '') params.set(k, String(v)); });
+    const res = await fetchWithConfig(`${API_BASE}/admin/chat/search/vendors?${params.toString()}`);
+    return res.json();
+  },
+
   // Vendor-Admin Chat (from chatbot API)
   getVendorAdminChatConversations: async (vendorId: string) => {
     const res = await fetchWithConfig(`${API_BASE}/chatbot/conversations/vendor-admin?vendorId=${vendorId}`);

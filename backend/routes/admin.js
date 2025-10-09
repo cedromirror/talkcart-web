@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿const express = require('express');
+﻿﻿﻿﻿﻿﻿﻿﻿const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 const Joi = require('joi');
@@ -4364,6 +4364,178 @@ router.delete('/chat/conversations/:id', authenticateTokenStrict, requireAdmin, 
   }
 });
 
+// GET /api/admin/chat/search/vendors
+// Search vendors for chat purposes
+router.get('/chat/search/vendors', authenticateTokenStrict, requireAdmin, async (req, res) => {
+  try {
+    const { search, limit = 20, page = 1 } = req.query;
+
+    // Build query for vendors with active products
+    let vendorQuery = { role: 'vendor' };
+    
+    // Find vendors with active products
+    const productVendors = await Product.distinct('vendorId', { isActive: true });
+    
+    if (productVendors.length === 0) {
+      return res.json({
+        success: true,
+        data: {
+          vendors: [],
+          pagination: {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            total: 0,
+            pages: 0,
+          },
+        },
+      });
+    }
+    
+    vendorQuery._id = { $in: productVendors };
+    
+    // Add search filter if provided
+    if (search) {
+      vendorQuery.$or = [
+        { username: { $regex: search, $options: 'i' } },
+        { displayName: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    // Calculate pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Get vendors
+    const vendors = await User.find(vendorQuery, 'username displayName avatar isVerified walletAddress followerCount followingCount')
+      .sort({ followerCount: -1 })
+      .limit(parseInt(limit))
+      .skip(skip)
+      .lean();
+
+    // Get total count
+    const total = await User.countDocuments(vendorQuery);
+
+    // Add product count for each vendor
+    const vendorsWithCounts = await Promise.all(vendors.map(async (vendor) => {
+      const productCount = await Product.countDocuments({ 
+        vendorId: vendor._id,
+        isActive: true 
+      });
+      
+      return {
+        ...vendor,
+        id: vendor._id,
+        productCount
+      };
+    }));
+
+    return res.json({
+      success: true,
+      data: {
+        vendors: vendorsWithCounts,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / parseInt(limit)),
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Search vendors for chat error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to search vendors', error: error.message });
+  }
+});
+
+// POST /api/admin/chat/vendor-admin
+// Create vendor-admin conversation
+router.post('/chat/vendor-admin', authenticateTokenStrict, requireAdmin, async (req, res) => {
+  try {
+    const { vendorId } = req.body;
+
+    // Validation
+    if (!vendorId) {
+      return res.status(400).json({ success: false, message: 'Vendor ID is required' });
+    }
+
+    // Verify vendor exists
+    const vendor = await User.findById(vendorId);
+    if (!vendor || vendor.role !== 'vendor') {
+      return res.status(404).json({ success: false, message: 'Vendor not found' });
+    }
+
+    // Check if conversation already exists
+    const existingConversation = await ChatbotConversation.findOne({
+      vendorId: vendorId,
+      customerId: req.user.userId, // Use actual admin user ID
+      isActive: true
+    });
+
+    if (existingConversation) {
+      return res.json({
+        success: true,
+        data: {
+          conversation: existingConversation,
+          isNew: false
+        },
+        message: 'Conversation already exists'
+      });
+    }
+
+    // Create new conversation with admin
+    const newConversation = new ChatbotConversation({
+      customerId: req.user.userId, // Use actual admin user ID
+      vendorId: vendorId,
+      productId: null,
+      productName: 'Vendor Support',
+      isResolved: false,
+      botEnabled: false
+    });
+
+    await newConversation.save();
+
+    // Create welcome message from admin
+    const welcomeMessage = new ChatbotMessage({
+      conversationId: newConversation._id,
+      senderId: req.user.userId, // Admin is the sender
+      content: `Hello ${vendor.displayName || vendor.username}! How can I help you with your vendor account today?`,
+      type: 'system',
+      isBotMessage: false
+    });
+
+    await welcomeMessage.save();
+
+    // Update conversation with last message
+    newConversation.lastMessage = welcomeMessage._id;
+    await newConversation.save();
+
+    // Populate the conversation
+    await newConversation.populate({
+      path: 'customerId',
+      select: 'username displayName avatar isVerified'
+    });
+    await newConversation.populate({
+      path: 'vendorId',
+      select: 'username displayName avatar isVerified'
+    });
+    await newConversation.populate({
+      path: 'lastMessage',
+      select: 'content senderId createdAt isBotMessage'
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        conversation: newConversation,
+        isNew: true
+      },
+      message: 'Vendor-admin conversation created successfully'
+    });
+  } catch (error) {
+    console.error('Create vendor-admin conversation error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to create conversation', error: error.message });
+  }
+});
+
 // GET /api/admin/chat/analytics
 // Get chat analytics
 router.get('/chat/analytics', authenticateTokenStrict, requireAdmin, async (req, res) => {
@@ -4465,6 +4637,441 @@ router.get('/chat/analytics', authenticateTokenStrict, requireAdmin, async (req,
   } catch (e) {
     console.error('admin chat analytics error:', e);
     res.status(500).json({ success: false, message: 'Failed to fetch chat analytics' });
+  }
+});
+
+// @route   GET /api/admin/chat/conversations
+// @desc    Get all chatbot conversations (admin only)
+// @access  Private (Admin only)
+router.get('/chat/conversations', authenticateTokenStrict, requireAdmin, async (req, res) => {
+  try {
+    const { limit = 50, page = 1, status, priority, assignedToMe } = req.query;
+    const userId = req.user.userId;
+
+    // Build query
+    const query = { isActive: true };
+
+    // Add status filter
+    if (status === 'resolved') {
+      query.isResolved = true;
+    } else if (status === 'active') {
+      query.isResolved = false;
+    } else if (status === 'pinned') {
+      query.isPinned = true;
+    }
+
+    // Add priority filter
+    if (priority) {
+      const validPriorities = ['low', 'normal', 'high', 'urgent'];
+      if (validPriorities.includes(priority)) {
+        query.priority = priority;
+      }
+    }
+
+    // Add assigned to me filter
+    if (assignedToMe === 'true') {
+      query.assignedAdmin = userId;
+    }
+
+    // Calculate pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Get conversations
+    const conversations = await ChatbotConversation.find(query)
+      .populate({
+        path: 'customerId',
+        select: 'username displayName avatar isVerified'
+      })
+      .populate({
+        path: 'vendorId',
+        select: 'username displayName avatar isVerified'
+      })
+      .populate({
+        path: 'productId',
+        select: 'name images price currency'
+      })
+      .populate({
+        path: 'lastMessage',
+        select: 'content senderId createdAt isBotMessage'
+      })
+      .populate({
+        path: 'assignedAdmin',
+        select: 'username displayName'
+      })
+      .sort({ lastActivity: -1 })
+      .limit(parseInt(limit))
+      .skip(skip)
+      .lean();
+
+    // Get total count
+    const total = await ChatbotConversation.countDocuments(query);
+
+    return res.json({
+      success: true,
+      data: {
+        conversations,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: Math.ceil(total / parseInt(limit)),
+          totalConversations: total,
+          hasMore: skip + conversations.length < total
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Admin get conversations error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to get conversations' });
+  }
+});
+
+// @route   GET /api/admin/chat/conversations/:id
+// @desc    Get specific chatbot conversation details (admin only)
+// @access  Private (Admin only)
+router.get('/chat/conversations/:id', authenticateTokenStrict, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Validate conversation ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid conversation ID' });
+    }
+
+    // Find the conversation
+    const conversation = await ChatbotConversation.findById(id)
+      .populate({
+        path: 'customerId',
+        select: 'username displayName avatar isVerified email'
+      })
+      .populate({
+        path: 'vendorId',
+        select: 'username displayName avatar isVerified email'
+      })
+      .populate({
+        path: 'productId',
+        select: 'name description images price currency category'
+      })
+      .populate({
+        path: 'lastMessage',
+        select: 'content senderId createdAt isBotMessage'
+      })
+      .populate({
+        path: 'assignedAdmin',
+        select: 'username displayName'
+      })
+      .lean();
+
+    if (!conversation) {
+      return res.status(404).json({ success: false, message: 'Conversation not found' });
+    }
+
+    return res.json({
+      success: true,
+      data: { conversation }
+    });
+  } catch (error) {
+    console.error('Admin get conversation error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to get conversation' });
+  }
+});
+
+// @route   PUT /api/admin/chat/conversations/:id/assign
+// @desc    Assign/unassign conversation to admin (admin only)
+// @access  Private (Admin only)
+router.put('/chat/conversations/:id/assign', authenticateTokenStrict, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { adminId } = req.body;
+    const userId = req.user.userId;
+
+    // Validate conversation ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid conversation ID' });
+    }
+
+    // Find the conversation
+    const conversation = await ChatbotConversation.findById(id);
+    if (!conversation) {
+      return res.status(404).json({ success: false, message: 'Conversation not found' });
+    }
+
+    // Validate admin ID if provided
+    if (adminId) {
+      const admin = await User.findById(adminId);
+      if (!admin || admin.role !== 'admin') {
+        return res.status(400).json({ success: false, message: 'Invalid admin ID' });
+      }
+      conversation.assignedAdmin = adminId;
+    } else {
+      // Unassign conversation
+      conversation.assignedAdmin = null;
+    }
+
+    conversation.lastActivity = new Date();
+    await conversation.save();
+
+    // Populate the updated conversation
+    const updatedConversation = await ChatbotConversation.findById(id)
+      .populate({
+        path: 'customerId',
+        select: 'username displayName avatar isVerified'
+      })
+      .populate({
+        path: 'vendorId',
+        select: 'username displayName avatar isVerified'
+      })
+      .populate({
+        path: 'productId',
+        select: 'name images price currency'
+      })
+      .populate({
+        path: 'lastMessage',
+        select: 'content senderId createdAt isBotMessage'
+      })
+      .populate({
+        path: 'assignedAdmin',
+        select: 'username displayName'
+      })
+      .lean();
+
+    return res.json({
+      success: true,
+      data: { conversation: updatedConversation },
+      message: adminId ? 'Conversation assigned successfully' : 'Conversation unassigned successfully'
+    });
+  } catch (error) {
+    console.error('Admin assign conversation error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to assign conversation' });
+  }
+});
+
+// @route   PUT /api/admin/chat/conversations/:id/priority
+// @desc    Set conversation priority (admin only)
+// @access  Private (Admin only)
+router.put('/chat/conversations/:id/priority', authenticateTokenStrict, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { priority } = req.body;
+
+    // Validate conversation ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid conversation ID' });
+    }
+
+    // Validate priority
+    const validPriorities = ['low', 'normal', 'high', 'urgent'];
+    if (!validPriorities.includes(priority)) {
+      return res.status(400).json({ success: false, message: 'Invalid priority level' });
+    }
+
+    // Find the conversation
+    const conversation = await ChatbotConversation.findById(id);
+    if (!conversation) {
+      return res.status(404).json({ success: false, message: 'Conversation not found' });
+    }
+
+    // Update priority
+    conversation.priority = priority;
+    conversation.lastActivity = new Date();
+    await conversation.save();
+
+    return res.json({
+      success: true,
+      data: { conversation },
+      message: `Conversation priority set to ${priority}`
+    });
+  } catch (error) {
+    console.error('Admin set priority error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to set conversation priority' });
+  }
+});
+
+// @route   PUT /api/admin/chat/conversations/:id/resolve
+// @desc    Resolve/unresolve conversation (admin only)
+// @access  Private (Admin only)
+router.put('/chat/conversations/:id/resolve', authenticateTokenStrict, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isResolved } = req.body;
+
+    // Validate conversation ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid conversation ID' });
+    }
+
+    // Find the conversation
+    const conversation = await ChatbotConversation.findById(id);
+    if (!conversation) {
+      return res.status(404).json({ success: false, message: 'Conversation not found' });
+    }
+
+    // Update resolved status
+    conversation.isResolved = isResolved !== undefined ? isResolved : !conversation.isResolved;
+    conversation.lastActivity = new Date();
+    await conversation.save();
+
+    return res.json({
+      success: true,
+      data: { conversation },
+      message: `Conversation ${conversation.isResolved ? 'resolved' : 'reopened'}`
+    });
+  } catch (error) {
+    console.error('Admin resolve conversation error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to update conversation status' });
+  }
+});
+
+// @route   DELETE /api/admin/chat/conversations/:id
+// @desc    Delete/close conversation (admin only)
+// @access  Private (Admin only)
+router.delete('/chat/conversations/:id', authenticateTokenStrict, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Validate conversation ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid conversation ID' });
+    }
+
+    // Find the conversation
+    const conversation = await ChatbotConversation.findById(id);
+    if (!conversation) {
+      return res.status(404).json({ success: false, message: 'Conversation not found' });
+    }
+
+    // Mark as inactive
+    conversation.isActive = false;
+    conversation.lastActivity = new Date();
+    await conversation.save();
+
+    return res.json({
+      success: true,
+      message: 'Conversation closed successfully'
+    });
+  } catch (error) {
+    console.error('Admin delete conversation error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to close conversation' });
+  }
+});
+
+// @route   GET /api/admin/chat/messages
+// @desc    Search messages across all conversations (admin only)
+// @access  Private (Admin only)
+router.get('/chat/messages', authenticateTokenStrict, requireAdmin, async (req, res) => {
+  try {
+    const { query, limit = 50, page = 1 } = req.query;
+
+    // Validate search query
+    if (!query || query.trim().length < 2) {
+      return res.status(400).json({ success: false, message: 'Search query must be at least 2 characters' });
+    }
+
+    // Build search query
+    const searchQuery = {
+      content: { $regex: query, $options: 'i' },
+      isDeleted: false
+    };
+
+    // Calculate pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Get messages
+    const messages = await ChatbotMessage.find(searchQuery)
+      .populate({
+        path: 'conversationId',
+        select: 'customerId vendorId productName',
+        populate: [
+          { path: 'customerId', select: 'username displayName' },
+          { path: 'vendorId', select: 'username displayName' }
+        ]
+      })
+      .populate({
+        path: 'senderId',
+        select: 'username displayName'
+      })
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip(skip)
+      .lean();
+
+    // Get total count
+    const total = await ChatbotMessage.countDocuments(searchQuery);
+
+    return res.json({
+      success: true,
+      data: {
+        messages,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: Math.ceil(total / parseInt(limit)),
+          totalMessages: total,
+          hasMore: skip + messages.length < total
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Admin search messages error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to search messages' });
+  }
+});
+
+// @route   GET /api/admin/chat/stats
+// @desc    Get chat statistics (admin only)
+// @access  Private (Admin only)
+router.get('/chat/stats', authenticateTokenStrict, requireAdmin, async (req, res) => {
+  try {
+    // Get statistics
+    const totalConversations = await ChatbotConversation.countDocuments({ isActive: true });
+    const totalMessages = await ChatbotMessage.countDocuments();
+    const activeConversations = await ChatbotConversation.countDocuments({ 
+      isActive: true, 
+      lastActivity: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } 
+    });
+    const resolvedConversations = await ChatbotConversation.countDocuments({ 
+      isResolved: true, 
+      isActive: true 
+    });
+    const pinnedConversations = await ChatbotConversation.countDocuments({ 
+      isPinned: true, 
+      isActive: true 
+    });
+
+    // Get conversation counts by priority
+    const priorityStats = await ChatbotConversation.aggregate([
+      { $match: { isActive: true } },
+      { $group: { _id: '$priority', count: { $sum: 1 } } }
+    ]);
+
+    // Get conversation counts by status
+    const statusStats = await ChatbotConversation.aggregate([
+      { $match: { isActive: true } },
+      { 
+        $group: { 
+          _id: { 
+            isResolved: '$isResolved', 
+            isPinned: '$isPinned' 
+          }, 
+          count: { $sum: 1 } 
+        } 
+      }
+    ]);
+
+    const stats = {
+      totalConversations,
+      totalMessages,
+      activeConversations,
+      resolvedConversations,
+      pinnedConversations,
+      priorityStats,
+      statusStats
+    };
+
+    return res.json({
+      success: true,
+      data: { stats }
+    });
+  } catch (error) {
+    console.error('Admin chat stats error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to get chat statistics' });
   }
 });
 

@@ -153,7 +153,7 @@ export default function VendorsAdmin() {
     }
     
     fetchVendors();
-  }, [page, limit, search, kycFilter, guard]);
+  }, [page, limit, guard.allowed, guard.loading]);
 
   const handleKycUpdate = async () => {
     if (!selectedVendor || !newKycStatus) return;

@@ -277,11 +277,13 @@ router.get('/conversations', authenticateTokenStrict, async (req, res) => {
     // Calculate pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // Get conversations where user is either customer or vendor
+    // Get conversations where user is either customer, vendor, or admin participant
+    // For vendor-admin conversations, customerId is 'admin' string
     const conversations = await ChatbotConversation.find({
       $or: [
         { customerId: userId },
-        { vendorId: userId }
+        { vendorId: userId },
+        { customerId: 'admin', vendorId: userId } // Vendor-admin conversations where user is vendor
       ],
       isActive: true
     })
@@ -344,11 +346,13 @@ router.get('/conversations/:id', authenticateTokenStrict, async (req, res) => {
     }
 
     // Find the conversation and ensure the requesting user is participant
+    // For vendor-admin conversations, customerId is 'admin' string
     const conversation = await ChatbotConversation.findOne({
       _id: id,
       $or: [
         { customerId: userId },
-        { vendorId: userId }
+        { vendorId: userId },
+        { customerId: 'admin', vendorId: userId } // Vendor-admin conversations where user is vendor
       ],
       isActive: true
     })
@@ -396,11 +400,13 @@ router.get('/conversations/:id/messages', authenticateTokenStrict, async (req, r
     }
 
     // Check if user is participant in conversation
+    // For vendor-admin conversations, customerId is 'admin' string
     const conversation = await ChatbotConversation.findOne({
       _id: id,
       $or: [
         { customerId: userId },
-        { vendorId: userId }
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
       ],
       isActive: true
     });
@@ -424,14 +430,21 @@ router.get('/conversations/:id/messages', authenticateTokenStrict, async (req, r
 
     // Get messages
     const messages = await ChatbotMessage.find(query)
-      .populate({
-        path: 'senderId',
-        select: 'username displayName avatar isVerified'
-      })
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .skip(skip)
       .lean();
+
+    // Populate sender data for each message, handling admin messages
+    for (const message of messages) {
+      if (message.senderId !== 'admin') {
+        await message.populate({
+          path: 'senderId',
+          select: 'username displayName avatar isVerified'
+        });
+      }
+      // For admin messages, senderId remains as 'admin' string
+    }
 
     // Get total count
     const total = await ChatbotMessage.countDocuments(query);
@@ -486,11 +499,16 @@ router.post('/conversations/:id/messages', authenticateTokenStrict, async (req, 
     }
 
     // Determine if this is a customer, vendor, or admin message
+    // For vendor-admin conversations, customerId is 'admin' string
     const isCustomer = userId === conversation.customerId.toString();
     const isVendor = userId === conversation.vendorId.toString();
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' && conversation.customerId === 'admin';
 
-    if (!isCustomer && !isVendor && !isAdmin) {
+    // Check if user is authorized to participate in this conversation
+    const isParticipant = isCustomer || isVendor || isAdmin || 
+      (req.user.role === 'admin' && conversation.customerId === 'admin');
+
+    if (!isParticipant) {
       return sendError(res, 'Access denied', 403);
     }
 
@@ -577,14 +595,30 @@ router.put('/conversations/:id/resolve', authenticateTokenStrict, async (req, re
       return sendError(res, 'Invalid conversation ID', 400);
     }
 
-    // Find the conversation and ensure the requesting user is the vendor
+    // Find the conversation and ensure the requesting user is the vendor or admin
+    // For vendor-admin conversations, allow admin to resolve them
     const conversation = await ChatbotConversation.findOne({
       _id: id,
-      vendorId: userId,
+      $or: [
+        { vendorId: userId },
+        { customerId: 'admin', vendorId: { $ne: null } } // Vendor-admin conversation
+      ],
       isActive: true
     });
 
-    if (!conversation) {
+    // Additional check for admin resolving vendor-admin conversations
+    const isAdminResolvingVendorAdminConversation = 
+      req.user.role === 'admin' && 
+      conversation && 
+      conversation.customerId === 'admin';
+
+    // Check if user is authorized to resolve this conversation
+    const canResolve = conversation && (
+      userId === conversation.vendorId.toString() || 
+      isAdminResolvingVendorAdminConversation
+    );
+
+    if (!canResolve) {
       return sendError(res, 'Conversation not found or access denied', 404);
     }
 
@@ -593,10 +627,14 @@ router.put('/conversations/:id/resolve', authenticateTokenStrict, async (req, re
     conversation.lastActivity = new Date();
     await conversation.save();
 
+    // Determine senderId for resolution message
+    // For vendor-admin conversations, use 'admin' if admin is resolving
+    const resolutionSenderId = isAdminResolvingVendorAdminConversation ? 'admin' : userId;
+
     // Create resolution message
     const resolutionMessage = new ChatbotMessage({
       conversationId: id,
-      senderId: userId,
+      senderId: resolutionSenderId,
       content: 'This conversation has been marked as resolved. If you have any more questions, feel free to start a new conversation.',
       type: 'system',
       isBotMessage: true
@@ -627,11 +665,13 @@ router.delete('/conversations/:id', authenticateTokenStrict, async (req, res) =>
     }
 
     // Find the conversation and ensure the requesting user is participant
+    // For vendor-admin conversations, customerId is 'admin' string
     const conversation = await ChatbotConversation.findOne({
       _id: id,
       $or: [
         { customerId: userId },
-        { vendorId: userId }
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
       ],
       isActive: true
     });
@@ -677,11 +717,13 @@ router.put('/conversations/:id/messages/:messageId', authenticateTokenStrict, as
     }
 
     // Check if user is participant in conversation
+    // For vendor-admin conversations, customerId is 'admin' string
     const conversation = await ChatbotConversation.findOne({
       _id: id,
       $or: [
         { customerId: userId },
-        { vendorId: userId }
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
       ],
       isActive: true
     });
@@ -750,11 +792,13 @@ router.delete('/conversations/:id/messages/:messageId', authenticateTokenStrict,
     }
 
     // Check if user is participant in conversation
+    // For vendor-admin conversations, customerId is 'admin' string
     const conversation = await ChatbotConversation.findOne({
       _id: id,
       $or: [
         { customerId: userId },
-        { vendorId: userId }
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
       ],
       isActive: true
     });
@@ -821,11 +865,13 @@ router.post('/conversations/:id/messages/:messageId/reply', authenticateTokenStr
     }
 
     // Check if user is participant in conversation
+    // For vendor-admin conversations, customerId is 'admin' string
     const conversation = await ChatbotConversation.findOne({
       _id: id,
       $or: [
         { customerId: userId },
-        { vendorId: userId }
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
       ],
       isActive: true
     });
@@ -1014,3 +1060,1196 @@ module.exports = router;
 
 
 
+// @route   PUT /api/chatbot/conversations/:id/pin
+// @desc    Pin/unpin a conversation
+// @access  Private
+router.put('/conversations/:id/pin', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+    const { isPinned } = req.body;
+
+    // Validate conversation ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, 'Invalid conversation ID', 400);
+    }
+
+    // Find the conversation and ensure the requesting user is participant
+    const conversation = await ChatbotConversation.findOne({
+      _id: id,
+      $or: [
+        { customerId: userId },
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
+      ],
+      isActive: true
+    });
+
+    if (!conversation) {
+      return sendError(res, 'Conversation not found or access denied', 404);
+    }
+
+    // Update pinned status
+    conversation.isPinned = isPinned !== undefined ? isPinned : !conversation.isPinned;
+    conversation.lastActivity = new Date();
+    await conversation.save();
+
+    return sendSuccess(res, {
+      conversation
+    }, `Conversation ${conversation.isPinned ? 'pinned' : 'unpinned'} successfully`);
+  } catch (error) {
+    console.error('Pin conversation error:', error);
+    return sendError(res, 'Failed to update conversation pin status', 500, error.message);
+  }
+});
+
+// @route   PUT /api/chatbot/conversations/:id/mute
+// @desc    Mute/unmute a conversation
+// @access  Private
+router.put('/conversations/:id/mute', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+    const { isMuted } = req.body;
+
+    // Validate conversation ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, 'Invalid conversation ID', 400);
+    }
+
+    // Find the conversation and ensure the requesting user is participant
+    const conversation = await ChatbotConversation.findOne({
+      _id: id,
+      $or: [
+        { customerId: userId },
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
+      ],
+      isActive: true
+    });
+
+    if (!conversation) {
+      return sendError(res, 'Conversation not found or access denied', 404);
+    }
+
+    // Update muted status
+    conversation.isMuted = isMuted !== undefined ? isMuted : !conversation.isMuted;
+    conversation.lastActivity = new Date();
+    await conversation.save();
+
+    return sendSuccess(res, {
+      conversation
+    }, `Conversation ${conversation.isMuted ? 'muted' : 'unmuted'} successfully`);
+  } catch (error) {
+    console.error('Mute conversation error:', error);
+    return sendError(res, 'Failed to update conversation mute status', 500, error.message);
+  }
+});
+
+// @route   PUT /api/chatbot/conversations/:id/priority
+// @desc    Set conversation priority
+// @access  Private (Admin/Vendor only)
+router.put('/conversations/:id/priority', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+    const { priority } = req.body;
+
+    // Validate conversation ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, 'Invalid conversation ID', 400);
+    }
+
+    // Validate priority
+    const validPriorities = ['low', 'normal', 'high', 'urgent'];
+    if (!validPriorities.includes(priority)) {
+      return sendError(res, 'Invalid priority level', 400);
+    }
+
+    // Find the conversation and ensure the requesting user is participant
+    const conversation = await ChatbotConversation.findOne({
+      _id: id,
+      $or: [
+        { customerId: userId },
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
+      ],
+      isActive: true
+    });
+
+    if (!conversation) {
+      return sendError(res, 'Conversation not found or access denied', 404);
+    }
+
+    // Update priority
+    conversation.priority = priority;
+    conversation.lastActivity = new Date();
+    await conversation.save();
+
+    return sendSuccess(res, {
+      conversation
+    }, `Conversation priority set to ${priority}`);
+  } catch (error) {
+    console.error('Set conversation priority error:', error);
+    return sendError(res, 'Failed to set conversation priority', 500, error.message);
+  }
+});
+
+// @route   PUT /api/chatbot/conversations/:id/theme
+// @desc    Set conversation theme
+// @access  Private
+router.put('/conversations/:id/theme', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+    const { theme } = req.body;
+
+    // Validate conversation ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, 'Invalid conversation ID', 400);
+    }
+
+    // Validate theme
+    const validThemes = ['light', 'dark', 'auto'];
+    if (!validThemes.includes(theme)) {
+      return sendError(res, 'Invalid theme', 400);
+    }
+
+    // Find the conversation and ensure the requesting user is participant
+    const conversation = await ChatbotConversation.findOne({
+      _id: id,
+      $or: [
+        { customerId: userId },
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
+      ],
+      isActive: true
+    });
+
+    if (!conversation) {
+      return sendError(res, 'Conversation not found or access denied', 404);
+    }
+
+    // Update theme
+    conversation.theme = theme;
+    conversation.lastActivity = new Date();
+    await conversation.save();
+
+    return sendSuccess(res, {
+      conversation
+    }, `Conversation theme set to ${theme}`);
+  } catch (error) {
+    console.error('Set conversation theme error:', error);
+    return sendError(res, 'Failed to set conversation theme', 500, error.message);
+  }
+});
+
+// @route   POST /api/chatbot/conversations/:id/tags
+// @desc    Add tags to conversation
+// @access  Private
+router.post('/conversations/:id/tags', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+    const { tags } = req.body;
+
+    // Validate conversation ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, 'Invalid conversation ID', 400);
+    }
+
+    // Validate tags
+    if (!Array.isArray(tags) || tags.length === 0) {
+      return sendError(res, 'Tags must be a non-empty array', 400);
+    }
+
+    // Find the conversation and ensure the requesting user is participant
+    const conversation = await ChatbotConversation.findOne({
+      _id: id,
+      $or: [
+        { customerId: userId },
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
+      ],
+      isActive: true
+    });
+
+    if (!conversation) {
+      return sendError(res, 'Conversation not found or access denied', 404);
+    }
+
+    // Add tags (avoid duplicates)
+    const newTags = [...new Set([...(conversation.tags || []), ...tags])];
+    conversation.tags = newTags;
+    conversation.lastActivity = new Date();
+    await conversation.save();
+
+    return sendSuccess(res, {
+      conversation
+    }, 'Tags added successfully');
+  } catch (error) {
+    console.error('Add conversation tags error:', error);
+    return sendError(res, 'Failed to add tags to conversation', 500, error.message);
+  }
+});
+
+// @route   DELETE /api/chatbot/conversations/:id/tags/:tag
+// @desc    Remove tag from conversation
+// @access  Private
+router.delete('/conversations/:id/tags/:tag', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { id, tag } = req.params;
+    const userId = req.user.userId;
+
+    // Validate conversation ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, 'Invalid conversation ID', 400);
+    }
+
+    // Find the conversation and ensure the requesting user is participant
+    const conversation = await ChatbotConversation.findOne({
+      _id: id,
+      $or: [
+        { customerId: userId },
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
+      ],
+      isActive: true
+    });
+
+    if (!conversation) {
+      return sendError(res, 'Conversation not found or access denied', 404);
+    }
+
+    // Remove tag
+    conversation.tags = (conversation.tags || []).filter(t => t !== tag);
+    conversation.lastActivity = new Date();
+    await conversation.save();
+
+    return sendSuccess(res, {
+      conversation
+    }, 'Tag removed successfully');
+  } catch (error) {
+    console.error('Remove conversation tag error:', error);
+    return sendError(res, 'Failed to remove tag from conversation', 500, error.message);
+  }
+});
+
+// @route   POST /api/chatbot/conversations/:id/assign
+// @desc    Assign conversation to admin
+// @access  Private (Admin only)
+router.post('/conversations/:id/assign', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+    const { adminId } = req.body;
+
+    // Validate conversation ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, 'Invalid conversation ID', 400);
+    }
+
+    // Verify that the requesting user is an admin
+    const user = await User.findById(userId);
+    if (!user || user.role !== 'admin') {
+      return sendError(res, 'Access denied. Admin access required.', 403);
+    }
+
+    // Find the conversation
+    const conversation = await ChatbotConversation.findById(id);
+    if (!conversation) {
+      return sendError(res, 'Conversation not found', 404);
+    }
+
+    // Validate admin ID if provided
+    if (adminId) {
+      const admin = await User.findById(adminId);
+      if (!admin || admin.role !== 'admin') {
+        return sendError(res, 'Invalid admin ID', 400);
+      }
+      conversation.assignedAdmin = adminId;
+    } else {
+      // Unassign conversation
+      conversation.assignedAdmin = null;
+    }
+
+    conversation.lastActivity = new Date();
+    await conversation.save();
+
+    return sendSuccess(res, {
+      conversation
+    }, adminId ? 'Conversation assigned to admin successfully' : 'Conversation unassigned successfully');
+  } catch (error) {
+    console.error('Assign conversation error:', error);
+    return sendError(res, 'Failed to assign conversation', 500, error.message);
+  }
+});
+
+// @route   POST /api/chatbot/messages/:id/reactions
+// @desc    Add reaction to message
+// @access  Private
+router.post('/messages/:id/reactions', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+    const { emoji } = req.body;
+
+    // Validate message ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, 'Invalid message ID', 400);
+    }
+
+    // Validate emoji
+    if (!emoji) {
+      return sendError(res, 'Emoji is required', 400);
+    }
+
+    // Find the message
+    const message = await ChatbotMessage.findById(id);
+    if (!message) {
+      return sendError(res, 'Message not found', 404);
+    }
+
+    // Find the conversation to verify user access
+    const conversation = await ChatbotConversation.findOne({
+      _id: message.conversationId,
+      $or: [
+        { customerId: userId },
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
+      ],
+      isActive: true
+    });
+
+    if (!conversation) {
+      return sendError(res, 'Access denied', 403);
+    }
+
+    // Find existing reaction or create new one
+    let reaction = message.reactions.find(r => r.emoji === emoji);
+    if (!reaction) {
+      reaction = {
+        emoji,
+        userIds: [],
+        count: 0
+      };
+      message.reactions.push(reaction);
+    }
+
+    // Check if user already reacted
+    const userIndex = reaction.userIds.findIndex(uid => uid.equals(userId));
+    if (userIndex === -1) {
+      // Add user to reaction
+      reaction.userIds.push(userId);
+      reaction.count++;
+    } else {
+      // Remove user from reaction
+      reaction.userIds.splice(userIndex, 1);
+      reaction.count--;
+      
+      // Remove reaction if no users left
+      if (reaction.count <= 0) {
+        message.reactions = message.reactions.filter(r => r.emoji !== emoji);
+      }
+    }
+
+    await message.save();
+
+    return sendSuccess(res, {
+      message
+    }, userIndex === -1 ? 'Reaction added successfully' : 'Reaction removed successfully');
+  } catch (error) {
+    console.error('Add reaction error:', error);
+    return sendError(res, 'Failed to add reaction', 500, error.message);
+  }
+});
+
+// @route   POST /api/chatbot/messages/:id/forward
+// @desc    Forward message to another conversation
+// @access  Private
+router.post('/messages/:id/forward', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+    const { conversationId } = req.body;
+
+    // Validate message ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, 'Invalid message ID', 400);
+    }
+
+    // Validate target conversation ID
+    if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+      return sendError(res, 'Invalid target conversation ID', 400);
+    }
+
+    // Find the original message
+    const originalMessage = await ChatbotMessage.findById(id);
+    if (!originalMessage) {
+      return sendError(res, 'Message not found', 404);
+    }
+
+    // Find the original conversation to verify user access
+    const originalConversation = await ChatbotConversation.findOne({
+      _id: originalMessage.conversationId,
+      $or: [
+        { customerId: userId },
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
+      ],
+      isActive: true
+    });
+
+    if (!originalConversation) {
+      return sendError(res, 'Access denied to original message', 403);
+    }
+
+    // Find the target conversation
+    const targetConversation = await ChatbotConversation.findOne({
+      _id: conversationId,
+      $or: [
+        { customerId: userId },
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
+      ],
+      isActive: true
+    });
+
+    if (!targetConversation) {
+      return sendError(res, 'Access denied to target conversation', 403);
+    }
+
+    // Create forwarded message
+    const forwardedMessage = new ChatbotMessage({
+      conversationId: targetConversation._id,
+      senderId: userId,
+      content: originalMessage.content,
+      type: originalMessage.type,
+      isForwarded: true,
+      forwardedFrom: originalMessage._id,
+      richContent: originalMessage.richContent,
+      attachments: originalMessage.attachments
+    });
+
+    await forwardedMessage.save();
+
+    // Update target conversation's last message and activity
+    targetConversation.lastMessage = forwardedMessage._id;
+    targetConversation.lastActivity = new Date();
+    await targetConversation.save();
+
+    return sendSuccess(res, {
+      message: forwardedMessage
+    }, 'Message forwarded successfully');
+  } catch (error) {
+    console.error('Forward message error:', error);
+    return sendError(res, 'Failed to forward message', 500, error.message);
+  }
+});
+
+// @route   GET /api/chatbot/conversations/pinned
+// @desc    Get all pinned conversations for user
+// @access  Private
+router.get('/conversations/pinned', authenticateTokenStrict, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { limit = 20 } = req.query;
+
+    // Get pinned conversations where user is participant
+    const conversations = await ChatbotConversation.find({
+      $or: [
+        { customerId: userId },
+        { vendorId: userId },
+        { customerId: 'admin', vendorId: userId } // Vendor-admin conversations where user is vendor
+      ],
+      isActive: true,
+      isPinned: true
+    })
+      .populate({
+        path: 'customerId',
+        select: 'username displayName avatar isVerified'
+      })
+      .populate({
+        path: 'vendorId',
+        select: 'username displayName avatar isVerified'
+      })
+      .populate({
+        path: 'productId',
+        select: 'name images price currency'
+      })
+      .populate({
+        path: 'lastMessage',
+        select: 'content senderId createdAt isBotMessage'
+      })
+      .sort({ lastActivity: -1 })
+      .limit(parseInt(limit))
+      .lean();
+
+    return sendSuccess(res, {
+      conversations
+    });
+  } catch (error) {
+    console.error('Get pinned conversations error:', error);
+    return sendError(res, 'Failed to get pinned conversations', 500, error.message);
+  }
+});
+
+// @route   GET /api/chatbot/conversations/priority/:level
+// @desc    Get conversations by priority level
+// @access  Private (Admin only)
+router.get('/conversations/priority/:level', authenticateTokenStrict, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { level } = req.params;
+    const { limit = 20 } = req.query;
+
+    // Verify that the requesting user is an admin
+    const user = await User.findById(userId);
+    if (!user || user.role !== 'admin') {
+      return sendError(res, 'Access denied. Admin access required.', 403);
+    }
+
+    // Validate priority level
+    const validPriorities = ['low', 'normal', 'high', 'urgent'];
+    if (!validPriorities.includes(level)) {
+      return sendError(res, 'Invalid priority level', 400);
+    }
+
+    // Get conversations with specified priority
+    const conversations = await ChatbotConversation.find({
+      priority: level,
+      isActive: true
+    })
+      .populate({
+        path: 'customerId',
+        select: 'username displayName avatar isVerified'
+      })
+      .populate({
+        path: 'vendorId',
+        select: 'username displayName avatar isVerified'
+      })
+      .populate({
+        path: 'productId',
+        select: 'name images price currency'
+      })
+      .populate({
+        path: 'lastMessage',
+        select: 'content senderId createdAt isBotMessage'
+      })
+      .populate({
+        path: 'assignedAdmin',
+        select: 'username displayName'
+      })
+      .sort({ lastActivity: -1 })
+      .limit(parseInt(limit))
+      .lean();
+
+    return sendSuccess(res, {
+      conversations
+    });
+  } catch (error) {
+    console.error('Get priority conversations error:', error);
+    return sendError(res, 'Failed to get priority conversations', 500, error.message);
+  }
+});
+
+// @route   GET /api/chatbot/conversations/assigned
+// @desc    Get conversations assigned to admin
+// @access  Private (Admin only)
+router.get('/conversations/assigned', authenticateTokenStrict, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { limit = 20 } = req.query;
+
+    // Verify that the requesting user is an admin
+    const user = await User.findById(userId);
+    if (!user || user.role !== 'admin') {
+      return sendError(res, 'Access denied. Admin access required.', 403);
+    }
+
+    // Get conversations assigned to this admin
+    const conversations = await ChatbotConversation.find({
+      assignedAdmin: userId,
+      isActive: true
+    })
+      .populate({
+        path: 'customerId',
+        select: 'username displayName avatar isVerified'
+      })
+      .populate({
+        path: 'vendorId',
+        select: 'username displayName avatar isVerified'
+      })
+      .populate({
+        path: 'productId',
+        select: 'name images price currency'
+      })
+      .populate({
+        path: 'lastMessage',
+        select: 'content senderId createdAt isBotMessage'
+      })
+      .sort({ lastActivity: -1 })
+      .limit(parseInt(limit))
+      .lean();
+
+    return sendSuccess(res, {
+      conversations
+    });
+  } catch (error) {
+    console.error('Get assigned conversations error:', error);
+    return sendError(res, 'Failed to get assigned conversations', 500, error.message);
+  }
+});
+
+// @route   GET /api/chatbot/stats
+// @desc    Get chatbot statistics
+// @access  Private (Admin only)
+router.get('/stats', authenticateTokenStrict, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    // Verify that the requesting user is an admin
+    const user = await User.findById(userId);
+    if (!user || user.role !== 'admin') {
+      return sendError(res, 'Access denied. Admin access required.', 403);
+    }
+
+    // Get statistics
+    const totalConversations = await ChatbotConversation.countDocuments({ isActive: true });
+    const totalMessages = await ChatbotMessage.countDocuments();
+    const activeConversations = await ChatbotConversation.countDocuments({ 
+      isActive: true, 
+      lastActivity: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } 
+    });
+    const resolvedConversations = await ChatbotConversation.countDocuments({ 
+      isResolved: true, 
+      isActive: true 
+    });
+    const pinnedConversations = await ChatbotConversation.countDocuments({ 
+      isPinned: true, 
+      isActive: true 
+    });
+
+    // Get conversation counts by priority
+    const priorityStats = await ChatbotConversation.aggregate([
+      { $match: { isActive: true } },
+      { $group: { _id: '$priority', count: { $sum: 1 } } }
+    ]);
+
+    // Get conversation counts by status
+    const statusStats = await ChatbotConversation.aggregate([
+      { $match: { isActive: true } },
+      { 
+        $group: { 
+          _id: { 
+            isResolved: '$isResolved', 
+            isPinned: '$isPinned' 
+          }, 
+          count: { $sum: 1 } 
+        } 
+      }
+    ]);
+
+    return sendSuccess(res, {
+      totalConversations,
+      totalMessages,
+      activeConversations,
+      resolvedConversations,
+      pinnedConversations,
+      priorityStats,
+      statusStats
+    });
+  } catch (error) {
+    console.error('Get chatbot stats error:', error);
+    return sendError(res, 'Failed to get chatbot statistics', 500, error.message);
+  }
+});
+
+// @route   PUT /api/chatbot/conversations/:id/pin
+// @desc    Pin/unpin a conversation
+// @access  Private
+router.put('/conversations/:id/pin', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+    const { isPinned } = req.body;
+
+    // Validate conversation ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, 'Invalid conversation ID', 400);
+    }
+
+    // Find the conversation and ensure the requesting user is participant
+    const conversation = await ChatbotConversation.findOne({
+      _id: id,
+      $or: [
+        { customerId: userId },
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
+      ],
+      isActive: true
+    });
+
+    if (!conversation) {
+      return sendError(res, 'Conversation not found or access denied', 404);
+    }
+
+    // Update pinned status
+    conversation.isPinned = isPinned !== undefined ? isPinned : !conversation.isPinned;
+    conversation.lastActivity = new Date();
+    await conversation.save();
+
+    return sendSuccess(res, {
+      conversation
+    }, `Conversation ${conversation.isPinned ? 'pinned' : 'unpinned'} successfully`);
+  } catch (error) {
+    console.error('Pin conversation error:', error);
+    return sendError(res, 'Failed to update conversation pin status', 500, error.message);
+  }
+});
+
+// @route   PUT /api/chatbot/conversations/:id/mute
+// @desc    Mute/unmute a conversation
+// @access  Private
+router.put('/conversations/:id/mute', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+    const { isMuted } = req.body;
+
+    // Validate conversation ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, 'Invalid conversation ID', 400);
+    }
+
+    // Find the conversation and ensure the requesting user is participant
+    const conversation = await ChatbotConversation.findOne({
+      _id: id,
+      $or: [
+        { customerId: userId },
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
+      ],
+      isActive: true
+    });
+
+    if (!conversation) {
+      return sendError(res, 'Conversation not found or access denied', 404);
+    }
+
+    // Update muted status
+    conversation.isMuted = isMuted !== undefined ? isMuted : !conversation.isMuted;
+    conversation.lastActivity = new Date();
+    await conversation.save();
+
+    return sendSuccess(res, {
+      conversation
+    }, `Conversation ${conversation.isMuted ? 'muted' : 'unmuted'} successfully`);
+  } catch (error) {
+    console.error('Mute conversation error:', error);
+    return sendError(res, 'Failed to update conversation mute status', 500, error.message);
+  }
+});
+
+// @route   PUT /api/chatbot/conversations/:id/priority
+// @desc    Set conversation priority
+// @access  Private (Admin/Vendor only)
+router.put('/conversations/:id/priority', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+    const { priority } = req.body;
+
+    // Validate conversation ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, 'Invalid conversation ID', 400);
+    }
+
+    // Validate priority
+    const validPriorities = ['low', 'normal', 'high', 'urgent'];
+    if (!validPriorities.includes(priority)) {
+      return sendError(res, 'Invalid priority level', 400);
+    }
+
+    // Find the conversation and ensure the requesting user is participant
+    const conversation = await ChatbotConversation.findOne({
+      _id: id,
+      $or: [
+        { customerId: userId },
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
+      ],
+      isActive: true
+    });
+
+    if (!conversation) {
+      return sendError(res, 'Conversation not found or access denied', 404);
+    }
+
+    // Update priority
+    conversation.priority = priority;
+    conversation.lastActivity = new Date();
+    await conversation.save();
+
+    return sendSuccess(res, {
+      conversation
+    }, `Conversation priority set to ${priority}`);
+  } catch (error) {
+    console.error('Set conversation priority error:', error);
+    return sendError(res, 'Failed to set conversation priority', 500, error.message);
+  }
+});
+
+// @route   PUT /api/chatbot/conversations/:id/theme
+// @desc    Set conversation theme
+// @access  Private
+router.put('/conversations/:id/theme', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+    const { theme } = req.body;
+
+    // Validate conversation ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, 'Invalid conversation ID', 400);
+    }
+
+    // Validate theme
+    const validThemes = ['light', 'dark', 'auto'];
+    if (!validThemes.includes(theme)) {
+      return sendError(res, 'Invalid theme', 400);
+    }
+
+    // Find the conversation and ensure the requesting user is participant
+    const conversation = await ChatbotConversation.findOne({
+      _id: id,
+      $or: [
+        { customerId: userId },
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
+      ],
+      isActive: true
+    });
+
+    if (!conversation) {
+      return sendError(res, 'Conversation not found or access denied', 404);
+    }
+
+    // Update theme
+    conversation.theme = theme;
+    conversation.lastActivity = new Date();
+    await conversation.save();
+
+    return sendSuccess(res, {
+      conversation
+    }, `Conversation theme set to ${theme}`);
+  } catch (error) {
+    console.error('Set conversation theme error:', error);
+    return sendError(res, 'Failed to set conversation theme', 500, error.message);
+  }
+});
+
+// @route   POST /api/chatbot/conversations/:id/tags
+// @desc    Add tags to conversation
+// @access  Private
+router.post('/conversations/:id/tags', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+    const { tags } = req.body;
+
+    // Validate conversation ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, 'Invalid conversation ID', 400);
+    }
+
+    // Validate tags
+    if (!Array.isArray(tags) || tags.length === 0) {
+      return sendError(res, 'Tags must be a non-empty array', 400);
+    }
+
+    // Find the conversation and ensure the requesting user is participant
+    const conversation = await ChatbotConversation.findOne({
+      _id: id,
+      $or: [
+        { customerId: userId },
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
+      ],
+      isActive: true
+    });
+
+    if (!conversation) {
+      return sendError(res, 'Conversation not found or access denied', 404);
+    }
+
+    // Add tags (avoid duplicates)
+    const newTags = [...new Set([...(conversation.tags || []), ...tags])];
+    conversation.tags = newTags;
+    conversation.lastActivity = new Date();
+    await conversation.save();
+
+    return sendSuccess(res, {
+      conversation
+    }, 'Tags added successfully');
+  } catch (error) {
+    console.error('Add conversation tags error:', error);
+    return sendError(res, 'Failed to add tags to conversation', 500, error.message);
+  }
+});
+
+// @route   DELETE /api/chatbot/conversations/:id/tags/:tag
+// @desc    Remove tag from conversation
+// @access  Private
+router.delete('/conversations/:id/tags/:tag', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { id, tag } = req.params;
+    const userId = req.user.userId;
+
+    // Validate conversation ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, 'Invalid conversation ID', 400);
+    }
+
+    // Find the conversation and ensure the requesting user is participant
+    const conversation = await ChatbotConversation.findOne({
+      _id: id,
+      $or: [
+        { customerId: userId },
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
+      ],
+      isActive: true
+    });
+
+    if (!conversation) {
+      return sendError(res, 'Conversation not found or access denied', 404);
+    }
+
+    // Remove tag
+    conversation.tags = (conversation.tags || []).filter(t => t !== tag);
+    conversation.lastActivity = new Date();
+    await conversation.save();
+
+    return sendSuccess(res, {
+      conversation
+    }, 'Tag removed successfully');
+  } catch (error) {
+    console.error('Remove conversation tag error:', error);
+    return sendError(res, 'Failed to remove tag from conversation', 500, error.message);
+  }
+});
+
+// @route   POST /api/chatbot/conversations/:id/assign
+// @desc    Assign conversation to admin
+// @access  Private (Admin only)
+router.post('/conversations/:id/assign', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+    const { adminId } = req.body;
+
+    // Validate conversation ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, 'Invalid conversation ID', 400);
+    }
+
+    // Verify that the requesting user is an admin
+    const user = await User.findById(userId);
+    if (!user || user.role !== 'admin') {
+      return sendError(res, 'Access denied. Admin access required.', 403);
+    }
+
+    // Find the conversation
+    const conversation = await ChatbotConversation.findById(id);
+    if (!conversation) {
+      return sendError(res, 'Conversation not found', 404);
+    }
+
+    // Validate admin ID if provided
+    if (adminId) {
+      const admin = await User.findById(adminId);
+      if (!admin || admin.role !== 'admin') {
+        return sendError(res, 'Invalid admin ID', 400);
+      }
+      conversation.assignedAdmin = adminId;
+    } else {
+      // Unassign conversation
+      conversation.assignedAdmin = null;
+    }
+
+    conversation.lastActivity = new Date();
+    await conversation.save();
+
+    return sendSuccess(res, {
+      conversation
+    }, adminId ? 'Conversation assigned to admin successfully' : 'Conversation unassigned successfully');
+  } catch (error) {
+    console.error('Assign conversation error:', error);
+    return sendError(res, 'Failed to assign conversation', 500, error.message);
+  }
+});
+
+// @route   POST /api/chatbot/messages/:id/reactions
+// @desc    Add reaction to message
+// @access  Private
+router.post('/messages/:id/reactions', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+    const { emoji } = req.body;
+
+    // Validate message ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, 'Invalid message ID', 400);
+    }
+
+    // Validate emoji
+    if (!emoji) {
+      return sendError(res, 'Emoji is required', 400);
+    }
+
+    // Find the message
+    const message = await ChatbotMessage.findById(id);
+    if (!message) {
+      return sendError(res, 'Message not found', 404);
+    }
+
+    // Find the conversation to verify user access
+    const conversation = await ChatbotConversation.findOne({
+      _id: message.conversationId,
+      $or: [
+        { customerId: userId },
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
+      ],
+      isActive: true
+    });
+
+    if (!conversation) {
+      return sendError(res, 'Access denied', 403);
+    }
+
+    // Find existing reaction or create new one
+    let reaction = message.reactions.find(r => r.emoji === emoji);
+    if (!reaction) {
+      reaction = {
+        emoji,
+        userIds: [],
+        count: 0
+      };
+      message.reactions.push(reaction);
+    }
+
+    // Check if user already reacted
+    const userIndex = reaction.userIds.findIndex(uid => uid.equals(userId));
+    if (userIndex === -1) {
+      // Add user to reaction
+      reaction.userIds.push(userId);
+      reaction.count++;
+    } else {
+      // Remove user from reaction
+      reaction.userIds.splice(userIndex, 1);
+      reaction.count--;
+      
+      // Remove reaction if no users left
+      if (reaction.count <= 0) {
+        message.reactions = message.reactions.filter(r => r.emoji !== emoji);
+      }
+    }
+
+    await message.save();
+
+    return sendSuccess(res, {
+      message
+    }, userIndex === -1 ? 'Reaction added successfully' : 'Reaction removed successfully');
+  } catch (error) {
+    console.error('Add reaction error:', error);
+    return sendError(res, 'Failed to add reaction', 500, error.message);
+  }
+});
+
+// @route   POST /api/chatbot/messages/:id/forward
+// @desc    Forward message to another conversation
+// @access  Private
+router.post('/messages/:id/forward', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+    const { conversationId } = req.body;
+
+    // Validate message ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, 'Invalid message ID', 400);
+    }
+
+    // Validate target conversation ID
+    if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+      return sendError(res, 'Invalid target conversation ID', 400);
+    }
+
+    // Find the original message
+    const originalMessage = await ChatbotMessage.findById(id);
+    if (!originalMessage) {
+      return sendError(res, 'Message not found', 404);
+    }
+
+    // Find the original conversation to verify user access
+    const originalConversation = await ChatbotConversation.findOne({
+      _id: originalMessage.conversationId,
+      $or: [
+        { customerId: userId },
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
+      ],
+      isActive: true
+    });
+
+    if (!originalConversation) {
+      return sendError(res, 'Access denied to original message', 403);
+    }
+
+    // Find the target conversation
+    const targetConversation = await ChatbotConversation.findOne({
+      _id: conversationId,
+      $or: [
+        { customerId: userId },
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
+      ],
+      isActive: true
+    });
+
+    if (!targetConversation) {
+      return sendError(res, 'Access denied to target conversation', 403);
+    }
+
+    // Create forwarded message
+    const forwardedMessage = new ChatbotMessage({
+      conversationId: targetConversation._id,
+      senderId: userId,
+      content: originalMessage.content,
+      type: originalMessage.type,
+      isForwarded: true,
+      forwardedFrom: originalMessage._id,
+      richContent: originalMessage.richContent,
+      attachments: originalMessage.attachments
+    });
+
+    await forwardedMessage.save();
+
+    // Update target conversation's last message and activity
+    targetConversation.lastMessage = forwardedMessage._id;
+    targetConversation.lastActivity = new Date();
+    await targetConversation.save();
+
+    return sendSuccess(res, {
+      message: forwardedMessage
+    }, 'Message forwarded successfully');
+  } catch (error) {
+    console.error('Forward message error:', error);
+    return sendError(res, 'Failed to forward message', 500, error.message);
+  }
+});
+
+module.exports = router;

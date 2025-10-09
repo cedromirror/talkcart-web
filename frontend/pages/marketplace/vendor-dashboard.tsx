@@ -95,6 +95,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
 import { toast } from 'react-hot-toast';
 import { SupportAgent as SupportAgentIcon } from '@mui/icons-material';
+import PersistentChatContainer from '@/components/chatbot/PersistentChatContainer';
 
 interface Product {
   id: string;
@@ -147,6 +148,7 @@ const VendorDashboard: React.FC = () => {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
   const [categories, setCategories] = useState<string[]>([]);
+  const [isChatOpen, setIsChatOpen] = useState(false);
 
   // Refresh user profile on component mount to ensure role is up to date
   useEffect(() => {
@@ -621,13 +623,12 @@ const VendorDashboard: React.FC = () => {
                         </ListItemAvatar>
                         <ListItemText
                           primary={
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }} component="div">
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
                               <Typography 
                                 variant="subtitle1" 
                                 fontWeight={600}
                                 sx={{ cursor: 'pointer' }}
                                 onClick={() => handleViewProduct(product.id)}
-                                component="div"
                               >
                                 {product.name}
                               </Typography>
@@ -643,33 +644,33 @@ const VendorDashboard: React.FC = () => {
                             </Box>
                           }
                           secondary={
-                            <Box component="div">
-                              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }} component="div">
+                            <Box>
+                              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                                 {product.description.substring(0, 100)}...
                               </Typography>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }} component="div">
-                                <Typography variant="h6" color="primary" fontWeight={600} component="div">
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                                <Typography variant="h6" color="primary" fontWeight={600}>
                                   {formatPrice(product.price, product.currency)}
                                 </Typography>
-                                <Typography variant="body2" color="text.secondary" component="div">
+                                <Typography variant="body2" color="text.secondary">
                                   <span style={{ verticalAlign: 'middle', marginRight: 4 }}>
                                     <Package size={14} style={{ verticalAlign: 'middle' }} />
                                   </span>
                                   Stock: {product.stock}
                                 </Typography>
-                                <Typography variant="body2" color="text.secondary" component="div">
+                                <Typography variant="body2" color="text.secondary">
                                   <span style={{ verticalAlign: 'middle', marginRight: 4 }}>
                                     <TrendingUp size={14} style={{ verticalAlign: 'middle' }} />
                                   </span>
                                   Sales: {product.sales}
                                 </Typography>
-                                <Typography variant="body2" color="text.secondary" component="div">
+                                <Typography variant="body2" color="text.secondary">
                                   <span style={{ verticalAlign: 'middle', marginRight: 4 }}>
                                     <Eye size={14} style={{ verticalAlign: 'middle' }} />
                                   </span>
                                   Views: {product.views}
                                 </Typography>
-                                <Typography variant="body2" color="text.secondary" component="div">
+                                <Typography variant="body2" color="text.secondary">
                                   <span style={{ verticalAlign: 'middle', marginRight: 4 }}>
                                     <Star size={14} style={{ verticalAlign: 'middle' }} />
                                   </span>
@@ -740,23 +741,11 @@ const VendorDashboard: React.FC = () => {
         </Paper>
       </Container>
       
-      {/* Chat with Admin Floating Button */}
-      <Tooltip title="Chat with Admin Support" arrow>
-        <Fab
-          color="primary"
-          aria-label="chat with admin"
-          sx={{
-            position: 'fixed',
-            bottom: 24,
-            right: 24,
-            zIndex: 1000,
-            boxShadow: `0 4px 12px ${alpha(theme.palette.primary.main, 0.3)}`,
-          }}
-          onClick={() => router.push('/marketplace/vendor-admin-chat')}
-        >
-          <SupportAgentIcon />
-        </Fab>
-      </Tooltip>
+      {/* Persistent Chat Container */}
+      <PersistentChatContainer 
+        isOpen={isChatOpen} 
+        onToggle={() => setIsChatOpen(!isChatOpen)} 
+      />
     </Layout>
   );
 };
