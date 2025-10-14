@@ -51,8 +51,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useProfile } from '@/contexts/ProfileContext'; // Add this import
 import { ProfileUser, Post } from '@/types';
 import UserCard from '@/components/profile/UserCard';
-import { PostCardEnhanced as PostCard } from '@/components/social/new/PostCardEnhanced';
-import { VideoFeedProvider } from '@/components/video/VideoFeedManager'; // Add this import
+import { PostListItem } from '@/components/social/new/PostListItem';
+// Removed VideoFeedProvider as PostListItem doesn't need it
 import { useProfileCache } from '@/contexts/ProfileCacheContext';
 
 // Modern Stats Card Component
@@ -624,7 +624,7 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
         if (usernameForPosts) {
           // Default Posts
           setPostsPage(1);
-          const postsRes = await api.posts.getUserPosts(displayProfile.id, { limit: 10, page: 1 });
+          const postsRes = await api.posts.getAll({ authorId: displayProfile.id, limit: 10, page: 1 });
           const fetched = (postsRes as any)?.data?.posts || (postsRes as any)?.posts || (Array.isArray(postsRes) ? postsRes : []);
           setPosts(Array.isArray(fetched) ? fetched : []);
           const total = (postsRes as any)?.data?.pagination?.total || (postsRes as any)?.pagination?.total || (Array.isArray(fetched) ? fetched.length : 0);
@@ -632,7 +632,7 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
 
           // Media tab initial load
           setMediaPage(1);
-          const mediaRes = await api.posts.getUserPosts(displayProfile.id, { limit: 10, page: 1, contentType: 'media' });
+          const mediaRes = await api.posts.getAll({ authorId: displayProfile.id, limit: 10, page: 1, contentType: 'media' });
           const mediaFetched = (mediaRes as any)?.data?.posts || (mediaRes as any)?.posts || [];
           setMediaPosts(Array.isArray(mediaFetched) ? mediaFetched : []);
           const mediaTotal = (mediaRes as any)?.data?.pagination?.total || (mediaRes as any)?.pagination?.total || 0;
@@ -641,7 +641,7 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
           // Liked + Bookmarked initial load only for own profile
           if (isOwnProfile && currentUser?.id) {
             setLikedPage(1);
-            const likedRes = await api.posts.getLikedPosts(currentUser.id, { limit: 10, page: 1 });
+            const likedRes = await api.posts.getAll({ feedType: 'liked', limit: 10, page: 1 });
             const likedFetched = (likedRes as any)?.data?.posts || (likedRes as any)?.posts || [];
             setLikedPosts(Array.isArray(likedFetched) ? likedFetched : []);
             const likedTotal = (likedRes as any)?.data?.pagination?.total || (likedRes as any)?.pagination?.total || 0;
@@ -900,29 +900,13 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                     </Paper>
                   ) : (
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                      {/* Wrap PostCard components with VideoFeedProvider */}
-                      <VideoFeedProvider
-                        initialSettings={{
-                          enabled: true,
-                          threshold: 0.6,
-                          pauseOnScroll: true,
-                          muteByDefault: true,
-                          preloadStrategy: 'metadata',
-                          maxConcurrentVideos: 2,
-                          scrollPauseDelay: 150,
-                          viewTrackingThreshold: 3,
-                          autoplayOnlyOnWifi: false,
-                          respectReducedMotion: true,
-                        }}
-                      >
-                        {posts.map((p) => (
-                          <Fade in={true} timeout={300} key={p.id}>
-                            <Box>
-                              <PostCard post={p as any} />
-                            </Box>
-                          </Fade>
-                        ))}
-                      </VideoFeedProvider>
+                      {posts.map((p) => (
+                        <Fade in={true} timeout={300} key={p.id}>
+                          <Box>
+                            <PostListItem post={p as any} />
+                          </Box>
+                        </Fade>
+                      ))}
                     </Box>
                   )}
 
@@ -936,7 +920,7 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                           setPostsLoading(true);
                           try {
                             const nextPage = postsPage + 1;
-                            const res = await api.posts.getUserPosts(displayProfile.id, { limit: 10, page: nextPage });
+                            const res = await api.posts.getAll({ authorId: displayProfile.id, limit: 10, page: nextPage });
                             const newPosts = (res as any)?.data?.posts || (res as any)?.posts || [];
                             setPosts((prev) => [...prev, ...newPosts]);
                             const total = (res as any)?.data?.pagination?.total || (res as any)?.pagination?.total || 0;
@@ -984,29 +968,13 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                     </Paper>
                   ) : (
                     <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)' }, gap: 2 }}>
-                      {/* Wrap PostCard components with VideoFeedProvider */}
-                      <VideoFeedProvider
-                        initialSettings={{
-                          enabled: true,
-                          threshold: 0.6,
-                          pauseOnScroll: true,
-                          muteByDefault: true,
-                          preloadStrategy: 'metadata',
-                          maxConcurrentVideos: 2,
-                          scrollPauseDelay: 150,
-                          viewTrackingThreshold: 3,
-                          autoplayOnlyOnWifi: false,
-                          respectReducedMotion: true,
-                        }}
-                      >
-                        {mediaPosts.map((p) => (
-                          <Fade in={true} timeout={300} key={p.id}>
-                            <Box>
-                              <PostCard post={p as any} />
-                            </Box>
-                          </Fade>
-                        ))}
-                      </VideoFeedProvider>
+                      {mediaPosts.map((p) => (
+                        <Fade in={true} timeout={300} key={p.id}>
+                          <Box>
+                            <PostListItem post={p as any} />
+                          </Box>
+                        </Fade>
+                      ))}
                     </Box>
                   )}
 
@@ -1020,7 +988,7 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                           setMediaLoading(true);
                           try {
                             const nextPage = mediaPage + 1;
-                            const res = await api.posts.getUserPosts(displayProfile.id, { limit: 10, page: nextPage, contentType: 'media' });
+                            const res = await api.posts.getAll({ authorId: displayProfile.id, limit: 10, page: nextPage, contentType: 'media' });
                             const newPosts = (res as any)?.data?.posts || (res as any)?.posts || [];
                             setMediaPosts((prev) => [...prev, ...newPosts]);
                             const total = (res as any)?.data?.pagination?.total || (res as any)?.pagination?.total || 0;
@@ -1071,29 +1039,13 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                     </Paper>
                   ) : (
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                      {/* Wrap PostCard components with VideoFeedProvider */}
-                      <VideoFeedProvider
-                        initialSettings={{
-                          enabled: true,
-                          threshold: 0.6,
-                          pauseOnScroll: true,
-                          muteByDefault: true,
-                          preloadStrategy: 'metadata',
-                          maxConcurrentVideos: 2,
-                          scrollPauseDelay: 150,
-                          viewTrackingThreshold: 3,
-                          autoplayOnlyOnWifi: false,
-                          respectReducedMotion: true,
-                        }}
-                      >
-                        {likedPosts.map((p) => (
-                          <Fade in={true} timeout={300} key={p.id}>
-                            <Box>
-                              <PostCard post={p as any} />
-                            </Box>
-                          </Fade>
-                        ))}
-                      </VideoFeedProvider>
+                      {likedPosts.map((p) => (
+                        <Fade in={true} timeout={300} key={p.id}>
+                          <Box>
+                            <PostListItem post={p as any} />
+                          </Box>
+                        </Fade>
+                      ))}
                     </Box>
                   )}
 
@@ -1107,7 +1059,7 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                           setLikedLoading(true);
                           try {
                             const nextPage = likedPage + 1;
-                            const res = await api.posts.getLikedPosts(currentUser.id, { limit: 10, page: nextPage });
+                            const res = await api.posts.getAll({ feedType: 'liked', limit: 10, page: nextPage });
                             const newPosts = (res as any)?.data?.posts || (res as any)?.posts || [];
                             setLikedPosts((prev) => [...prev, ...newPosts]);
                             const total = (res as any)?.data?.pagination?.total || (res as any)?.pagination?.total || 0;
@@ -1158,29 +1110,13 @@ const SmartProfilePage: React.FC<SmartProfilePageProps> = ({ username }) => {
                     </Paper>
                   ) : (
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                      {/* Wrap PostCard components with VideoFeedProvider */}
-                      <VideoFeedProvider
-                        initialSettings={{
-                          enabled: true,
-                          threshold: 0.6,
-                          pauseOnScroll: true,
-                          muteByDefault: true,
-                          preloadStrategy: 'metadata',
-                          maxConcurrentVideos: 2,
-                          scrollPauseDelay: 150,
-                          viewTrackingThreshold: 3,
-                          autoplayOnlyOnWifi: false,
-                          respectReducedMotion: true,
-                        }}
-                      >
-                        {bookmarkedPosts.map((p) => (
-                          <Fade in={true} timeout={300} key={p.id}>
-                            <Box>
-                              <PostCard post={p as any} />
-                            </Box>
-                          </Fade>
-                        ))}
-                      </VideoFeedProvider>
+                      {bookmarkedPosts.map((p) => (
+                        <Fade in={true} timeout={300} key={p.id}>
+                          <Box>
+                            <PostListItem post={p as any} />
+                          </Box>
+                        </Fade>
+                      ))}
                     </Box>
                   )}
 

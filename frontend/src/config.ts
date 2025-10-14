@@ -1,7 +1,9 @@
 // API configuration
 // Prefer same-origin proxy in browser to avoid CORS issues; use env on server
 export const API_URL = typeof window !== 'undefined' ? '/api' : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api');
+
 // Socket URL (used by WebSocketContext and others)
+// Ensure we're using the correct protocol and path for Socket.IO
 export const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:8000';
 
 // WebRTC ICE servers (STUN/TURN) from env

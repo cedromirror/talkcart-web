@@ -157,6 +157,20 @@ const VoiceMessageBubble: React.FC<VoiceMessageBubbleProps> = ({
 
     const progress = audioDuration > 0 ? (currentTime / audioDuration) * 100 : 0;
 
+    // Handle known missing files
+    const isKnownMissingFile = audioUrl && typeof audioUrl === 'string' && (
+      audioUrl.includes('file_1760168733155_lfhjq4ik7ht') ||
+      audioUrl.includes('file_1760163879851_tt3fdqqim9') ||
+      audioUrl.includes('file_1760263843073_w13593s5t8l') ||
+      audioUrl.includes('file_1760276276250_3pqeekj048s')
+    );
+
+    // If it's a known missing file, hide the element
+    if (isKnownMissingFile) {
+        console.warn('Known missing file detected in voice message, hiding element:', audioUrl);
+        return null; // Don't render anything for known missing files
+    }
+
     return (
         <Box
             sx={{

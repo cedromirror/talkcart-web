@@ -143,20 +143,18 @@ const VendorAdminChatInterface: React.FC<VendorAdminChatInterfaceProps> = ({ ope
       setLoading(true);
       setError(null);
       
-      // Try to find existing conversation between vendor and admin
-      const response = await chatbotApiModule.getConversations({ 
-        limit: 1 
-      });
+      // Try to find existing vendor-admin conversation
+      const response = await chatbotApiModule.getVendorAdminConversation();
       
-      if (response?.data?.conversations?.length > 0) {
-        const conversation = response.data.conversations[0];
+      if (response?.success && response?.data?.conversation) {
+        const conversation = response.data.conversation;
         setConversation(conversation);
         setIsPinned(conversation.isPinned || false);
         setIsMuted(conversation.isMuted || false);
         
         // Fetch messages for this conversation
         const messagesResponse = await chatbotApiModule.getMessages(conversation._id, { limit: 50 });
-        if (messagesResponse?.data?.messages) {
+        if (messagesResponse?.success && messagesResponse?.data?.messages) {
           setMessages(messagesResponse.data.messages);
         }
       } else {
@@ -179,17 +177,17 @@ const VendorAdminChatInterface: React.FC<VendorAdminChatInterfaceProps> = ({ ope
       setLoading(true);
       setError(null);
       
-      // Create new conversation between vendor and admin
-      const response = await chatbotApiModule.createConversation({
-        vendorId: user.id,
-        productId: '' // Empty productId for general vendor-admin chat
-      });
+      // Create new vendor-admin conversation
+      const response = await chatbotApiModule.createVendorAdminConversation();
       
-      if (response?.data?.conversation) {
-        setConversation(response.data.conversation);
+      if (response?.success && response?.data?.conversation) {
+        const conversation = response.data.conversation;
+        setConversation(conversation);
         setMessages([]);
         setIsPinned(false);
         setIsMuted(false);
+      } else {
+        setError(response?.message || 'Failed to start conversation');
       }
     } catch (err: any) {
       console.error('Failed to create conversation:', err);
@@ -233,7 +231,7 @@ const VendorAdminChatInterface: React.FC<VendorAdminChatInterfaceProps> = ({ ope
         content: newMessage
       });
       
-      if (response?.data?.message) {
+      if (response?.success && response?.data?.message) {
         setMessages(prev => [...prev, response.data.message]);
         setNewMessage('');
       } else {
@@ -257,8 +255,8 @@ const VendorAdminChatInterface: React.FC<VendorAdminChatInterfaceProps> = ({ ope
     
     try {
       const response = await chatbotApiModule.pinConversation(conversation._id, !isPinned);
-      if (response?.data?.conversation) {
-        setIsPinned(response.data.conversation.isPinned);
+      if (response?.success && response?.data?.conversation) {
+        setIsPinned(response.data.conversation.isPinned ?? false);
         setConversation(response.data.conversation);
       }
     } catch (err: any) {
@@ -272,8 +270,8 @@ const VendorAdminChatInterface: React.FC<VendorAdminChatInterfaceProps> = ({ ope
     
     try {
       const response = await chatbotApiModule.muteConversation(conversation._id, !isMuted);
-      if (response?.data?.conversation) {
-        setIsMuted(response.data.conversation.isMuted);
+      if (response?.success && response?.data?.conversation) {
+        setIsMuted(response.data.conversation.isMuted ?? false);
         setConversation(response.data.conversation);
       }
     } catch (err: any) {
@@ -383,7 +381,7 @@ const VendorAdminChatInterface: React.FC<VendorAdminChatInterfaceProps> = ({ ope
           </ListItemIcon>
           <MenuItemText>Chat Settings</MenuItemText>
         </MenuItem>
-        <MenuItem onClick={handleCloseMenu}>
+        <MenuItem onClick={() => { handleCloseMenu(); fetchConversation(); }}>
           <ListItemIcon>
             <RefreshIcon fontSize="small" />
           </ListItemIcon>
@@ -422,41 +420,47 @@ const VendorAdminChatInterface: React.FC<VendorAdminChatInterfaceProps> = ({ ope
             </Box>
           ) : (
             <List sx={{ display: 'flex', flexDirection: 'column' }}>
-              {messages.map((message) => (
-                <Box
-                  key={message._id}
-                  sx={{
-                    display: 'flex',
-                    justifyContent: message.senderId === user?.id ? 'flex-end' : 'flex-start',
-                    mb: 1,
-                  }}
-                >
-                  <MessageContainer>
-                    <MessageHeader>
-                      <Typography variant="caption" sx={{ fontWeight: 'bold' }}>
-                        {message.senderId === user?.id ? 'You' : 'Admin Support'}
-                      </Typography>
-                      <Typography variant="caption" sx={{ ml: 1 }}>
-                        {formatTime(message.createdAt)}
-                      </Typography>
-                    </MessageHeader>
-                    {message.senderId === user?.id ? (
-                      <UserMessageBubble>
-                        <MessageContent>{message.content}</MessageContent>
-                      </UserMessageBubble>
-                    ) : (
-                      <AdminMessageBubble>
-                        <MessageContent>{message.content}</MessageContent>
-                      </AdminMessageBubble>
-                    )}
-                    <MessageActions>
-                      <IconButton size="small" onClick={(e) => handleOpenMessageActions(e, message)}>
-                        <MoreVertIcon fontSize="small" />
-                      </IconButton>
-                    </MessageActions>
-                  </MessageContainer>
-                </Box>
-              ))}
+              {messages.map((message) => {
+                // For vendor-admin conversations, admin messages have senderId set to 'admin'
+                // For regular user messages, senderId is the actual user ID
+                const isUserMessage = message.senderId === user?.id;
+                
+                return (
+                  <Box
+                    key={message._id}
+                    sx={{
+                      display: 'flex',
+                      justifyContent: isUserMessage ? 'flex-end' : 'flex-start',
+                      mb: 1,
+                    }}
+                  >
+                    <MessageContainer>
+                      <MessageHeader>
+                        <Typography variant="caption" sx={{ fontWeight: 'bold' }}>
+                          {isUserMessage ? 'You' : 'Admin Support'}
+                        </Typography>
+                        <Typography variant="caption" sx={{ ml: 1 }}>
+                          {formatTime(message.createdAt)}
+                        </Typography>
+                      </MessageHeader>
+                      {isUserMessage ? (
+                        <UserMessageBubble>
+                          <MessageContent>{message.content}</MessageContent>
+                        </UserMessageBubble>
+                      ) : (
+                        <AdminMessageBubble>
+                          <MessageContent>{message.content}</MessageContent>
+                        </AdminMessageBubble>
+                      )}
+                      <MessageActions>
+                        <IconButton size="small" onClick={(e) => handleOpenMessageActions(e, message)}>
+                          <MoreVertIcon fontSize="small" />
+                        </IconButton>
+                      </MessageActions>
+                    </MessageContainer>
+                  </Box>
+                );
+              })}
               <div ref={messagesEndRef} />
             </List>
           )}

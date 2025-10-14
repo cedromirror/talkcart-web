@@ -1,11 +1,37 @@
 import { io, Socket } from 'socket.io-client';
 import { SOCKET_URL } from '@/config';
 
+// Add the helper function directly to avoid TypeScript import issues
+const getWebSocketUrlLocal = (): string => {
+  let url = SOCKET_URL;
+  
+  // If it's a relative URL, convert to absolute
+  if (url.startsWith('/')) {
+    if (typeof window !== 'undefined') {
+      url = `${window.location.protocol}//${window.location.host}${url}`;
+    } else {
+      url = 'http://localhost:8000';
+    }
+  }
+  
+  // Ensure it has proper protocol for WebSocket
+  if (url.startsWith('http://')) {
+    return url.replace('http://', 'ws://');
+  } else if (url.startsWith('https://')) {
+    return url.replace('https://', 'wss://');
+  }
+  
+  return url;
+};
+
 class SocketService {
   private socket: Socket | null = null;
   private listeners: Record<string, Function[]> = {};
   private userId: string | null = null;
   private activeConversationId: string | null = null;
+  private activeChatbotConversationId: string | null = null;
+  private reconnectAttempts: number = 0;
+  private maxReconnectAttempts: number = 5;
 
   // Connect to socket server
   connect(token: string, userId: string): Promise<void> {
@@ -13,18 +39,38 @@ class SocketService {
       try {
         this.userId = userId;
 
-        this.socket = io(SOCKET_URL, {
+        // Ensure we're using the correct URL format
+        let socketUrl = getWebSocketUrlLocal();
+        if (!socketUrl || socketUrl.trim() === '') {
+          socketUrl = typeof window !== 'undefined' ? 
+            `${window.location.protocol}//${window.location.hostname}:8000` : 
+            'http://localhost:8000';
+        }
+
+        // Ensure the URL has a proper protocol
+        if (!socketUrl.startsWith('ws://') && !socketUrl.startsWith('wss://')) {
+          const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+          socketUrl = `${protocol}${socketUrl.replace(/^https?:\/\//, '').replace(/^http?:\/\//, '')}`;
+        }
+
+        this.socket = io(socketUrl, {
+          path: '/socket.io/',
           auth: {
             token
           },
-          transports: ['websocket'],
+          transports: ['websocket', 'polling'], // Allow polling as fallback
           reconnection: true,
-          reconnectionAttempts: 5,
+          reconnectionAttempts: 15,
           reconnectionDelay: 1000,
+          reconnectionDelayMax: 15000,
+          timeout: 20000,
+          rejectUnauthorized: false, // For development environments
+          withCredentials: true, // Add explicit CORS configuration
         });
 
         this.socket.on('connect', () => {
-          console.log('Socket connected');
+          console.log('Socket connected successfully');
+          this.reconnectAttempts = 0; // Reset reconnect attempts on successful connection
 
           // Authenticate socket connection
           this.socket?.emit('authenticate', { userId });
@@ -34,11 +80,22 @@ class SocketService {
 
         this.socket.on('connect_error', (error) => {
           console.error('Socket connection error:', error);
-          reject(error);
+          this.reconnectAttempts++;
+          
+          // If we've exceeded max reconnect attempts, reject the promise
+          if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+            reject(new Error(`Failed to connect after ${this.maxReconnectAttempts} attempts: ${error.message}`));
+          }
+          // Otherwise, let the reconnection logic handle it
         });
 
         this.socket.on('disconnect', (reason) => {
           console.log('Socket disconnected:', reason);
+          
+          // If it's a forced disconnection from the server, don't try to reconnect
+          if (reason === 'io server disconnect') {
+            console.log('Server forced disconnection, not attempting to reconnect');
+          }
         });
 
         // Set up event listeners
@@ -57,6 +114,7 @@ class SocketService {
       this.socket.disconnect();
       this.socket = null;
       this.listeners = {};
+      this.reconnectAttempts = 0;
     }
   }
 
@@ -69,9 +127,14 @@ class SocketService {
   private setupEventListeners(): void {
     if (!this.socket) return;
 
-    // New message received
+    // New message received (regular conversations)
     this.socket.on('message:new', (data) => {
       this.emit('message:new', data);
+    });
+
+    // New message received (chatbot conversations)
+    this.socket.on('chatbot:message:new', (data) => {
+      this.emit('chatbot:message:new', data);
     });
 
     // Message updated
@@ -99,9 +162,14 @@ class SocketService {
       this.emit('message:read', data);
     });
 
-    // Typing indicator
+    // Typing indicator (regular conversations)
     this.socket.on('typing', (data) => {
       this.emit('typing', data);
+    });
+
+    // Typing indicator (chatbot conversations)
+    this.socket.on('chatbot:typing', (data) => {
+      this.emit('chatbot:typing', data);
     });
 
     // New conversation
@@ -118,9 +186,19 @@ class SocketService {
     this.socket.on('user:status', (data) => {
       this.emit('user:status', data);
     });
+
+    // Chatbot user joined
+    this.socket.on('chatbot:user-joined', (data) => {
+      this.emit('chatbot:user-joined', data);
+    });
+
+    // Chatbot user left
+    this.socket.on('chatbot:user-left', (data) => {
+      this.emit('chatbot:user-left', data);
+    });
   }
 
-  // Send a message
+  // Send a message (regular conversations)
   sendMessage(conversationId: string, message: any): void {
     if (!this.socket) return;
 
@@ -130,7 +208,17 @@ class SocketService {
     });
   }
 
-  // Send typing indicator
+  // Send a message (chatbot conversations)
+  sendChatbotMessage(conversationId: string, message: any): void {
+    if (!this.socket) return;
+
+    this.socket.emit('chatbot:message:send', {
+      conversationId,
+      message
+    });
+  }
+
+  // Send typing indicator (regular conversations)
   sendTyping(conversationId: string, isTyping: boolean): void {
     if (!this.socket) return;
 
@@ -142,6 +230,31 @@ class SocketService {
     console.log('Sent typing indicator:', { conversationId, isTyping });
   }
 
+  // Send typing indicator (chatbot conversations)
+  sendChatbotTyping(conversationId: string, isTyping: boolean): void {
+    if (!this.socket) return;
+
+    this.socket.emit('chatbot:typing', {
+      conversationId,
+      isTyping
+    });
+
+    console.log('Sent chatbot typing indicator:', { conversationId, isTyping });
+  }
+
+  // Send message status update (chatbot conversations)
+  sendChatbotMessageStatus(conversationId: string, messageId: string, status: 'delivered' | 'read'): void {
+    if (!this.socket) return;
+
+    this.socket.emit('chatbot:message:status', {
+      conversationId,
+      messageId,
+      status
+    });
+
+    console.log('Sent chatbot message status update:', { conversationId, messageId, status });
+  }
+
   // Mark message as read
   markMessageAsRead(messageId: string): void {
     if (!this.socket) return;
@@ -151,7 +264,7 @@ class SocketService {
     });
   }
 
-  // Join a conversation room
+  // Join a conversation room (regular conversations)
   joinConversation(conversationId: string): void {
     if (!this.socket) return;
 
@@ -164,7 +277,20 @@ class SocketService {
     console.log('Joined conversation:', conversationId);
   }
 
-  // Leave a conversation room
+  // Join a chatbot conversation room
+  joinChatbotConversation(conversationId: string): void {
+    if (!this.socket) return;
+
+    this.activeChatbotConversationId = conversationId;
+
+    this.socket.emit('join-chatbot-conversation', {
+      conversationId
+    });
+
+    console.log('Joined chatbot conversation:', conversationId);
+  }
+
+  // Leave a conversation room (regular conversations)
   leaveConversation(conversationId: string): void {
     if (!this.socket) return;
 
@@ -177,6 +303,21 @@ class SocketService {
     }
 
     console.log('Left conversation:', conversationId);
+  }
+
+  // Leave a chatbot conversation room
+  leaveChatbotConversation(conversationId: string): void {
+    if (!this.socket) return;
+
+    this.socket.emit('leave-chatbot-conversation', {
+      conversationId
+    });
+
+    if (this.activeChatbotConversationId === conversationId) {
+      this.activeChatbotConversationId = null;
+    }
+
+    console.log('Left chatbot conversation:', conversationId);
   }
 
   // Add event listener

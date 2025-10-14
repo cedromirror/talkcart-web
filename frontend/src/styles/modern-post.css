@@ -4,11 +4,14 @@
 .post-card {
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   will-change: transform, box-shadow;
+  /* Enhanced performance optimizations */
+  contain: layout style paint;
+  transform: translateZ(0); /* Force hardware acceleration */
 }
 
 /* Enhanced image loading animation */
 .post-image {
-  opacity: 0;
+  opacity: 1;
   animation: fadeInImage 0.6s ease-out forwards;
 }
 
@@ -180,6 +183,26 @@
   .hover-lift:hover {
     transform: translateY(-2px);
   }
+  
+  .post-actions {
+    gap: 0.25rem;
+    padding: 0.25rem;
+  }
+  
+  .action-button {
+    width: 44px;
+    height: 44px;
+  }
+  
+  .text-post-content {
+    padding: 1.5rem;
+    font-size: 0.9rem;
+  }
+  
+  .video-control-button {
+    width: 36px;
+    height: 36px;
+  }
 }
 
 /* Dark mode adjustments */
@@ -207,6 +230,163 @@
   outline: 2px solid #667eea;
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+/* Post card container enhancements */
+.post-card-container {
+  position: relative;
+  overflow: hidden;
+  border-radius: 16px;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  /* Ensure no background overlays */
+  background: transparent !important;
+}
+
+/* Action buttons container */
+.post-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  backdrop-filter: blur(12px);
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 12px;
+  padding: 0.5rem;
+  transition: all 0.3s ease;
+}
+
+.post-actions:hover {
+  background: rgba(0, 0, 0, 0.1);
+  transform: scale(1.02);
+}
+
+/* Enhanced button styles */
+.action-button {
+  position: relative;
+  overflow: hidden;
+  border-radius: 50%;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  backdrop-filter: blur(8px);
+}
+
+.action-button::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: radial-gradient(circle, rgba(255,255,255,0.3) 0%, transparent 70%);
+  opacity: 0;
+  transform: scale(0.8);
+  transition: all 0.3s ease;
+}
+
+.action-button:hover::before {
+  opacity: 1;
+  transform: scale(1.2);
+}
+
+.action-button:hover {
+  transform: scale(1.08) translateY(-1px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+}
+
+/* Text post specific styles */
+.text-post-content {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 16px;
+  padding: 2rem;
+  text-align: center;
+  transition: all 0.3s ease;
+}
+
+.text-post-content:hover {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0.08) 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+}
+
+/* Media post overlays */
+.media-overlay {
+  background: linear-gradient(to top, 
+    rgba(0, 0, 0, 0.8) 0%, 
+    rgba(0, 0, 0, 0.4) 40%, 
+    transparent 70%
+  );
+  backdrop-filter: blur(2px);
+}
+
+/* Video controls enhancement */
+.video-controls {
+  position: absolute;
+  bottom: 1rem;
+  right: 1rem;
+  display: flex;
+  gap: 0.5rem;
+  z-index: 10;
+}
+
+.video-control-button {
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(8px);
+}
+
+.video-control-button:hover {
+  background: rgba(0, 0, 0, 0.8);
+  transform: scale(1.1);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+/* Performance optimizations */
+.post-card,
+.action-button,
+.text-post-content,
+.video-control-button {
+  transform: translateZ(0);
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
+/* Reduce motion for users who prefer it */
+@media (prefers-reduced-motion: reduce) {
+  .post-card,
+  .action-button,
+  .text-post-content,
+  .video-control-button,
+  .hover-lift,
+  .hover-scale {
+    transition: none;
+    animation: none;
+    transform: none;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .glass-effect {
+    background: rgba(255, 255, 255, 0.9);
+    border: 2px solid #000;
+  }
+  
+  .action-button {
+    border: 2px solid currentColor;
+  }
+  
+  .text-post-content {
+    border: 2px solid currentColor;
+    background: rgba(255, 255, 255, 0.95);
+  }
 }
 
 /* Micro-interactions */

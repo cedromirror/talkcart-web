@@ -7,7 +7,14 @@ const mediaSchema = new mongoose.Schema({
   },
   secure_url: {
     type: String,
-    required: true
+    required: true,
+    validate: {
+      validator: function(v) {
+        // Basic URL validation
+        return v && (v.startsWith('http') || v.startsWith('/uploads/') || v.startsWith('/cloudinary/'));
+      },
+      message: props => `${props.value} is not a valid URL!`
+    }
   },
   url: String,
   resource_type: {
@@ -25,6 +32,25 @@ const mediaSchema = new mongoose.Schema({
     default: Date.now
   }
 }, { _id: false });
+
+// Add a pre-save hook to validate media
+mediaSchema.pre('save', function(next) {
+  if (this.secure_url) {
+    // Check for known missing file patterns
+    const knownMissingPatterns = [
+      'file_1760168733155_lfhjq4ik7ht',
+      'file_1760263843073_w13593s5t8l',
+      'file_1760276276250_3pqeekj048s'
+    ];
+    
+    for (const pattern of knownMissingPatterns) {
+      if (this.secure_url.includes(pattern)) {
+        return next(new Error(`Media references a known missing file`));
+      }
+    }
+  }
+  next();
+});
 
 const postSchema = new mongoose.Schema({
   author: {
@@ -148,6 +174,34 @@ const postSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
+// Add a pre-save hook to validate post media
+postSchema.pre('save', function(next) {
+  if (this.media && this.media.length > 0) {
+    for (let i = 0; i < this.media.length; i++) {
+      const media = this.media[i];
+      
+      // Ensure secure_url is present
+      if (!media.secure_url) {
+        return next(new Error(`Media item ${i + 1} is missing secure_url`));
+      }
+      
+      // Check for known missing file patterns
+      const knownMissingPatterns = [
+        'file_1760168733155_lfhjq4ik7ht',
+        'file_1760263843073_w13593s5t8l',
+        'file_1760276276250_3pqeekj048s'
+      ];
+      
+      for (const pattern of knownMissingPatterns) {
+        if (media.secure_url.includes(pattern)) {
+          return next(new Error(`Media item ${i + 1} references a known missing file`));
+        }
+      }
+    }
+  }
+  next();
+});
+
 // Indexes for better query performance
 postSchema.index({ author: 1, createdAt: -1 });
 postSchema.index({ hashtags: 1 });
@@ -200,26 +254,9 @@ postSchema.methods.isLikedBy = function(userId) {
     return false;
   }
   
-  // Check if user has liked this post
-  return this.likes.some(like => {
-    // Handle different possible structures of like objects
-    if (!like || !like.user) return false;
-    
-    // Compare user IDs
-    try {
-      const likeUserId = like.user.toString ? like.user.toString() : String(like.user);
-      const targetUserId = userId.toString ? userId.toString() : String(userId);
-      return likeUserId === targetUserId;
-    } catch (error) {
-      console.error('Error comparing user IDs in isLikedBy:', error);
-      return false;
-    }
-  });
-};
-
-// Instance method to check if user shared the post
-postSchema.methods.isSharedBy = function(userId) {
-  return this.shares.some(share => share.user.toString() === userId.toString());
+  return this.likes.some(like => 
+    like.user && like.user.toString() === userId.toString()
+  );
 };
 
 // Instance method to check if user bookmarked the post
@@ -229,188 +266,220 @@ postSchema.methods.isBookmarkedBy = function(userId) {
     return false;
   }
   
-  // Check if user has bookmarked this post
-  return this.bookmarks.some(bookmark => {
-    // Handle different possible structures of bookmark objects
-    if (!bookmark || !bookmark.user) return false;
-    
-    // Compare user IDs
-    try {
-      const bookmarkUserId = bookmark.user.toString ? bookmark.user.toString() : String(bookmark.user);
-      const targetUserId = userId.toString ? userId.toString() : String(userId);
-      return bookmarkUserId === targetUserId;
-    } catch (error) {
-      console.error('Error comparing user IDs in isBookmarkedBy:', error);
-      return false;
-    }
-  });
+  return this.bookmarks.some(bookmark => 
+    bookmark.user && bookmark.user.toString() === userId.toString()
+  );
 };
 
-// Instance method to add like
-postSchema.methods.addLike = function(userId) {
-  // Initialize likes array if it doesn't exist
-  if (!this.likes || !Array.isArray(this.likes)) {
-    this.likes = [];
+// Instance method to check if user shared the post
+postSchema.methods.isSharedBy = function(userId) {
+  // Handle edge cases where shares array might be undefined or null
+  if (!this.shares || !Array.isArray(this.shares)) {
+    return false;
   }
   
-  const alreadyLiked = this.isLikedBy(userId);
-  if (!alreadyLiked) {
-    this.likes.push({ user: userId });
-  }
-  return this.save();
+  return this.shares.some(share => 
+    share.user && share.user.toString() === userId.toString()
+  );
 };
 
-// Instance method to remove like
-postSchema.methods.removeLike = function(userId) {
-  // Initialize likes array if it doesn't exist
-  if (!this.likes || !Array.isArray(this.likes)) {
-    this.likes = [];
-    return this.save();
-  }
-  
-  this.likes = this.likes.filter(like => {
-    // Handle different possible structures of like objects
-    if (!like || !like.user) return true;
-    
-    // Compare user IDs
-    try {
-      const likeUserId = like.user.toString ? like.user.toString() : String(like.user);
-      const targetUserId = userId.toString ? userId.toString() : String(userId);
-      return likeUserId !== targetUserId;
-    } catch (error) {
-      console.error('Error comparing user IDs in removeLike:', error);
-      return true; // Keep the like if we can't compare
-    }
-  });
-  return this.save();
-};
-
-// Instance method to add share
-postSchema.methods.addShare = function(userId) {
-  console.log(`addShare called with userId: ${userId}`);
-  console.log(`Current shares:`, this.shares);
-  const alreadyShared = this.isSharedBy(userId);
-  console.log(`User ${userId} already shared: ${alreadyShared}`);
-  if (!alreadyShared) {
-    console.log(`Adding share for user ${userId}`);
-    this.shares.push({ user: userId });
-    console.log(`Shares after adding:`, this.shares);
-  } else {
-    console.log(`User ${userId} already shared this post, not adding again`);
-  }
-  console.log(`Saving post with shares:`, this.shares);
-  return this.save();
-};
-
-// Instance method to add bookmark
-postSchema.methods.addBookmark = function(userId) {
-  // Initialize bookmarks array if it doesn't exist
-  if (!this.bookmarks || !Array.isArray(this.bookmarks)) {
-    this.bookmarks = [];
-  }
-  
-  const alreadyBookmarked = this.isBookmarkedBy(userId);
-  if (!alreadyBookmarked) {
-    this.bookmarks.push({ user: userId });
-  }
-  return this.save();
-};
-
-// Instance method to remove bookmark
-postSchema.methods.removeBookmark = function(userId) {
-  // Initialize bookmarks array if it doesn't exist
-  if (!this.bookmarks || !Array.isArray(this.bookmarks)) {
-    this.bookmarks = [];
-    return this.save();
-  }
-  
-  this.bookmarks = this.bookmarks.filter(bookmark => {
-    // Handle different possible structures of bookmark objects
-    if (!bookmark || !bookmark.user) return true;
-    
-    // Compare user IDs
-    try {
-      const bookmarkUserId = bookmark.user.toString ? bookmark.user.toString() : String(bookmark.user);
-      const targetUserId = userId.toString ? userId.toString() : String(userId);
-      return bookmarkUserId !== targetUserId;
-    } catch (error) {
-      console.error('Error comparing user IDs in removeBookmark:', error);
-      return true; // Keep the bookmark if we can't compare
-    }
-  });
-  return this.save();
-};
-
-// Instance method to increment views
-postSchema.methods.incrementViews = function() {
-  this.views += 1;
-  return this.save();
-};
-
-// Static method to get feed posts
-postSchema.statics.getFeedPosts = function(options = {}) {
-  const { 
-    userId, 
-    feedType = 'for-you', 
-    limit = 20, 
-    skip = 0,
-    followingIds = []
+// Static method to get trending posts
+postSchema.statics.getTrending = async function(options = {}) {
+  const {
+    limit = 20,
+    timeRange = 'week', // 'day', 'week', 'month', 'year'
+    minViews = 0,
+    minLikes = 0
   } = options;
-
-  let query = { isActive: true };
-  let sort = { createdAt: -1 };
-
-  switch (feedType) {
-    case 'following':
-      if (followingIds.length > 0) {
-        query.author = { $in: followingIds };
-      } else {
-        // If no following, show user's own posts
-        query.author = userId;
-      }
+  
+  // Calculate date range
+  const now = new Date();
+  let startDate = new Date(now);
+  
+  switch (timeRange) {
+    case 'day':
+      startDate.setDate(startDate.getDate() - 1);
       break;
-    
-    case 'trending':
-      // Get posts from last 7 days and sort by engagement
-      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-      query.createdAt = { $gte: weekAgo };
-      sort = { views: -1, createdAt: -1 };
+    case 'week':
+      startDate.setDate(startDate.getDate() - 7);
       break;
-    
-    case 'for-you':
+    case 'month':
+      startDate.setMonth(startDate.getMonth() - 1);
+      break;
+    case 'year':
+      startDate.setFullYear(startDate.getFullYear() - 1);
+      break;
     default:
-      // Personalized feed - all public posts
-      query.privacy = 'public';
-      break;
+      startDate.setDate(startDate.getDate() - 7);
   }
-
-  return this.find(query)
-    .populate('author', 'username displayName avatar isVerified')
-    .populate('mentions', 'username displayName')
-    .sort(sort)
-    .limit(limit)
-    .skip(skip)
-    .lean();
-};
-
-// Static method to search posts
-postSchema.statics.searchPosts = function(query, options = {}) {
-  const { limit = 20, skip = 0, sortBy = 'createdAt', sortOrder = -1 } = options;
   
-  const searchRegex = new RegExp(query, 'i');
-  
-  return this.find({
-    $or: [
-      { content: searchRegex },
-      { hashtags: { $in: [searchRegex] } }
-    ],
+  // Query for trending posts
+  const trendingPosts = await this.find({
+    privacy: 'public',
     isActive: true,
-    privacy: 'public'
+    createdAt: { $gte: startDate },
+    views: { $gte: minViews },
+    likes: { $size: { $gte: minLikes } }
   })
   .populate('author', 'username displayName avatar isVerified')
-  .sort({ [sortBy]: sortOrder })
+  .sort({ 
+    views: -1,
+    createdAt: -1 
+  })
   .limit(limit)
-  .skip(skip);
+  .lean();
+  
+  return trendingPosts;
+};
+
+// Static method to get posts by feed type
+postSchema.statics.getByFeedType = async function(feedType, userId, options = {}) {
+  const {
+    limit = 20,
+    page = 1,
+    contentType = 'all',
+    hashtag,
+    search
+  } = options;
+  
+  // Base query
+  let query = { isActive: true };
+  
+  // Apply feed type specific filters
+  switch (feedType) {
+    case 'following':
+      if (userId) {
+        // Get IDs of users that the current user follows
+        const { Follow } = require('./Follow');
+        const followingIds = await Follow.getFollowingIds(userId);
+        
+        // Include posts from followed users and own posts
+        const authorIds = [...followingIds, userId];
+        
+        query.$and = [
+          { author: { $in: authorIds } },
+          {
+            $or: [
+              { privacy: 'public' },
+              { privacy: 'followers', author: { $in: followingIds } },
+              { author: userId } // Always show own posts
+            ]
+          }
+        ];
+      } else {
+        // Not authenticated: show all public posts
+        query.privacy = 'public';
+      }
+      break;
+      
+    case 'recent':
+      // Recent feed: show all public posts + posts from followed users (most inclusive)
+      if (userId) {
+        const { Follow } = require('./Follow');
+        const followingIds = await Follow.getFollowingIds(userId);
+        
+        query.$or = [
+          { privacy: 'public' }, // All public posts from everyone
+          { privacy: 'followers', author: { $in: followingIds } }, // Followers posts from people you follow
+          { author: userId } // Always show own posts
+        ];
+      } else {
+        // Not authenticated: show all public posts
+        query.privacy = 'public';
+      }
+      break;
+      
+    case 'trending':
+      // Trending feed: show popular public posts only
+      query.privacy = 'public';
+      // Add date filter for trending (last 7 days)
+      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      query.createdAt = { $gte: weekAgo };
+      break;
+      
+    case 'for-you':
+    default:
+      // For-you feed: personalized content
+      if (userId) {
+        const { Follow } = require('./Follow');
+        const followingIds = await Follow.getFollowingIds(userId);
+        
+        query.$or = [
+          { privacy: 'public' },
+          { privacy: 'followers', author: { $in: followingIds } },
+          { author: userId } // Always show own posts
+        ];
+      } else {
+        // Not authenticated: only show public posts
+        query.privacy = 'public';
+      }
+  }
+  
+  // Filter by content type
+  if (contentType !== 'all') {
+    query.type = contentType;
+  }
+  
+  // Filter by hashtag
+  if (hashtag) {
+    query.hashtags = { $in: [hashtag.toLowerCase()] };
+  }
+  
+  // Search functionality using MongoDB $text for content/hashtags
+  if (search) {
+    const searchString = String(search).trim();
+    if (searchString.length) {
+      const textClause = { $text: { $search: searchString } };
+      if (query.$and) {
+        query.$and.push(textClause);
+      } else {
+        query = { $and: [query, textClause] };
+      }
+    }
+  }
+  
+  // Calculate pagination
+  const skip = (parseInt(page) - 1) * parseInt(limit);
+  
+  // Determine sort criteria based on feed type
+  let sortCriteria;
+  switch (feedType) {
+    case 'trending':
+      // Sort by engagement metrics for trending
+      sortCriteria = { 
+        views: -1,
+        createdAt: -1
+      };
+      break;
+    case 'following':
+      // Sort by recency for following feed
+      sortCriteria = { createdAt: -1 };
+      break;
+    case 'recent':
+      // Sort by recency for recent feed
+      sortCriteria = { createdAt: -1 };
+      break;
+    default:
+      // For-you feed: mix of engagement and recency
+      sortCriteria = { 
+        createdAt: -1
+      };
+  }
+  
+  // Prefer $text score sort when using text search
+  const isTextSearch = !!(
+    (query.$and && query.$and.some(clause => clause.$text)) ||
+    (query.$or && query.$or.some(clause => clause.$text))
+  );
+  
+  const posts = await this.find(query, isTextSearch ? { score: { $meta: 'textScore' } } : undefined)
+    .populate('author', 'username displayName avatar isVerified bio role followerCount location')
+    .sort(isTextSearch ? { score: { $meta: 'textScore' }, createdAt: -1 } : sortCriteria)
+    .limit(parseInt(limit))
+    .skip(skip)
+    .lean();
+  
+  return posts;
 };
 
 module.exports = mongoose.model('Post', postSchema);

@@ -184,6 +184,48 @@ class SocketService {
       }
     });
 
+    // Join chatbot conversation room
+    socket.on('join-chatbot-conversation', async (data) => {
+      try {
+        const { conversationId } = data;
+        const userId = this.socketUsers.get(socket.id);
+
+        if (!userId || !conversationId) {
+          socket.emit('error', { message: 'Invalid request' });
+          return;
+        }
+
+        // Check if user is a participant in the chatbot conversation
+        const conversation = await ChatbotConversation.findOne({
+          _id: conversationId,
+          $or: [
+            { customerId: userId },
+            { vendorId: userId },
+            { customerId: 'admin' } // Allow admin conversations
+          ],
+          isActive: true
+        });
+
+        if (!conversation) {
+          socket.emit('error', { message: 'Access denied to chatbot conversation' });
+          return;
+        }
+
+        // Join chatbot conversation room
+        socket.join(`chatbot_conversation_${conversationId}`);
+        console.log(`User ${userId} joined chatbot conversation ${conversationId}`);
+
+        // Notify other participants that user has joined
+        socket.to(`chatbot_conversation_${conversationId}`).emit('chatbot:user-joined', {
+          conversationId,
+          userId
+        });
+      } catch (error) {
+        console.error('Join chatbot conversation error:', error);
+        socket.emit('error', { message: 'Failed to join chatbot conversation' });
+      }
+    });
+
     // Join post room for real-time updates
     socket.on('join-post', async (data) => {
       try {
@@ -254,6 +296,117 @@ class SocketService {
       } catch (error) {
         console.error('Leave conversation error:', error);
         socket.emit('error', { message: 'Failed to leave conversation' });
+      }
+    });
+
+    // Leave chatbot conversation room
+    socket.on('leave-chatbot-conversation', (data) => {
+      try {
+        const { conversationId } = data;
+        const userId = this.socketUsers.get(socket.id);
+
+        if (!userId || !conversationId) {
+          socket.emit('error', { message: 'Invalid request' });
+          return;
+        }
+
+        // Leave chatbot conversation room
+        socket.leave(`chatbot_conversation_${conversationId}`);
+        console.log(`User ${userId} left chatbot conversation ${conversationId}`);
+
+        // Notify other participants that user has left
+        socket.to(`chatbot_conversation_${conversationId}`).emit('chatbot:user-left', {
+          conversationId,
+          userId
+        });
+      } catch (error) {
+        console.error('Leave chatbot conversation error:', error);
+        socket.emit('error', { message: 'Failed to leave chatbot conversation' });
+      }
+    });
+
+    // Chatbot message status update
+    socket.on('chatbot:message:status', async (data) => {
+      try {
+        const { conversationId, messageId, status } = data;
+        const userId = this.socketUsers.get(socket.id);
+
+        if (!userId || !conversationId || !messageId || !status) {
+          socket.emit('error', { message: 'Invalid request' });
+          return;
+        }
+
+        // Validate status value
+        if (!['delivered', 'read'].includes(status)) {
+          socket.emit('error', { message: 'Invalid status value' });
+          return;
+        }
+
+        // Find the chatbot message
+        const message = await ChatbotMessage.findById(messageId);
+        if (!message) {
+          socket.emit('error', { message: 'Message not found' });
+          return;
+        }
+
+        // Check if user is a participant in the chatbot conversation
+        const conversation = await ChatbotConversation.findOne({
+          _id: conversationId,
+          $or: [
+            { customerId: userId },
+            { vendorId: userId },
+            { customerId: 'admin' } // Allow admin conversations
+          ],
+          isActive: true
+        });
+
+        if (!conversation) {
+          socket.emit('error', { message: 'Access denied to chatbot conversation' });
+          return;
+        }
+
+        // Update message status
+        message.status = status;
+        await message.save();
+
+        // Broadcast status update to all participants in the chatbot conversation
+        socket.to(`chatbot_conversation_${conversationId}`).emit('chatbot:message:status', {
+          conversationId,
+          messageId,
+          status
+        });
+      } catch (error) {
+        console.error('Chatbot message status update error:', error);
+        socket.emit('error', { message: 'Failed to update message status' });
+      }
+    });
+
+    // Chatbot typing indicator
+    socket.on('chatbot:typing', (data) => {
+      try {
+        const { conversationId, isTyping } = data;
+        const userId = this.socketUsers.get(socket.id);
+
+        if (!userId || !conversationId) {
+          socket.emit('error', { message: 'Invalid request' });
+          return;
+        }
+
+        if (isTyping) {
+          this.addTypingUser(conversationId, userId);
+        } else {
+          this.removeTypingUser(conversationId, userId);
+        }
+
+        // Broadcast typing status to all participants in the chatbot conversation
+        socket.to(`chatbot_conversation_${conversationId}`).emit('chatbot:typing', {
+          conversationId,
+          userId,
+          isTyping
+        });
+      } catch (error) {
+        console.error('Chatbot typing indicator error:', error);
+        socket.emit('error', { message: 'Failed to send typing indicator' });
       }
     });
 

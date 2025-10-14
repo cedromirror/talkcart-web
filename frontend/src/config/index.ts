@@ -13,6 +13,29 @@ export const DEFAULT_AVATAR_URL = '/images/default-avatar.png';
 // Socket Configuration
 export const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:8000';
 
+// Add a helper to ensure proper WebSocket URL format
+export const getWebSocketUrl = (): string => {
+  let url = SOCKET_URL;
+  
+  // If it's a relative URL, convert to absolute
+  if (url.startsWith('/')) {
+    if (typeof window !== 'undefined') {
+      url = `${window.location.protocol}//${window.location.host}${url}`;
+    } else {
+      url = 'http://localhost:8000';
+    }
+  }
+  
+  // Ensure it has proper protocol for WebSocket
+  if (url.startsWith('http://')) {
+    return url.replace('http://', 'ws://');
+  } else if (url.startsWith('https://')) {
+    return url.replace('https://', 'wss://');
+  }
+  
+  return url;
+};
+
 // WebRTC Configuration
 export const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },

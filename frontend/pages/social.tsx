@@ -1,61 +1,51 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Box,
-  Container,
-  Typography,
-  Grid,
-  Card,
-  CardContent,
-  CardHeader,
-  Avatar,
-  IconButton,
-  Divider,
-  Button,
-  TextField,
-  Tabs,
-  Tab,
-  Chip,
-  useTheme,
+import Head from 'next/head';
+import { 
+  Box, 
+  Container, 
+  Typography, 
+  Tabs, 
+  Tab, 
+  Fab, 
+  useTheme, 
   alpha,
   CircularProgress,
-  Fab,
+  IconButton,
+  Button,
+  Card,
+  CardContent,
 } from '@mui/material';
+import Skeleton from '@mui/material/Skeleton';
 import { 
-  MoreHorizontal, 
-  Heart, 
-  MessageSquare, 
-  Share, 
-  Bookmark, 
-  Image, 
-  Video,
-  Smile, 
-  Hash, 
-  TrendingUp, 
+  Home, 
   Users, 
   Clock, 
-  BookmarkCheck,
-  AlertCircle,
-  Plus,
-  RefreshCw,
-  Home,
-  Compass,
-  Search,
+  Plus, 
+  Search, 
   User,
+  TrendingUp,
+  Hash,
+  Bookmark,
+  AlertCircle,
+  RefreshCw,
+  Compass,
   Bell,
   Mail,
-  ShoppingCart
+  ShoppingCart,
 } from 'lucide-react';
+import { useRouter } from 'next/router';
 import Layout from '@/components/layout/Layout';
 import { useAuth } from '@/contexts/AuthContext';
-import usePosts from '@/hooks/usePosts';
-
-import WhoToFollow from '@/components/social/new/WhoToFollow';
+import { PostListItem } from '@/components/social/new/PostListItem';
 import { CreatePostDialog } from '@/components/social/new/CreatePostDialog';
-import { PostCardEnhanced as PostCard } from '@/components/social/new/PostCardEnhanced';
-import { VideoFeedProvider } from '@/components/video/VideoFeedManager';
+import WhoToFollow from '@/components/social/new/WhoToFollow';
+import TrendingPosts from '@/components/social/new/TrendingPosts';
 import TrendingProducts from '@/components/social/new/TrendingProducts';
-import TrendingPostsSidebar from '@/components/social/new/TrendingPostsSidebar';
-import { useRouter } from 'next/router';
+import UserAchievements from '@/components/social/new/UserAchievements';
+// Removed VideoFeedProvider as PostListItem doesn't need it
+import toast from 'react-hot-toast';
+import { usePosts } from '@/hooks/usePosts'; // Import the real usePosts hook
+import { Post } from '@/types/social';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -87,8 +77,8 @@ function a11yProps(index: number) {
 }
 
 const SocialPage: React.FC = () => {
-  const theme = useTheme();
   const router = useRouter();
+  const theme = useTheme();
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState(0);
   const [postContent, setPostContent] = useState('');
@@ -105,7 +95,12 @@ const SocialPage: React.FC = () => {
     }
   };
   
-  const { posts, loading, error, fetchPosts, fetchBookmarkedPosts, likePost, bookmarkPost, sharePost } = usePosts();
+  // Local scrolling state
+  const [sentinelRef, setSentinelRef] = useState<HTMLDivElement | null>(null);
+  const [lastLoadAt, setLastLoadAt] = useState<number>(0);
+
+  // Use the real usePosts hook (keep hook order stable)
+  const { posts, loading, error, page, hasMore, fetchPosts, loadMore, fetchBookmarkedPosts, likePost, bookmarkPost, sharePost } = usePosts();
   
   // Handle tab change and fetch posts for the new feed type
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
@@ -135,9 +130,39 @@ const SocialPage: React.FC = () => {
     }
   };
   
+  // Enhanced post creation handler
+  const handlePostCreated = (createdPost?: Post) => {
+    // Refresh the current feed to show the newly created post
+    const feedType = getFeedType(activeTab);
+    if (feedType === 'bookmarks' && user?.id) {
+      fetchBookmarkedPosts(user.id);
+    } else {
+      fetchPosts({ feedType });
+    }
+    // Additionally, if we got the created post, prepend it optimistically
+    if (createdPost) {
+      // Dispatch window event already handled by usePosts, but keep local safety if needed
+      try {
+        const event = new CustomEvent('posts:new', { detail: { post: createdPost } });
+        window.dispatchEvent(event);
+      } catch {}
+    }
+    
+    // Show success message
+    toast.success('Post created successfully!');
+  };
+  
   // Handle post interactions
   const handleBookmarkPost = (postId: string) => {
     bookmarkPost(postId);
+  };
+
+  const handleCommentPost = (postId: string) => {
+    // Navigate to the post detail page with focus on comments
+    router.push(`/post/${postId}?focus=comments`).catch((err) => {
+      console.error('Failed to navigate to post:', err);
+      toast.error('Failed to open post. Please try again.');
+    });
   };
   
   // Handle refresh for current feed
@@ -146,21 +171,52 @@ const SocialPage: React.FC = () => {
     if (feedType === 'bookmarks' && user?.id) {
       fetchBookmarkedPosts(user.id);
     } else {
-      fetchPosts({ feedType });
+      fetchPosts({ feedType, page: 1, reset: true });
     }
   };
-  
-  // Fetch posts when activeTab changes
+
+  // IntersectionObserver-based infinite scroll
   useEffect(() => {
-    const feedType = getFeedType(activeTab);
-    
-    // Handle bookmarked posts specially
-    if (feedType === 'bookmarks' && user?.id) {
-      fetchBookmarkedPosts(user.id);
-    } else {
-      fetchPosts({ feedType });
+    if (!sentinelRef) return;
+    const observer = new IntersectionObserver((entries) => {
+      const entry = entries[0];
+      if (entry.isIntersecting && hasMore && !loading) {
+        const now = Date.now();
+        if (now - lastLoadAt > 600) { // debounce interval (ms)
+          setLastLoadAt(now);
+          loadMore();
+        }
+      }
+    }, { root: null, rootMargin: '200px', threshold: 0 });
+    observer.observe(sentinelRef);
+    return () => observer.disconnect();
+  }, [sentinelRef, hasMore, loading, loadMore, lastLoadAt]);
+  
+  // Refetch when user identity changes (avoid duplicate initial fetch)
+  useEffect(() => {
+    if (!user?.id) return;
+    handleRefresh();
+  }, [user?.id]);
+  
+  // Add real-time post creation listener
+  useEffect(() => {
+    // Listen for posts:new window event to refresh current feed
+    const onLocalNewPost = (e: Event) => {
+      const currentFeedType = getFeedType(activeTab);
+      // Refresh all main feeds to ensure visibility
+      if (currentFeedType === 'for-you' || currentFeedType === 'following' || currentFeedType === 'recent') {
+        fetchPosts({ feedType: currentFeedType });
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('posts:new', onLocalNewPost as EventListener);
     }
-  }, [activeTab, fetchPosts, fetchBookmarkedPosts, user?.id]);
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('posts:new', onLocalNewPost as EventListener);
+      }
+    };
+  }, [activeTab]);
   
   // Navigation handlers with error handling
   const handleNavigation = (path: string) => {
@@ -210,7 +266,7 @@ const SocialPage: React.FC = () => {
         }}>
           <WhoToFollow limit={5} />
           <Box sx={{ mt: 3 }}>
-            <TrendingPostsSidebar />
+            <TrendingProducts />
           </Box>
         </Box>
         
@@ -277,49 +333,60 @@ const SocialPage: React.FC = () => {
             </Fab>
           </Box>
 
-          {/* Feed tabs - Enhanced design for desktop */}
+          {/* Feed tabs - Redesigned sticky pill-style with icons */}
           <Box sx={{
+            position: 'sticky',
+            top: 0,
+            zIndex: 10,
             display: { xs: 'none', md: 'block' },
-            borderBottom: `2px solid ${alpha(theme.palette.primary.main, 0.1)}`,
-            bgcolor: alpha(theme.palette.background.paper, 0.9),
-            backdropFilter: 'blur(10px)',
-            borderRadius: 2,
+            bgcolor: alpha(theme.palette.background.paper, 0.85),
+            backdropFilter: 'blur(8px)',
             mx: 2,
-            mt: 2,
-            mb: 1
+            pt: 2,
+            pb: 1
           }}>
             <Tabs
               value={activeTab}
               onChange={handleTabChange}
-              variant="fullWidth"
+              variant="scrollable"
+              allowScrollButtonsMobile
+              scrollButtons="auto"
               sx={{
+                minHeight: 0,
+                '& .MuiTabs-flexContainer': {
+                  gap: 1
+                },
                 '& .MuiTabs-indicator': {
-                  bgcolor: `linear-gradient(45deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
-                  height: 4,
-                  borderRadius: 2
+                  display: 'none'
                 },
                 '& .MuiTab-root': {
-                  fontWeight: 700,
-                  fontSize: '1rem',
+                  minHeight: 0,
+                  height: 40,
+                  px: 2,
+                  borderRadius: 999,
                   textTransform: 'none',
-                  minHeight: 56,
-                  borderRadius: 2,
-                  transition: 'all 0.3s ease',
+                  fontWeight: 700,
+                  fontSize: '0.95rem',
+                  bgcolor: alpha(theme.palette.primary.main, 0.06),
+                  color: theme.palette.text.primary,
+                  transition: 'all .2s ease',
                   '&:hover': {
-                    bgcolor: alpha(theme.palette.primary.main, 0.05),
-                    color: theme.palette.primary.main
+                    bgcolor: alpha(theme.palette.primary.main, 0.12)
                   },
                   '&.Mui-selected': {
-                    color: theme.palette.primary.main,
-                    fontWeight: 800
+                    bgcolor: alpha(theme.palette.primary.main, 0.2),
+                    color: theme.palette.primary.main
+                  },
+                  '& .MuiTab-iconWrapper': {
+                    marginRight: 8
                   }
                 }
               }}
             >
-              <Tab label="✨ For You" {...a11yProps(0)} />
-              <Tab label="👥 Following" {...a11yProps(1)} />
-              <Tab label="🕒 Recent" {...a11yProps(2)} />
-              <Tab label="🔖 Bookmarks" {...a11yProps(3)} />
+              <Tab icon={<Home size={16} />} iconPosition="start" label="For You" {...a11yProps(0)} />
+              <Tab icon={<Users size={16} />} iconPosition="start" label="Following" {...a11yProps(1)} />
+              <Tab icon={<Clock size={16} />} iconPosition="start" label="Recent" {...a11yProps(2)} />
+              <Tab icon={<Bookmark size={16} />} iconPosition="start" label="Bookmarks" {...a11yProps(3)} />
             </Tabs>
           </Box>
           
@@ -344,9 +411,29 @@ const SocialPage: React.FC = () => {
             }
           }}>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {loading ? (
-                <Box sx={{ display: 'flex', justifyContent: 'center', my: 8 }}>
-                  <CircularProgress size={40} />
+              {loading && posts.length === 0 ? (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  {[...Array(5)].map((_, i) => (
+                    <Card key={i}>
+                      <CardContent>
+                        <Box display="flex" alignItems="center" gap={1} mb={1}>
+                          <Skeleton variant="circular" width={36} height={36} />
+                          <Box>
+                            <Skeleton variant="text" width={120} height={16} />
+                            <Skeleton variant="text" width={80} height={12} />
+                          </Box>
+                        </Box>
+                        <Skeleton variant="text" height={18} sx={{ mb: 1 }} />
+                        <Skeleton variant="rectangular" height={160} sx={{ borderRadius: 1, mb: 1 }} />
+                        <Box display="flex" alignItems="center" gap={1}>
+                          <Skeleton variant="circular" width={24} height={24} />
+                          <Skeleton variant="text" width={24} height={14} />
+                          <Skeleton variant="circular" width={24} height={24} />
+                          <Skeleton variant="text" width={24} height={14} />
+                        </Box>
+                      </CardContent>
+                    </Card>
+                  ))}
                 </Box>
               ) : error ? (
                 <Box sx={{ textAlign: 'center', my: 8 }}>
@@ -383,30 +470,22 @@ const SocialPage: React.FC = () => {
                   </Button>
                 </Box>
               ) : (
-                <VideoFeedProvider
-                  initialSettings={{
-                    enabled: true,
-                    threshold: 0.6,
-                    pauseOnScroll: true,
-                    muteByDefault: true,
-                    preloadStrategy: 'metadata',
-                    maxConcurrentVideos: 2,
-                    scrollPauseDelay: 150,
-                    viewTrackingThreshold: 3,
-                    autoplayOnlyOnWifi: false,
-                    respectReducedMotion: true,
-                  }}
-                >
-                  {posts.map((post) => (
-                    <PostCard 
-                      key={post.id} 
-                      post={post} 
-                      onBookmark={handleBookmarkPost}
-                      onLike={likePost}
-                      onShare={sharePost}
-                    />
-                  ))}
-                </VideoFeedProvider>
+                posts.map((post) => (
+                  <PostListItem
+                    key={post.id}
+                    post={post}
+                    onBookmark={handleBookmarkPost}
+                    onLike={likePost}
+                    onShare={sharePost}
+                    onComment={handleCommentPost}
+                  />
+                ))
+              )}
+              <Box ref={setSentinelRef} sx={{ height: 1 }} />
+              {loading && posts.length > 0 && (
+                <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
+                  <CircularProgress size={28} />
+                </Box>
               )}
             </Box>
           </Box>
@@ -445,7 +524,7 @@ const SocialPage: React.FC = () => {
                     width: 24,
                     height: 24,
                     borderRadius: 2,
-                    bgcolor: `linear-gradient(45deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
+                    background: `linear-gradient(45deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center'
@@ -580,7 +659,7 @@ const SocialPage: React.FC = () => {
                     width: 24,
                     height: 24,
                     borderRadius: 2,
-                    bgcolor: `linear-gradient(45deg, ${theme.palette.secondary.main}, ${theme.palette.primary.main})`,
+                    background: `linear-gradient(45deg, ${theme.palette.secondary.main}, ${theme.palette.primary.main})`,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center'
@@ -832,15 +911,7 @@ const SocialPage: React.FC = () => {
       <CreatePostDialog
         open={createPostOpen}
         onClose={() => setCreatePostOpen(false)}
-        onPostCreated={() => {
-          const feedType = getFeedType(activeTab);
-          if (feedType === 'bookmarks' && user?.id) {
-            fetchBookmarkedPosts(user.id);
-          } else {
-            fetchPosts({ feedType });
-          }
-          setCreatePostOpen(false);
-        }}
+        onPostCreated={handlePostCreated}
       />
     </Layout>
   );

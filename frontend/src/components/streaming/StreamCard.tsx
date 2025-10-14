@@ -24,6 +24,7 @@ import {
   Clock,
 } from 'lucide-react';
 import { useRouter } from 'next/router';
+import OptimizedImage from '@/components/media/OptimizedImage';
 import { Stream } from '@/services/streamingApi';
 import { formatDistanceToNow } from 'date-fns';
 import { formatNumber } from '@/utils/format';
@@ -103,15 +104,7 @@ const StreamCard: React.FC<StreamCardProps> = ({
                 bgcolor: 'grey.200',
               }}
             >
-              <img
-                src={getThumbnail()}
-                alt={stream.title}
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  objectFit: 'cover',
-                }}
-              />
+              <OptimizedImage src={getThumbnail()} alt={stream.title} fill sizes="240px" style={{ objectFit: 'cover' }} quality={80} />
               {stream.isLive && (
                 <Chip
                   label="LIVE"
@@ -177,16 +170,9 @@ const StreamCard: React.FC<StreamCardProps> = ({
     >
       {/* Thumbnail */}
       <Box sx={{ position: 'relative', aspectRatio: '16/9' }}>
-        <CardMedia
-          component="img"
-          image={getThumbnail()}
-          alt={stream.title}
-          sx={{
-            width: '100%',
-            height: '100%',
-            objectFit: 'cover',
-          }}
-        />
+        <Box sx={{ position: 'absolute', inset: 0 }}>
+          <OptimizedImage src={getThumbnail()} alt={stream.title} fill sizes="(max-width: 1200px) 100vw, 50vw" style={{ objectFit: 'cover' }} quality={80} />
+        </Box>
         
         {/* Live Badge */}
         {stream.isLive && (

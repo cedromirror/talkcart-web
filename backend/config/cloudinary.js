@@ -1,32 +1,67 @@
 const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const config = require('./config');
 
-// Configure Cloudinary
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
+// Cloudinary configuration check
 
-// Cloudinary storage configuration for multer
-const storage = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: {
-    folder: 'talkcart',
-    resource_type: 'auto', // Automatically detect resource type
-    public_id: (req, file) => {
-      // Generate unique public_id
-      const timestamp = Date.now();
-      const randomString = Math.random().toString(36).substring(2, 15);
-      return `${file.fieldname}_${timestamp}_${randomString}`;
+// Configure Cloudinary only if credentials are provided
+if (config.cloudinary.enabled) {
+  cloudinary.config({
+    cloud_name: config.cloudinary.cloudName,
+    api_key: config.cloudinary.apiKey,
+    api_secret: config.cloudinary.apiSecret,
+  });
+}
+
+// Create uploads directory if it doesn't exist (for local fallback)
+const uploadDir = path.join(__dirname, '..', 'uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+// Create talkcart subdirectory for local storage (only one level deep)
+const talkcartDir = path.join(uploadDir, 'talkcart');
+if (!fs.existsSync(talkcartDir)) {
+  fs.mkdirSync(talkcartDir, { recursive: true });
+}
+
+// Storage configuration - use Cloudinary if credentials are provided, otherwise use local disk storage
+let storage;
+if (config.cloudinary.enabled) {
+  // Cloudinary storage configuration for multer
+  storage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+      folder: 'talkcart',
+      resource_type: 'auto', // Automatically detect resource type
+      public_id: (req, file) => {
+        // Generate unique public_id without additional folder nesting
+        const timestamp = Date.now();
+        const randomString = Math.random().toString(36).substring(2, 15);
+        return `${file.fieldname}_${timestamp}_${randomString}`;
+      },
     },
-  },
-});
+  });
+} else {
+  // Local disk storage configuration for multer
+  storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+      cb(null, talkcartDir);
+    },
+    filename: (req, file, cb) => {
+      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+      const filename = `file_${uniqueSuffix}_${Math.random().toString(36).substring(2, 15)}${path.extname(file.originalname)}`;
+      cb(null, filename);
+    }
+  });
+}
 
 // Multer upload configuration for general uploads
-const MAX_UPLOAD_MB = parseInt(process.env.UPLOAD_MAX_FILE_SIZE_MB || '200', 10);
-const MAX_FIELD_MB = parseInt(process.env.UPLOAD_MAX_FIELD_SIZE_MB || String(Math.max(200, MAX_UPLOAD_MB)), 10);
+const MAX_UPLOAD_MB = config.upload.maxFileSize;
+const MAX_FIELD_MB = config.upload.maxFieldSize;
 
 const upload = multer({
   storage: storage,
@@ -36,15 +71,7 @@ const upload = multer({
     files: 1, // Maximum number of files
   },
   fileFilter: (req, file, cb) => {
-    console.log('File filter check:', {
-      fieldname: file.fieldname,
-      originalname: file.originalname,
-      mimetype: file.mimetype,
-      size: file.size
-    });
-
-    // Allow all file types for now, but log what's being uploaded
-    console.log('File type allowed:', file.mimetype);
+    // Allow all file types for now
     cb(null, true);
   },
 });
@@ -74,28 +101,103 @@ const profilePictureUpload = multer({
 });
 
 /**
- * Upload single file to Cloudinary
+ * Upload single file to Cloudinary or local storage
  */
 const uploadSingle = (fieldName) => {
-  return upload.single(fieldName);
+  return (req, res, next) => {
+    const uploadHandler = upload.single(fieldName);
+    
+    uploadHandler(req, res, async (err) => {
+      if (err) {
+        return next(err);
+      }
+      
+      // If using local storage, fix the file URL
+      if (!config.cloudinary.enabled && req.file) {
+        // Generate proper local URL
+        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        req.file.secure_url = `${baseUrl}/uploads/talkcart/${req.file.filename}`;
+        req.file.url = `${baseUrl}/uploads/talkcart/${req.file.filename}`;
+        req.file.public_id = `talkcart/${req.file.filename}`;
+      }
+      
+      next();
+    });
+  };
 };
 
 /**
- * Upload multiple files to Cloudinary
+ * Upload multiple files to Cloudinary or local storage
  */
 const uploadMultiple = (fieldName, maxCount = 10) => {
-  return upload.array(fieldName, maxCount);
+  return (req, res, next) => {
+    const uploadHandler = upload.array(fieldName, maxCount);
+    
+    uploadHandler(req, res, async (err) => {
+      if (err) {
+        return next(err);
+      }
+      
+      // If using local storage, fix the file URLs
+      if (!config.cloudinary.enabled && req.files) {
+        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        req.files.forEach(file => {
+          file.secure_url = `${baseUrl}/uploads/talkcart/${file.filename}`;
+          file.url = `${baseUrl}/uploads/talkcart/${file.filename}`;
+          file.public_id = `talkcart/${file.filename}`;
+        });
+      }
+      
+      next();
+    });
+  };
 };
 
 /**
  * Upload files with different field names
  */
 const uploadFields = (fields) => {
-  return upload.fields(fields);
+  return (req, res, next) => {
+    const uploadHandler = upload.fields(fields);
+    
+    uploadHandler(req, res, async (err) => {
+      if (err) {
+        return next(err);
+      }
+      
+      // If using local storage, fix the file URLs
+      if (!config.cloudinary.enabled) {
+        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        
+        // Handle single files
+        if (req.file) {
+          req.file.secure_url = `${baseUrl}/uploads/talkcart/${req.file.filename}`;
+          req.file.url = `${baseUrl}/uploads/talkcart/${req.file.filename}`;
+          req.file.public_id = `talkcart/${req.file.filename}`;
+        }
+        
+        // Handle multiple files
+        if (req.files) {
+          Object.keys(req.files).forEach(fieldname => {
+            const files = req.files[fieldname];
+            if (Array.isArray(files)) {
+              files.forEach(file => {
+                file.secure_url = `${baseUrl}/uploads/talkcart/${file.filename}`;
+                file.url = `${baseUrl}/uploads/talkcart/${file.filename}`;
+                file.public_id = `talkcart/${file.filename}`;
+              });
+            }
+          });
+        }
+      }
+      
+      next();
+    });
+  };
 };
 
 /**
- * Upload single profile picture to Cloudinary with size validation
+ * Upload single profile picture to Cloudinary or local storage with size validation
  */
 const uploadProfilePicture = (fieldName) => {
   return (req, res, next) => {
@@ -104,6 +206,14 @@ const uploadProfilePicture = (fieldName) => {
     uploadHandler(req, res, (err) => {
       if (err) {
         return next(err);
+      }
+
+      // If using local storage, fix the file URL
+      if (!config.cloudinary.enabled && req.file) {
+        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        req.file.secure_url = `${baseUrl}/uploads/talkcart/${req.file.filename}`;
+        req.file.url = `${baseUrl}/uploads/talkcart/${req.file.filename}`;
+        req.file.public_id = `talkcart/${req.file.filename}`;
       }
 
       next();

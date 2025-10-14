@@ -58,23 +58,9 @@ import {
   FileSpreadsheet,
   Image,
 } from 'lucide-react';
-import {
-  LineChart,
-  Line,
-  AreaChart,
-  Area,
-  BarChart,
-  Bar,
-  PieChart,
-  Pie,
-  Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip as RechartsTooltip,
-  Legend,
-  ResponsiveContainer,
-} from 'recharts';
+import dynamic from 'next/dynamic';
+
+const Recharts = dynamic(() => import('recharts'), { ssr: false, loading: () => null }) as any;
 
 interface StreamAnalyticsProps {
   streamId: string;
@@ -450,14 +436,14 @@ const StreamAnalytics: React.FC<StreamAnalyticsProps> = ({
                 <Typography variant="h6" gutterBottom>
                   Viewer Count Over Time
                 </Typography>
-                <ResponsiveContainer width="100%" height={300}>
-                  <AreaChart data={analyticsData.chartData.viewerHistory}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="time" />
-                    <YAxis />
-                    <RechartsTooltip />
-                    <Legend />
-                    <Area
+                <Recharts.ResponsiveContainer width="100%" height={300}>
+                  <Recharts.AreaChart data={analyticsData.chartData.viewerHistory}>
+                    <Recharts.CartesianGrid strokeDasharray="3 3" />
+                    <Recharts.XAxis dataKey="time" />
+                    <Recharts.YAxis />
+                    <Recharts.RechartsTooltip />
+                    <Recharts.Legend />
+                    <Recharts.Area
                       type="monotone"
                       dataKey="viewers"
                       stroke="#1976d2"
@@ -465,7 +451,7 @@ const StreamAnalytics: React.FC<StreamAnalyticsProps> = ({
                       fillOpacity={0.3}
                       name="Viewers"
                     />
-                    <Area
+                    <Recharts.Area
                       type="monotone"
                       dataKey="chatActivity"
                       stroke="#ff9800"
@@ -473,8 +459,8 @@ const StreamAnalytics: React.FC<StreamAnalyticsProps> = ({
                       fillOpacity={0.3}
                       name="Chat Activity"
                     />
-                  </AreaChart>
-                </ResponsiveContainer>
+                  </Recharts.AreaChart>
+                </Recharts.ResponsiveContainer>
               </Grid>
 
               <Grid item xs={12} lg={4}>
@@ -527,18 +513,18 @@ const StreamAnalytics: React.FC<StreamAnalyticsProps> = ({
                 <Typography variant="h6" gutterBottom>
                   Engagement Over Time
                 </Typography>
-                <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={analyticsData.chartData.engagementHistory}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="time" />
-                    <YAxis />
-                    <RechartsTooltip />
-                    <Legend />
-                    <Line type="monotone" dataKey="likes" stroke="#e91e63" name="Likes" />
-                    <Line type="monotone" dataKey="messages" stroke="#2196f3" name="Messages" />
-                    <Line type="monotone" dataKey="gifts" stroke="#ff9800" name="Gifts" />
-                  </LineChart>
-                </ResponsiveContainer>
+                <Recharts.ResponsiveContainer width="100%" height={300}>
+                  <Recharts.LineChart data={analyticsData.chartData.engagementHistory}>
+                    <Recharts.CartesianGrid strokeDasharray="3 3" />
+                    <Recharts.XAxis dataKey="time" />
+                    <Recharts.YAxis />
+                    <Recharts.RechartsTooltip />
+                    <Recharts.Legend />
+                    <Recharts.Line type="monotone" dataKey="likes" stroke="#e91e63" name="Likes" />
+                    <Recharts.Line type="monotone" dataKey="messages" stroke="#2196f3" name="Messages" />
+                    <Recharts.Line type="monotone" dataKey="gifts" stroke="#ff9800" name="Gifts" />
+                  </Recharts.LineChart>
+                </Recharts.ResponsiveContainer>
               </Grid>
 
               <Grid item xs={12} md={6}>
@@ -604,9 +590,9 @@ const StreamAnalytics: React.FC<StreamAnalyticsProps> = ({
                 <Typography variant="h6" gutterBottom>
                   Viewers by Country
                 </Typography>
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
+                <Recharts.ResponsiveContainer width="100%" height={300}>
+                  <Recharts.PieChart>
+                    <Recharts.Pie
                       data={analyticsData.demographics.countries}
                       cx="50%"
                       cy="50%"
@@ -617,42 +603,42 @@ const StreamAnalytics: React.FC<StreamAnalyticsProps> = ({
                       dataKey="viewers"
                     >
                       {analyticsData.demographics.countries.map((entry: any, index: number) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        <Recharts.Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                       ))}
-                    </Pie>
-                    <RechartsTooltip />
-                  </PieChart>
-                </ResponsiveContainer>
+                    </Recharts.Pie>
+                    <Recharts.RechartsTooltip />
+                  </Recharts.PieChart>
+                </Recharts.ResponsiveContainer>
               </Grid>
 
               <Grid item xs={12} md={6}>
                 <Typography variant="h6" gutterBottom>
                   Device Types
                 </Typography>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={analyticsData.demographics.devices}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="type" />
-                    <YAxis />
-                    <RechartsTooltip />
-                    <Bar dataKey="count" fill="#1976d2" />
-                  </BarChart>
-                </ResponsiveContainer>
+                <Recharts.ResponsiveContainer width="100%" height={300}>
+                  <Recharts.BarChart data={analyticsData.demographics.devices}>
+                    <Recharts.CartesianGrid strokeDasharray="3 3" />
+                    <Recharts.XAxis dataKey="type" />
+                    <Recharts.YAxis />
+                    <Recharts.RechartsTooltip />
+                    <Recharts.Bar dataKey="count" fill="#1976d2" />
+                  </Recharts.BarChart>
+                </Recharts.ResponsiveContainer>
               </Grid>
 
               <Grid item xs={12}>
                 <Typography variant="h6" gutterBottom>
                   Age Distribution
                 </Typography>
-                <ResponsiveContainer width="100%" height={200}>
-                  <BarChart data={analyticsData.demographics.ageGroups} layout="horizontal">
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis type="number" />
-                    <YAxis dataKey="range" type="category" />
-                    <RechartsTooltip />
-                    <Bar dataKey="count" fill="#4caf50" />
-                  </BarChart>
-                </ResponsiveContainer>
+                <Recharts.ResponsiveContainer width="100%" height={200}>
+                  <Recharts.BarChart data={analyticsData.demographics.ageGroups} layout="horizontal">
+                    <Recharts.CartesianGrid strokeDasharray="3 3" />
+                    <Recharts.XAxis type="number" />
+                    <Recharts.YAxis dataKey="range" type="category" />
+                    <Recharts.RechartsTooltip />
+                    <Recharts.Bar dataKey="count" fill="#4caf50" />
+                  </Recharts.BarChart>
+                </Recharts.ResponsiveContainer>
               </Grid>
             </Grid>
           </CardContent>

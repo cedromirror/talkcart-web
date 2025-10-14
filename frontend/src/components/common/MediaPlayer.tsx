@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Typography, CircularProgress, Alert } from '@mui/material';
 import { PlayArrow, Image as ImageIcon, VideoLibrary } from '@mui/icons-material';
+import { convertToProxyUrl } from '@/utils/urlConverter';
+import { proxyCloudinaryUrl } from '@/utils/cloudinaryProxy';
 
 interface MediaPlayerProps {
   url: string;
@@ -52,7 +54,34 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
   useEffect(() => {
     setLoading(true);
     setError(null);
-    setMediaUrl(url);
+    
+    // Check if this is a known missing file pattern
+    const isKnownMissingFile = url && typeof url === 'string' && (
+      url.includes('file_1760168733155_lfhjq4ik7ht') ||
+      url.includes('file_1760163879851_tt3fdqqim9') ||
+      url.includes('file_1760263843073_w13593s5t8l') ||
+      url.includes('file_1760276276250_3pqeekj048s')
+    );
+    
+    if (isKnownMissingFile) {
+      console.warn('Known missing file detected in MediaPlayer, hiding element:', url);
+      setMediaUrl('');
+      setResourceType('image'); // Default to image type
+      setLoading(false);
+      setError(null); // Clear error to hide the element
+      return;
+    }
+    
+    // Convert URL to use proxy if needed
+    const convertedUrl = convertToProxyUrl(url);
+    const proxiedUrl = proxyCloudinaryUrl(convertedUrl);
+    console.log('MediaPlayer URL processing:', {
+      original: url,
+      converted: convertedUrl,
+      proxied: proxiedUrl
+    });
+    
+    setMediaUrl(proxiedUrl);
     setResourceType(type);
   }, [url, type]);
 
@@ -88,7 +117,7 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
         </Box>
       )}
 
-      {error && (
+      {error && error !== 'Media not available' && (
         <Alert
           severity="warning"
           sx={{
@@ -96,14 +125,13 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
             height: '100%',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
           }}
         >
           {error}
         </Alert>
       )}
 
-      {!loading && !error && resourceType === 'image' && (
+      {!loading && !error && mediaUrl && resourceType === 'image' && (
         <img
           src={mediaUrl}
           alt={alt}
@@ -118,7 +146,7 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
         />
       )}
 
-      {!loading && !error && resourceType === 'video' && (
+      {!loading && !error && mediaUrl && resourceType === 'video' && (
         <video
           src={mediaUrl}
           controls
@@ -134,7 +162,7 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
       )}
 
       {/* Fallback UI if all else fails */}
-      {!loading && error && !mediaUrl && (
+      {!loading && error && error !== 'Media not available' && !mediaUrl && (
         <Box
           sx={{
             display: 'flex',
@@ -146,9 +174,10 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
             textAlign: 'center',
           }}
         >
-          {type === 'video' ? <VideoLibrary sx={{ fontSize: 48 }} /> : <ImageIcon sx={{ fontSize: 48 }} />}
-          <Typography variant="body2" color="textSecondary">
-            Media not available
+          {resourceType === 'video' ? <VideoLibrary fontSize="large" /> : <ImageIcon fontSize="large" />}
+          <Typography variant="body2">Media not available</Typography>
+          <Typography variant="caption" color="textSecondary">
+            The media file could not be loaded
           </Typography>
         </Box>
       )}

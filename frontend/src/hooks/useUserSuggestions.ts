@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { API_URL } from '../config';
+import { API_URL, TIMEOUTS } from '@/config/index';
 import { api } from '@/lib/api';
 
 export interface UserSuggestion {
@@ -56,10 +56,35 @@ export const useUserSuggestions = (options: UseUserSuggestionsOptions = {}) => {
       const params = new URLSearchParams({ limit: String(limit) });
       if (search && search.trim()) params.set('search', search.trim());
 
-      const response = await axios.get<UserSuggestionsResponse>(
-        `${API_URL}/users/suggestions?${params.toString()}`,
-        { headers }
-      );
+      const url = `${API_URL}/users/suggestions?${params.toString()}`;
+
+      // Retry GET with backoff similar to api.ts
+      let attempt = 0;
+      const maxRetries = 2;
+      let lastError: any = null;
+      let response: { data: UserSuggestionsResponse } | null = null;
+      while (attempt <= maxRetries) {
+        try {
+          response = await axios.get<UserSuggestionsResponse>(url, {
+            headers,
+            timeout: attempt === 0 ? Math.min(TIMEOUTS.API_REQUEST, 15000) : Math.min(TIMEOUTS.API_REQUEST + attempt * 5000, TIMEOUTS.API_REQUEST * 2),
+          });
+          break;
+        } catch (err: any) {
+          lastError = err;
+          const isTimeout = err?.code === 'ECONNABORTED' || (typeof err?.message === 'string' && err.message.toLowerCase().includes('timeout'));
+          const isNetwork = typeof err?.message === 'string' && err.message.toLowerCase().includes('network');
+          if (attempt < maxRetries && (isTimeout || isNetwork)) {
+            attempt += 1;
+            continue;
+          }
+          break;
+        }
+      }
+
+      if (!response) {
+        throw lastError || new Error('Failed to fetch user suggestions');
+      }
 
       if (response.data.success) {
         setSuggestions(response.data.data.suggestions);
@@ -96,10 +121,10 @@ export const useUserSuggestions = (options: UseUserSuggestionsOptions = {}) => {
         return { success: false, error: 'Your session expired. Please log in again.' };
       }
 
-      return { 
-        success: false, 
-        error: err.response?.data?.message || err?.message || 'Failed to follow user' 
-      };
+      const msg = (err?.message || '').toLowerCase().includes('timeout')
+        ? 'Network is slow. Please try again.'
+        : (err.response?.data?.message || err?.message || 'Failed to follow user');
+      return { success: false, error: msg };
     }
   };
 

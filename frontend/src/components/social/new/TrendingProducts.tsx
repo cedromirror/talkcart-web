@@ -6,6 +6,8 @@ import {
   Skeleton,
 } from '@mui/material';
 import api from '@/lib/api';
+import { proxyCloudinaryUrl } from '@/utils/cloudinaryProxy';
+import { convertToProxyUrl } from '@/utils/urlConverter';
 
 interface Product {
   id: string;
@@ -74,8 +76,8 @@ const TrendingProducts: React.FC = () => {
                   currency: 'USD',
                   images: [{
                     public_id: 'mock1',
-                    secure_url: '/placeholder-product.jpg',
-                    url: '/placeholder-product.jpg',
+                    secure_url: '/images/placeholder-image-new.png',
+                    url: '/images/placeholder-image-new.png',
                     _id: 'img1'
                   }],
                   category: 'Electronics',
@@ -106,8 +108,8 @@ const TrendingProducts: React.FC = () => {
                   currency: 'USD',
                   images: [{
                     public_id: 'mock2',
-                    secure_url: '/placeholder-product.jpg',
-                    url: '/placeholder-product.jpg',
+                    secure_url: '/images/placeholder-image-new.png',
+                    url: '/images/placeholder-image-new.png',
                     _id: 'img2'
                   }],
                   category: 'Fashion',
@@ -146,8 +148,8 @@ const TrendingProducts: React.FC = () => {
                 currency: 'USD',
                 images: [{
                   public_id: 'mock1',
-                  secure_url: '/placeholder-product.jpg',
-                  url: '/placeholder-product.jpg',
+                  secure_url: '/images/placeholder-image-new.png',
+                  url: '/images/placeholder-image-new.png',
                   _id: 'img1'
                 }],
                 category: 'Electronics',
@@ -178,8 +180,8 @@ const TrendingProducts: React.FC = () => {
                 currency: 'USD',
                 images: [{
                   public_id: 'mock2',
-                  secure_url: '/placeholder-product.jpg',
-                  url: '/placeholder-product.jpg',
+                  secure_url: '/images/placeholder-image-new.png',
+                  url: '/images/placeholder-image-new.png',
                   _id: 'img2'
                 }],
                 category: 'Fashion',
@@ -220,8 +222,8 @@ const TrendingProducts: React.FC = () => {
             currency: 'USD',
             images: [{
               public_id: 'mock1',
-              secure_url: '/placeholder-product.jpg',
-              url: '/placeholder-product.jpg',
+              secure_url: '/images/placeholder-image-new.png',
+              url: '/images/placeholder-image-new.png',
               _id: 'img1'
             }],
             category: 'Electronics',
@@ -252,8 +254,8 @@ const TrendingProducts: React.FC = () => {
             currency: 'USD',
             images: [{
               public_id: 'mock2',
-              secure_url: '/placeholder-product.jpg',
-              url: '/placeholder-product.jpg',
+              secure_url: '/images/placeholder-image-new.png',
+              url: '/images/placeholder-image-new.png',
               _id: 'img2'
             }],
             category: 'Fashion',
@@ -287,10 +289,10 @@ const TrendingProducts: React.FC = () => {
     // Fetch initial products
     fetchTrendingProducts();
     
-    // Fetch new products every 30 seconds
+    // Fetch new products every 45 seconds to reduce pressure under slow networks
     const interval = setInterval(() => {
       fetchTrendingProducts();
-    }, 30000);
+    }, 45000);
 
     return () => {
       clearInterval(interval);
@@ -300,13 +302,16 @@ const TrendingProducts: React.FC = () => {
   // Get image URL with proper fallbacks
   const getImageUrl = (product: Product) => {
     if (!Array.isArray(product.images) || product.images.length === 0) {
-      return '/placeholder-product.jpg';
+      return '/images/placeholder-image-new.png';
     }
     
     // Always use the first image for simplicity
     const image = product.images[0];
-    
-    return image?.secure_url || image?.url || '/placeholder-product.jpg';
+    const raw = image?.secure_url || image?.url || '/images/placeholder-image-new.png';
+    // Proxy Cloudinary or backend uploads similar to post images
+    const converted = convertToProxyUrl(raw);
+    const proxied = proxyCloudinaryUrl(converted);
+    return proxied || converted || '/images/placeholder-image-new.png';
   };
 
   return (

@@ -2,6 +2,65 @@ import React from 'react';
 import { Volume2, VolumeX } from 'lucide-react';
 
 /**
+ * Validate video file before upload
+ */
+export const validateVideoFile = (file: File): { valid: boolean; error?: string; details?: string } => {
+  // Check if file exists
+  if (!file) {
+    return { valid: false, error: 'No file selected' };
+  }
+
+  // Check file size (200MB limit)
+  const maxSize = 200 * 1024 * 1024; // 200MB in bytes
+  if (file.size > maxSize) {
+    const fileSizeMB = (file.size / (1024 * 1024)).toFixed(1);
+    return { 
+      valid: false, 
+      error: 'File too large', 
+      details: `Selected file is ${fileSizeMB}MB. Maximum allowed size is 200MB.` 
+    };
+  }
+
+  // Check file type
+  const allowedTypes = [
+    'video/mp4',
+    'video/webm',
+    'video/ogg',
+    'video/quicktime', // MOV
+    'video/x-msvideo', // AVI
+    'video/x-matroska' // MKV
+  ];
+
+  if (!allowedTypes.includes(file.type)) {
+    // Also check file extension as fallback
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    const allowedExtensions = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'];
+    
+    if (!extension || !allowedExtensions.includes(extension)) {
+      return { 
+        valid: false, 
+        error: 'Unsupported file type', 
+        details: `File type ${file.type || 'unknown'} is not supported. Supported formats: MP4, WebM, OGG, MOV, AVI, MKV.` 
+      };
+    }
+  }
+
+  // Additional validation for video files
+  if (file.type.startsWith('video/')) {
+    // Check if filename seems valid
+    if (!file.name || file.name.length < 5) {
+      return { 
+        valid: false, 
+        error: 'Invalid filename', 
+        details: 'The selected file has an invalid name.' 
+      };
+    }
+  }
+
+  return { valid: true };
+};
+
+/**
  * Get volume icon based on muted state
  */
 export const getVolumeIcon = (

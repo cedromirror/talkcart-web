@@ -8,7 +8,7 @@ export { default as Sidebar } from './layout/Sidebar';
 export { default as NavigationItem } from './layout/NavigationItem';
 
 // Social Components
-export { PostCard } from './social/PostCard';
+export { PostListItem } from './social/new/PostListItem';
 
 // Comments
 export { default as CommentSection } from './Comments/CommentSection';

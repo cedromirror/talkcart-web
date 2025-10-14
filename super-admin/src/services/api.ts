@@ -114,8 +114,16 @@ export const AdminApi = {
 
   // Authentication
   me: async () => {
-    const res = await fetchWithConfig(`${API_BASE}/admin/me`);
-    return res.json();
+    try {
+      const res = await fetchWithConfig(`${API_BASE}/admin/me`);
+      return res.json();
+    } catch (error) {
+      // Provide more specific error handling
+      if (error instanceof Error && error.message.includes('Failed to fetch')) {
+        throw new Error('Unable to connect to the authentication server. Please ensure the backend service is running.');
+      }
+      throw error;
+    }
   },
 
   // Products

@@ -86,8 +86,24 @@ export interface ChatbotConversation {
     isResolved: boolean;
     botEnabled: boolean;
     botPersonality: string;
+    isPinned?: boolean;
+    isMuted?: boolean;
     createdAt: string;
     updatedAt: string;
+}
+
+export interface ChatbotAttachment {
+    type: 'image' | 'document' | 'video' | 'audio' | 'file';
+    url: string;
+    name: string;
+    size: number;
+    thumbnail?: string;
+}
+
+export interface ChatbotReaction {
+    emoji: string;
+    userIds: string[];
+    count: number;
 }
 
 export interface ChatbotMessage {
@@ -95,7 +111,7 @@ export interface ChatbotMessage {
     conversationId: string;
     senderId: string;
     content: string;
-    type: 'text' | 'system' | 'suggestion';
+    type: 'text' | 'system' | 'suggestion' | 'image' | 'file' | 'link';
     isBotMessage: boolean;
     botConfidence?: number;
     suggestedResponses?: Array<{
@@ -106,6 +122,16 @@ export interface ChatbotMessage {
     userSatisfaction?: number;
     isEdited: boolean;
     isDeleted: boolean;
+    attachments?: ChatbotAttachment[];
+    reactions?: ChatbotReaction[];
+    status?: 'sent' | 'delivered' | 'read';
+    richContent?: {
+        title: string;
+        description: string;
+        imageUrl: string;
+        url: string;
+        metadata: any;
+    };
     createdAt: string;
     updatedAt: string;
 }
@@ -187,12 +213,42 @@ export interface CreateConversationResponse {
 
 export interface SendMessageRequest {
     content: string;
+    attachments?: ChatbotAttachment[];
 }
 
 export interface SendMessageResponse {
     success: boolean;
     data: {
         message: ChatbotMessage;
+    };
+    message: string;
+}
+
+export interface SearchMessagesResponse {
+    success: boolean;
+    data: {
+        messages: ChatbotMessage[];
+        total: number;
+        page: number;
+        limit: number;
+        query: string;
+    };
+    message: string;
+}
+
+export interface UploadFileResponse {
+    success: boolean;
+    data: {
+        attachment: ChatbotAttachment;
+    };
+    message: string;
+}
+
+export interface ExportConversationResponse {
+    success: boolean;
+    data: {
+        conversation: ChatbotConversation;
+        messages: ChatbotMessage[];
     };
     message: string;
 }
@@ -211,6 +267,14 @@ export interface CreateVendorAdminConversationResponse {
     data: {
         conversation: ChatbotConversation;
         isNew: boolean;
+    };
+    message: string;
+}
+
+export interface AddReactionResponse {
+    success: boolean;
+    data: {
+        message: ChatbotMessage;
     };
     message: string;
 }
@@ -351,6 +415,35 @@ export const getMessages = async (conversationId: string, options: {
 };
 
 /**
+ * Upload file for chatbot message
+ */
+export const uploadFile = async (
+    conversationId: string,
+    file: File
+): Promise<UploadFileResponse> => {
+    try {
+        // Validate conversation ID
+        if (!isValidObjectId(conversationId)) {
+            throw { success: false, error: 'Invalid conversation ID' };
+        }
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await chatbotApi.post(`/conversations/${conversationId}/messages/upload`, formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data',
+            },
+        });
+        
+        return response.data;
+    } catch (error: any) {
+        console.error('Upload chatbot file error:', error);
+        throw error.response?.data || { success: false, error: 'Failed to upload file' };
+    }
+};
+
+/**
  * Send message in chatbot conversation
  */
 export const sendMessage = async (
@@ -437,6 +530,65 @@ export const replyToMessage = async (
 };
 
 /**
+ * Search messages within a chatbot conversation
+ */
+export const searchMessages = async (
+    conversationId: string,
+    query: string,
+    options: {
+        limit?: number;
+        page?: number;
+    } = {}
+): Promise<SearchMessagesResponse> => {
+    try {
+        // Validate conversation ID
+        if (!isValidObjectId(conversationId)) {
+            throw { success: false, error: 'Invalid conversation ID' };
+        }
+
+        // Validate search query
+        if (!query || query.trim().length === 0) {
+            throw { success: false, error: 'Search query is required' };
+        }
+
+        const params = new URLSearchParams();
+        params.append('q', query);
+        if (options.limit) params.append('limit', options.limit.toString());
+        if (options.page) params.append('page', options.page.toString());
+
+        const response = await chatbotApi.get(`/conversations/${conversationId}/search?${params.toString()}`);
+        return response.data;
+    } catch (error: any) {
+        console.error('Search chatbot messages error:', error);
+        throw error.response?.data || { success: false, error: 'Failed to search messages' };
+    }
+};
+
+/**
+ * Export conversation history
+ */
+export const exportConversation = async (
+    conversationId: string,
+    format: 'json' | 'csv' = 'json'
+): Promise<any> => {
+    try {
+        // Validate conversation ID
+        if (!isValidObjectId(conversationId)) {
+            throw { success: false, error: 'Invalid conversation ID' };
+        }
+
+        const response = await chatbotApi.get(`/conversations/${conversationId}/export?format=${format}`, {
+            responseType: format === 'json' ? 'json' : 'blob'
+        });
+        
+        return response.data;
+    } catch (error: any) {
+        console.error('Export conversation error:', error);
+        throw error.response?.data || { success: false, error: 'Failed to export conversation' };
+    }
+};
+
+/**
  * Mark chatbot conversation as resolved
  */
 export const resolveConversation = async (conversationId: string): Promise<{ success: boolean; data: { conversation: ChatbotConversation }; message: string }> => {
@@ -494,10 +646,25 @@ export const getVendorAdminConversation = async (): Promise<GetVendorAdminConver
         // Return a structured error response instead of throwing
         if (error.response) {
             // Server responded with error status
+            const errorMessage = error.response.data?.message || `Server error: ${error.response.status}`;
+            // Provide more specific error messages based on status code
+            if (error.response.status === 403) {
+                return {
+                    success: false,
+                    data: { conversation: null },
+                    message: 'Access denied. Only vendors can access this feature.'
+                };
+            } else if (error.response.status === 400) {
+                return {
+                    success: false,
+                    data: { conversation: null },
+                    message: 'Invalid request. Please try refreshing the page.'
+                };
+            }
             return {
                 success: false,
                 data: { conversation: null },
-                message: error.response.data?.message || `Server error: ${error.response.status}`
+                message: errorMessage
             };
         } else if (error.request) {
             // Request was made but no response received
@@ -539,10 +706,25 @@ export const createVendorAdminConversation = async (): Promise<CreateVendorAdmin
         // Return a structured error response instead of throwing
         if (error.response) {
             // Server responded with error status
+            const errorMessage = error.response.data?.message || `Server error: ${error.response.status}`;
+            // Provide more specific error messages based on status code
+            if (error.response.status === 403) {
+                return {
+                    success: false,
+                    data: { conversation: null as any, isNew: false },
+                    message: 'Access denied. Only vendors can access this feature.'
+                };
+            } else if (error.response.status === 400) {
+                return {
+                    success: false,
+                    data: { conversation: null as any, isNew: false },
+                    message: 'Invalid request. Please try refreshing the page.'
+                };
+            }
             return {
                 success: false,
                 data: { conversation: null as any, isNew: false },
-                message: error.response.data?.message || `Server error: ${error.response.status}`
+                message: errorMessage
             };
         } else if (error.request) {
             // Request was made but no response received
@@ -562,6 +744,69 @@ export const createVendorAdminConversation = async (): Promise<CreateVendorAdmin
     }
 };
 
+/**
+ * Add reaction to a chatbot message
+ */
+export const addReaction = async (
+    messageId: string,
+    emoji: string
+): Promise<AddReactionResponse> => {
+    try {
+        // Validate message ID
+        if (!isValidObjectId(messageId)) {
+            throw { success: false, error: 'Invalid message ID' };
+        }
+
+        const response = await chatbotApi.post(`/messages/${messageId}/reactions`, { emoji });
+        return response.data;
+    } catch (error: any) {
+        console.error('Add reaction error:', error);
+        throw error.response?.data || { success: false, error: 'Failed to add reaction' };
+    }
+};
+
+/**
+ * Pin/unpin a conversation
+ */
+export const pinConversation = async (
+    conversationId: string,
+    isPinned: boolean
+): Promise<{ success: boolean; data: { conversation: ChatbotConversation }; message: string }> => {
+    try {
+        // Validate conversation ID
+        if (!isValidObjectId(conversationId)) {
+            throw { success: false, error: 'Invalid conversation ID' };
+        }
+        
+        const response = await chatbotApi.put(`/conversations/${conversationId}/pin`, { isPinned });
+        return response.data;
+    } catch (error: any) {
+        console.error('Pin conversation error:', error);
+        throw error.response?.data || { success: false, error: 'Failed to update conversation pin status' };
+    }
+};
+
+/**
+ * Mute/unmute a conversation
+ */
+export const muteConversation = async (
+    conversationId: string,
+    isMuted: boolean
+): Promise<{ success: boolean; data: { conversation: ChatbotConversation }; message: string }> => {
+    try {
+        // Validate conversation ID
+        if (!isValidObjectId(conversationId)) {
+            throw { success: false, error: 'Invalid conversation ID' };
+        }
+        
+        const response = await chatbotApi.put(`/conversations/${conversationId}/mute`, { isMuted });
+        return response.data;
+    } catch (error: any) {
+        console.error('Mute conversation error:', error);
+        throw error.response?.data || { success: false, error: 'Failed to update conversation mute status' };
+    }
+};
+
 export default {
     getConversations,
     searchVendors,
@@ -569,12 +814,34 @@ export default {
     createConversation,
     getConversation,
     getMessages,
+    uploadFile,
     sendMessage,
     editMessage,
     deleteMessage,
     replyToMessage,
+    searchMessages,
+    addReaction,
+    exportConversation,
     resolveConversation,
     closeConversation,
     getVendorAdminConversation,
     createVendorAdminConversation,
+    pinConversation,
+    muteConversation,
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

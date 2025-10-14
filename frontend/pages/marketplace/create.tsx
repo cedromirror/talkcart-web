@@ -29,6 +29,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
 import { toast } from 'react-hot-toast';
 import { isAddress, getAddress } from 'ethers';
+import { validateMediaFile, formatFileSize } from '@/utils/mediaValidation';
 
 // Categories will be loaded from API
 
@@ -148,16 +149,18 @@ const CreateProductPage: React.FC = () => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
 
-    // Validate file types and sizes
+    // Validate file types and sizes using our utility
     const validFiles = files.filter(file => {
-      if (!file.type.startsWith('image/')) {
-        toast.error(`${file.name} is not an image file`);
+      const validation = validateMediaFile(file, {
+        maxSize: 5, // 5MB limit for product images
+        allowedTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+      });
+      
+      if (!validation.valid) {
+        toast.error(`${file.name}: ${validation.error} - ${validation.details || ''}`);
         return false;
       }
-      if (file.size > 5 * 1024 * 1024) { // 5MB
-        toast.error(`${file.name} is too large (max 5MB)`);
-        return false;
-      }
+      
       return true;
     });
 

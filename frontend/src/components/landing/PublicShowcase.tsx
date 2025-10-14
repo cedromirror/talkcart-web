@@ -22,8 +22,8 @@ import {
   Share2,
   ArrowRight,
   Sparkles,
+  Globe
 } from 'lucide-react';
-import { PublicFeed } from '../social/PublicFeed';
 import Link from 'next/link';
 
 interface PublicShowcaseProps {
@@ -191,12 +191,12 @@ export const PublicShowcase: React.FC<PublicShowcaseProps> = ({
         </Box>
 
         {/* Public Feed */}
-        <PublicFeed
+        {/* <PublicFeed
           showHeader={false}
           maxPosts={10}
           contentFilter="all"
           sortBy="recent"
-        />
+        /> */}
 
         {/* Call to Action */}
         <Paper

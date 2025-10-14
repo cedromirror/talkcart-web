@@ -26,6 +26,26 @@ router.post('/upload', authenticateToken, (req, res) => {
     try {
       if (err) {
         console.error('Multer error:', err);
+        
+        // Handle specific multer errors
+        if (err instanceof multer.MulterError) {
+          if (err.code === 'LIMIT_FILE_SIZE') {
+            return res.status(413).json({
+              success: false,
+              error: 'File too large',
+              details: `File size exceeds the limit of ${process.env.UPLOAD_MAX_FILE_SIZE_MB || '200'}MB`
+            });
+          }
+          
+          if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+            return res.status(400).json({
+              success: false,
+              error: 'Unexpected file field',
+              details: 'Please check the file upload field name'
+            });
+          }
+        }
+        
         return res.status(500).json({
           success: false,
           error: 'File upload failed',
@@ -69,7 +89,8 @@ router.post('/upload', authenticateToken, (req, res) => {
         bytes: req.file.bytes || req.file.size
       });
 
-      const fileData = {
+      // Enhanced file data with better validation
+      let fileData = {
         public_id,
         secure_url,
         url,
@@ -81,6 +102,26 @@ router.post('/upload', authenticateToken, (req, res) => {
         duration: req.file.duration,
         created_at: req.file.created_at || new Date().toISOString(),
       };
+
+      // Additional validation for video files
+      if (resource_type === 'video') {
+        // Ensure we have a proper URL for videos
+        if (!secure_url || !secure_url.includes('cloudinary.com')) {
+          // If using local storage, ensure proper URL format
+          if (!config.cloudinary.enabled) {
+            const baseUrl = `${req.protocol}://${req.get('host')}`;
+            fileData.secure_url = `${baseUrl}/uploads/talkcart/${req.file.filename}`;
+            fileData.url = `${baseUrl}/uploads/talkcart/${req.file.filename}`;
+          }
+        }
+        
+        // Log video-specific information
+        console.log('Video metadata:', {
+          duration: fileData.duration,
+          format: fileData.format,
+          dimensions: `${fileData.width}x${fileData.height}`
+        });
+      }
 
       console.log('Sending response:', fileData);
       // Return wrapped response for frontend compatibility
@@ -127,60 +168,44 @@ router.post('/upload/single', authenticateToken, (req, res) => {
     }
   });
 
-  req.on('aborted', () => {
-    console.error('Request aborted');
-    if (!res.headersSent) {
-      res.status(400).json({
-        success: false,
-        error: 'Request aborted',
-        details: 'Upload was cancelled'
-      });
-    }
-  });
-
-  const upload = uploadSingle('file');
-
-  upload(req, res, async (err) => {
+  uploadSingle('file')(req, res, async (err) => {
     try {
       if (err) {
-        console.error('Multer error details:', {
-          message: err.message,
-          code: err.code,
-          field: err.field,
-          storageErrors: err.storageErrors,
-          stack: err.stack
-        });
-
+        console.error('Multer error:', err);
+        
         // Handle specific multer errors
-        if (err.code === 'LIMIT_FILE_SIZE') {
-          return res.status(413).json({
-            success: false,
-            error: 'File too large',
-            details: `File size exceeds limit. Max ${(process.env.UPLOAD_MAX_FILE_SIZE_MB || 200)}MB`,
-          });
+        if (err instanceof multer.MulterError) {
+          if (err.code === 'LIMIT_FILE_SIZE') {
+            return res.status(413).json({
+              success: false,
+              error: 'File too large',
+              details: `File size exceeds the limit of ${process.env.UPLOAD_MAX_FILE_SIZE_MB || '200'}MB`
+            });
+          }
+          
+          if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+            return res.status(400).json({
+              success: false,
+              error: 'Unexpected file field',
+              details: 'Please check the file upload field name'
+            });
+          }
+          
+          if (err.code === 'LIMIT_FIELD_COUNT') {
+            return res.status(400).json({
+              success: false,
+              error: 'Too many fields',
+              details: 'Form has too many fields'
+            });
+          }
         }
-
-        if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+        
+        // Handle file type errors
+        if (err.message && err.message.includes('not allowed')) {
           return res.status(400).json({
             success: false,
-            error: 'Unexpected file field',
-            details: 'Expected field name: file',
-          });
-        }
-
-        if (err.message && err.message.includes('Unexpected end of form')) {
-          return res.status(400).json({
-            success: false,
-            error: 'Form data corrupted',
-            details: 'The uploaded file data was incomplete or corrupted. Please try again.',
-          });
-        }
-
-        if (err.message && err.message.includes('Multipart')) {
-          return res.status(400).json({
-            success: false,
-            error: 'Invalid multipart data',
-            details: 'The file upload format is invalid. Please try again.',
+            error: 'Invalid file type',
+            details: err.message
           });
         }
 
@@ -203,7 +228,7 @@ router.post('/upload/single', authenticateToken, (req, res) => {
         });
       }
 
-      console.log('File uploaded successfully to Cloudinary');
+      console.log('File uploaded successfully');
 
       // Handle both Cloudinary and local storage responses
       let fileData;
@@ -236,10 +261,15 @@ router.post('/upload/single', authenticateToken, (req, res) => {
         } else {
           // Local storage response (fallback)
           const filename = req.file.filename || req.file.originalname;
+          // Use the backend origin for CORS compliance
+          const backendOrigin = process.env.NODE_ENV === 'production' 
+            ? 'https://talkcart.app' 
+            : 'http://localhost:8000';
+          const filePath = `/uploads/${filename}`;
           fileData = {
             public_id: filename,
-            secure_url: `${req.protocol}://${req.get('host')}/uploads/${filename}`,
-            url: `${req.protocol}://${req.get('host')}/uploads/${filename}`,
+            secure_url: `${backendOrigin}${filePath}`,
+            url: `${backendOrigin}${filePath}`,
             format: req.file.originalname?.split('.').pop()?.toLowerCase() || 'unknown',
             resource_type: req.file.mimetype?.startsWith('image/') ? 'image' :
                           req.file.mimetype?.startsWith('video/') ? 'video' :
@@ -357,7 +387,7 @@ router.post('/upload/profile-picture', authenticateToken, (req, res) => {
         });
       }
 
-      console.log('Profile picture uploaded successfully to Cloudinary');
+      console.log('Profile picture uploaded successfully');
 
       // Handle both Cloudinary and local storage responses
       let fileData;
@@ -385,10 +415,15 @@ router.post('/upload/profile-picture', authenticateToken, (req, res) => {
         } else {
           // Local storage response (fallback)
           const filename = req.file.filename || req.file.originalname;
+          // Use the backend origin for CORS compliance
+          const backendOrigin = process.env.NODE_ENV === 'production' 
+            ? 'https://talkcart.app' 
+            : 'http://localhost:8000';
+          const filePath = `/uploads/${filename}`;
           fileData = {
             public_id: filename,
-            secure_url: `${req.protocol}://${req.get('host')}/uploads/${filename}`,
-            url: `${req.protocol}://${req.get('host')}/uploads/${filename}`,
+            secure_url: `${backendOrigin}${filePath}`,
+            url: `${backendOrigin}${filePath}`,
             format: req.file.originalname?.split('.').pop()?.toLowerCase() || 'unknown',
             resource_type: 'image',
             bytes: req.file.size,

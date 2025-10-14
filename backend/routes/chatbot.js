@@ -2,7 +2,9 @@ const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 const { authenticateToken, authenticateTokenStrict } = require('./auth');
+const { uploadSingle } = require('../config/cloudinary');
 const { ChatbotConversation, ChatbotMessage, Product, User, Order } = require('../models');
+const NotificationService = require('../services/notificationService');
 const { asyncHandler, sendSuccess, sendError } = require('../middleware/errorHandler');
 
 // Health check endpoint
@@ -449,6 +451,16 @@ router.get('/conversations/:id/messages', authenticateTokenStrict, async (req, r
     // Get total count
     const total = await ChatbotMessage.countDocuments(query);
 
+    // Join the user to the conversation room for real-time updates
+    const io = req.app.get('io');
+    if (io) {
+      // Join the chatbot conversation room
+      io.to(`chatbot_conversation_${id}`).emit('chatbot:user-joined', {
+        conversationId: id,
+        userId: userId
+      });
+    }
+
     return sendSuccess(res, {
       messages: messages.reverse(), // Reverse to show oldest first
       pagination: {
@@ -464,18 +476,76 @@ router.get('/conversations/:id/messages', authenticateTokenStrict, async (req, r
   }
 });
 
+// Add this new route for file uploads in chatbot conversations
+// @route   POST /api/chatbot/conversations/:id/messages/upload
+// @desc    Upload file attachment for chatbot message
+// @access  Private
+router.post('/conversations/:id/messages/upload', authenticateTokenStrict, uploadSingle('file'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+
+    // Validate conversation ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, 'Invalid conversation ID', 400);
+    }
+
+    // Check if user is participant in conversation
+    const conversation = await ChatbotConversation.findOne({
+      _id: id,
+      $or: [
+        { customerId: userId },
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
+      ],
+      isActive: true
+    });
+
+    if (!conversation) {
+      return sendError(res, 'Conversation not found or access denied', 404);
+    }
+
+    // Check if file was uploaded
+    if (!req.file) {
+      return sendError(res, 'No file uploaded', 400);
+    }
+
+    // Process uploaded file
+    const attachment = {
+      type: req.file.mimetype.startsWith('image/') ? 'image' :
+           req.file.mimetype.startsWith('video/') ? 'video' :
+           req.file.mimetype.startsWith('audio/') ? 'audio' : 'file',
+      url: req.file.secure_url || req.file.path,
+      name: req.file.originalname,
+      size: req.file.size,
+      thumbnail: req.file.mimetype.startsWith('image/') || req.file.mimetype.startsWith('video/') 
+        ? req.file.secure_url.replace('/upload/', '/upload/c_thumb,w_200,h_200,g_face/') 
+        : null
+    };
+
+    // Return the attachment data for frontend to use in message
+    return sendSuccess(res, {
+      attachment
+    }, 'File uploaded successfully');
+  } catch (error) {
+    console.error('Chatbot file upload error:', error);
+    return sendError(res, 'Failed to upload file', 500, error.message);
+  }
+});
+
+// Modify the existing sendMessage route to handle attachments
 // @route   POST /api/chatbot/conversations/:id/messages
 // @desc    Send message in chatbot conversation
 // @access  Private
 router.post('/conversations/:id/messages', authenticateTokenStrict, async (req, res) => {
   try {
     const { id } = req.params;
-    const { content } = req.body;
+    const { content, attachments } = req.body; // Add attachments to destructuring
     const userId = req.user.userId;
 
-    // Validation
-    if (!content || content.trim().length === 0) {
-      return sendError(res, 'Message content is required', 400);
+    // Validation - content or attachments required
+    if ((!content || content.trim().length === 0) && (!attachments || attachments.length === 0)) {
+      return sendError(res, 'Message content or attachment is required', 400);
     }
 
     // Validate conversation ID
@@ -516,8 +586,10 @@ router.post('/conversations/:id/messages', authenticateTokenStrict, async (req, 
     const newMessage = new ChatbotMessage({
       conversationId: id,
       senderId: userId,
-      content: content.trim(),
-      isBotMessage: false
+      content: content ? content.trim() : '',
+      isBotMessage: false,
+      // Add attachments if provided
+      attachments: attachments || []
     });
 
     await newMessage.save();
@@ -530,6 +602,41 @@ router.post('/conversations/:id/messages', authenticateTokenStrict, async (req, 
     // Populate sender data (only if senderId is not 'admin')
     if (newMessage.senderId !== 'admin') {
       await newMessage.populate('senderId', 'username displayName avatar isVerified');
+    }
+
+    // Send notification to other participants
+    try {
+      // Determine recipient based on message sender
+      let recipientId;
+      if (isCustomer) {
+        // Customer message - notify vendor or admin
+        recipientId = conversation.vendorId.toString() === userId ? 'admin' : conversation.vendorId;
+      } else if (isVendor) {
+        // Vendor message - notify customer or admin
+        recipientId = conversation.customerId === 'admin' ? 'admin' : conversation.customerId;
+      } else if (isAdmin) {
+        // Admin message - notify vendor or customer
+        recipientId = conversation.customerId === 'admin' ? conversation.vendorId : conversation.customerId;
+      }
+
+      // Only send notification if recipient is different from sender
+      if (recipientId && recipientId !== userId) {
+        // Get sender info for notification
+        const sender = await User.findById(userId).select('username displayName');
+        
+        if (sender) {
+          // Create notification
+          await NotificationService.createMessageNotification(
+            userId, // senderId
+            recipientId, // recipientId
+            id, // conversationId
+            content ? content.trim() : 'sent an attachment' // messageContent
+          );
+        }
+      }
+    } catch (notificationError) {
+      console.error('Failed to send notification:', notificationError);
+      // Don't fail the message send if notification fails
     }
 
     // If this is a customer message and bot is enabled, generate bot response
@@ -573,6 +680,15 @@ router.post('/conversations/:id/messages', authenticateTokenStrict, async (req, 
       }, 1000); // Simulate bot thinking time
     }
 
+    // Emit socket event for real-time updates for all messages
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`chatbot_conversation_${id}`).emit('chatbot:message:new', {
+        conversationId: id,
+        message: newMessage
+      });
+    }
+
     return sendSuccess(res, {
       message: newMessage
     }, 'Message sent successfully');
@@ -581,6 +697,9 @@ router.post('/conversations/:id/messages', authenticateTokenStrict, async (req, 
     return sendError(res, 'Failed to send message', 500, error.message);
   }
 });
+
+
+
 
 // @route   PUT /api/chatbot/conversations/:id/resolve
 // @desc    Mark chatbot conversation as resolved
@@ -931,6 +1050,11 @@ router.get('/conversations/vendor-admin', authenticateTokenStrict, async (req, r
   try {
     const vendorId = req.user.userId;
 
+    // Validate vendorId format
+    if (!vendorId || !mongoose.Types.ObjectId.isValid(vendorId)) {
+      return sendError(res, 'Invalid vendor ID format', 400);
+    }
+
     // Verify that the requesting user is a vendor
     const user = await User.findById(vendorId);
     if (!user || user.role !== 'vendor') {
@@ -975,6 +1099,11 @@ router.get('/conversations/vendor-admin', authenticateTokenStrict, async (req, r
 router.post('/conversations/vendor-admin', authenticateTokenStrict, async (req, res) => {
   try {
     const vendorId = req.user.userId;
+
+    // Validate vendorId format
+    if (!vendorId || !mongoose.Types.ObjectId.isValid(vendorId)) {
+      return sendError(res, 'Invalid vendor ID format', 400);
+    }
 
     // Verify that the requesting user is a vendor
     const vendor = await User.findById(vendorId);
@@ -1084,6 +1213,8 @@ router.put('/conversations/:id/pin', authenticateTokenStrict, async (req, res) =
       ],
       isActive: true
     });
+
+
 
     if (!conversation) {
       return sendError(res, 'Conversation not found or access denied', 404);
@@ -1765,6 +1896,89 @@ router.get('/stats', authenticateTokenStrict, async (req, res) => {
   }
 });
 
+// @route   POST /api/chatbot/messages/:id/forward
+// @desc    Forward message to another conversation
+// @access  Private
+router.post('/messages/:id/forward', authenticateTokenStrict, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+    const { conversationId } = req.body;
+
+    // Validate message ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, 'Invalid message ID', 400);
+    }
+
+    // Validate target conversation ID
+    if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+      return sendError(res, 'Invalid target conversation ID', 400);
+    }
+
+    // Find the original message
+    const originalMessage = await ChatbotMessage.findById(id);
+    if (!originalMessage) {
+      return sendError(res, 'Message not found', 404);
+    }
+
+    // Find the original conversation to verify user access
+    const originalConversation = await ChatbotConversation.findOne({
+      _id: originalMessage.conversationId,
+      $or: [
+        { customerId: userId },
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
+      ],
+      isActive: true
+    });
+
+    if (!originalConversation) {
+      return sendError(res, 'Access denied to original message', 403);
+    }
+
+    // Find the target conversation
+    const targetConversation = await ChatbotConversation.findOne({
+      _id: conversationId,
+      $or: [
+        { customerId: userId },
+        { vendorId: userId },
+        { customerId: 'admin' } // Allow admin conversations
+      ],
+      isActive: true
+    });
+
+    if (!targetConversation) {
+      return sendError(res, 'Access denied to target conversation', 403);
+    }
+
+    // Create forwarded message
+    const forwardedMessage = new ChatbotMessage({
+      conversationId: targetConversation._id,
+      senderId: userId,
+      content: originalMessage.content,
+      type: originalMessage.type,
+      isForwarded: true,
+      forwardedFrom: originalMessage._id,
+      richContent: originalMessage.richContent,
+      attachments: originalMessage.attachments
+    });
+
+    await forwardedMessage.save();
+
+    // Update target conversation's last message and activity
+    targetConversation.lastMessage = forwardedMessage._id;
+    targetConversation.lastActivity = new Date();
+    await targetConversation.save();
+
+    return sendSuccess(res, {
+      message: forwardedMessage
+    }, 'Message forwarded successfully');
+  } catch (error) {
+    console.error('Forward message error:', error);
+    return sendError(res, 'Failed to forward message', 500, error.message);
+  }
+});
+
 // @route   PUT /api/chatbot/conversations/:id/pin
 // @desc    Pin/unpin a conversation
 // @access  Private
@@ -1851,57 +2065,8 @@ router.put('/conversations/:id/mute', authenticateTokenStrict, async (req, res) 
   }
 });
 
-// @route   PUT /api/chatbot/conversations/:id/priority
-// @desc    Set conversation priority
-// @access  Private (Admin/Vendor only)
-router.put('/conversations/:id/priority', authenticateTokenStrict, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const userId = req.user.userId;
-    const { priority } = req.body;
+module.exports = router;
 
-    // Validate conversation ID
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return sendError(res, 'Invalid conversation ID', 400);
-    }
-
-    // Validate priority
-    const validPriorities = ['low', 'normal', 'high', 'urgent'];
-    if (!validPriorities.includes(priority)) {
-      return sendError(res, 'Invalid priority level', 400);
-    }
-
-    // Find the conversation and ensure the requesting user is participant
-    const conversation = await ChatbotConversation.findOne({
-      _id: id,
-      $or: [
-        { customerId: userId },
-        { vendorId: userId },
-        { customerId: 'admin' } // Allow admin conversations
-      ],
-      isActive: true
-    });
-
-    if (!conversation) {
-      return sendError(res, 'Conversation not found or access denied', 404);
-    }
-
-    // Update priority
-    conversation.priority = priority;
-    conversation.lastActivity = new Date();
-    await conversation.save();
-
-    return sendSuccess(res, {
-      conversation
-    }, `Conversation priority set to ${priority}`);
-  } catch (error) {
-    console.error('Set conversation priority error:', error);
-    return sendError(res, 'Failed to set conversation priority', 500, error.message);
-  }
-});
-
-// @route   PUT /api/chatbot/conversations/:id/theme
-// @desc    Set conversation theme
 // @access  Private
 router.put('/conversations/:id/theme', authenticateTokenStrict, async (req, res) => {
   try {

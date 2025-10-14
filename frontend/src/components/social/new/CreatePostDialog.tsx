@@ -25,11 +25,13 @@ import {
 import { X, ImageIcon, Video, Type, Hash, AtSign, Music, Play, Globe2, UserCheck, Lock } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '@/lib/api';
+import { Post } from '@/types/social';
+import { validateMediaFile } from '@/utils/mediaValidation';
 
 interface CreatePostDialogProps {
   open: boolean;
   onClose: () => void;
-  onPostCreated?: () => void;
+  onPostCreated?: (post: Post) => void;
 }
 
 export const CreatePostDialog: React.FC<CreatePostDialogProps> = ({
@@ -97,7 +99,23 @@ export const CreatePostDialog: React.FC<CreatePostDialogProps> = ({
       if (response?.success) {
         toast.success('Post created successfully!');
         resetForm();
-        onPostCreated?.();
+        // Emit socket event for real-time updates
+        if (typeof window !== 'undefined') {
+          // Emit socket event for real-time updates if available
+          if ((window as any).socket) {
+            (window as any).socket.emit('post:create', {
+              post: response.data.post
+            });
+          }
+          // Dispatch a custom event that feeds can listen to, to prepend the post immediately
+          try {
+            const event = new CustomEvent('posts:new', { detail: { post: response.data.post } });
+            window.dispatchEvent(event);
+          } catch (e) {
+            // Ignore if CustomEvent is not supported
+          }
+        }
+        onPostCreated?.(response.data.post);
         onClose();
       } else {
         throw new Error(response?.message || 'Failed to create post');
@@ -124,11 +142,10 @@ export const CreatePostDialog: React.FC<CreatePostDialogProps> = ({
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      // Validate file size (50MB limit for videos, 10MB for images)
-      const maxSize = file.type.startsWith('video/') ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
-      if (file.size > maxSize) {
-        const maxSizeMB = maxSize / (1024 * 1024);
-        toast.error(`${file.type.startsWith('video/') ? 'Video' : 'Image'} size should be less than ${maxSizeMB}MB`);
+      // Validate file using our utility
+      const validation = validateMediaFile(file);
+      if (!validation.valid) {
+        toast.error(`${validation.error} - ${validation.details || ''}`);
         return;
       }
       

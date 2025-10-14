@@ -201,7 +201,32 @@ class ApiService {
   // Unified request method with auto-refresh on 401
   private async request<T>(url: string, init: RequestInit = {}, timeout: number = TIMEOUTS.API_REQUEST): Promise<T> {
     console.log(`API Request: ${init.method || 'GET'} ${url}`);
-    const response = await this.fetchWithTimeout(url, init, timeout);
+    const method = (init.method || 'GET').toUpperCase();
+    let response: Response;
+    let attempt = 0;
+    const maxRetries = method === 'GET' ? 2 : 0; // retry GETs only
+    let currentTimeout = timeout;
+    // Simple retry loop for transient network/timeout errors
+    // Attempts: 0 (original), then up to maxRetries with backoff
+    // Backoff: +5s per retry
+    // Do not retry non-timeout HTTP errors
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      try {
+        response = await this.fetchWithTimeout(url, init, currentTimeout);
+        break;
+      } catch (err: any) {
+        const isTimeout = (err?.name === 'AbortError') || (typeof err?.message === 'string' && err.message.toLowerCase().includes('timeout'));
+        const isNetwork = typeof err?.message === 'string' && err.message.toLowerCase().includes('network');
+        if (attempt < maxRetries && (isTimeout || isNetwork)) {
+          attempt += 1;
+          currentTimeout = Math.min(currentTimeout + 5000, TIMEOUTS.API_REQUEST * 2);
+          console.warn(`API transient error (${isTimeout ? 'timeout' : 'network'}), retrying ${attempt}/${maxRetries} in-flight for ${url}`);
+          continue;
+        }
+        throw err;
+      }
+    }
 
     if (response.status === 401) {
       const refreshResult = await this.auth.refreshToken().catch(() => null);
@@ -788,7 +813,7 @@ class ApiService {
 
   // Posts API
   posts = {
-    // Get all posts
+    // Get all posts with filtering options
     getAll: async (params?: {
       feedType?: string;
       limit?: number;
@@ -799,131 +824,140 @@ class ApiService {
       search?: string;
     }) => {
       const queryParams = new URLSearchParams();
-      if (params?.feedType) queryParams.append('feedType', params.feedType);
-      if (params?.limit) queryParams.append('limit', params.limit.toString());
-      if (params?.page) queryParams.append('page', params.page.toString());
-      if (params?.contentType) queryParams.append('contentType', params.contentType);
-      if (params?.authorId) queryParams.append('authorId', params.authorId);
-      if (params?.hashtag) queryParams.append('hashtag', params.hashtag);
-      if (params?.search) queryParams.append('search', params.search);
       
-      const queryString = queryParams.toString();
-      return this.get(`/posts${queryString ? `?${queryString}` : ''}`);
-    },
-
-    // Test health endpoint
-    health: async () => {
-      return this.get('/posts/health');
+      if (params) {
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            queryParams.append(key, value.toString());
+          }
+        });
+      }
+      
+      return this.get(`/posts?${queryParams}`, {}, TIMEOUTS.POSTS_REQUEST);
     },
 
     // Get trending posts
     getTrending: async (params?: {
       limit?: number;
-      timeRange?: 'day' | 'week' | 'month';
+      timeRange?: string;
     }) => {
       const queryParams = new URLSearchParams();
-      queryParams.append('feedType', 'trending');
-      if (params?.limit) queryParams.append('limit', params.limit.toString());
-      if (params?.timeRange) queryParams.append('timeRange', params.timeRange);
       
-      const queryString = queryParams.toString();
-      console.log(`Calling trending endpoint with query: ${queryString}`);
-      return this.get(`/posts${queryString ? `?${queryString}` : ''}`);
+      if (params) {
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            queryParams.append(key, value.toString());
+          }
+        });
+      }
+      
+      return this.get(`/posts/trending?${queryParams}`, {}, TIMEOUTS.POSTS_REQUEST);
     },
 
-    // Get post by ID
-    getById: async (id: string) => {
-      return this.get(`/posts/${id}`);
-    },
-
-    // Create a new post
-    create: async (postData: {
-      content: string;
-      type?: string;
-      media?: any[];
-      hashtags?: string[];
-      mentions?: string[];
-      location?: string;
-      privacy?: string;
-    }) => {
-      return this.post('/posts', postData);
-    },
-
-    // Update a post
-    update: async (id: string, postData: {
-      content?: string;
-      media?: any[];
-      hashtags?: string[];
-      mentions?: string[];
-      location?: string;
-      privacy?: string;
-    }) => {
-      return this.put(`/posts/${id}`, postData);
-    },
-
-    // Delete a post
-    delete: async (id: string) => {
-      return this.delete(`/posts/${id}`);
-    },
-
-    // Like/unlike a post
-    like: async (id: string) => {
-      return this.post(`/posts/${id}/like`);
-    },
-
-    // Bookmark/unbookmark a post
-    bookmark: async (id: string) => {
-      return this.post(`/posts/${id}/bookmark`);
-    },
-
-    // Share a post
-    share: async (id: string, platform: string = 'internal') => {
-      return this.post(`/posts/${id}/share`, { platform });
-    },
-
-    // Get user's posts
-    getUserPosts: async (userId: string, params?: {
+    // Get public posts (no auth required)
+    getPublicPosts: async (params?: {
       limit?: number;
       page?: number;
       contentType?: string;
+      hashtag?: string;
+      search?: string;
+      sortBy?: 'recent' | 'trending' | 'popular';
     }) => {
       const queryParams = new URLSearchParams();
-      if (params?.limit) queryParams.append('limit', params.limit.toString());
-      if (params?.page) queryParams.append('page', params.page.toString());
-      if (params?.contentType) queryParams.append('contentType', params.contentType);
-      
-      const queryString = queryParams.toString();
-      return this.get(`/posts/user/${userId}${queryString ? `?${queryString}` : ''}`);
+      if (params) {
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            queryParams.append(key, value.toString());
+          }
+        });
+      }
+      return this.get(`/posts/public?${queryParams}`, {}, TIMEOUTS.POSTS_REQUEST);
     },
 
-    // Get user's liked posts
-    getLikedPosts: async (userId: string, params?: {
-      limit?: number;
-      page?: number;
-      contentType?: string;
-    }) => {
-      const queryParams = new URLSearchParams();
-      if (params?.limit) queryParams.append('limit', params.limit.toString());
-      if (params?.page) queryParams.append('page', params.page.toString());
-      if (params?.contentType) queryParams.append('contentType', params.contentType);
-      
-      const queryString = queryParams.toString();
-      return this.get(`/posts/user/${userId}/liked${queryString ? `?${queryString}` : ''}`);
-    },
-
-    // Get user's bookmarked posts
+    // Get bookmarked posts for a user
     getBookmarkedPosts: async (userId: string, params?: {
       limit?: number;
       page?: number;
-      contentType?: string;
     }) => {
       const queryParams = new URLSearchParams();
-      if (params?.limit) queryParams.append('limit', params.limit.toString());
-      if (params?.page) queryParams.append('page', params.page.toString());
-      if (params?.contentType) queryParams.append('contentType', params.contentType);
       
-      const queryString = queryParams.toString();
-      return this.get(`/posts/user/${userId}/bookmarks${queryString ? `?${queryString}` : ''}`);
+      if (params) {
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            queryParams.append(key, value.toString());
+          }
+        });
+      }
+      
+      return this.get(`/posts/bookmarks/${userId}?${queryParams}`, {}, TIMEOUTS.POSTS_REQUEST);
+    },
+
+    // Create a new post
+    create: async (postData: any) => {
+      return this.post('/posts', postData, {}, TIMEOUTS.POSTS_REQUEST);
+    },
+
+    // Get a specific post by ID
+    getById: async (postId: string) => {
+      return this.get(`/posts/${postId}`, {}, TIMEOUTS.POSTS_REQUEST);
+    },
+
+    // Update a post
+    update: async (postId: string, postData: any) => {
+      return this.put(`/posts/${postId}`, postData, {}, TIMEOUTS.POSTS_REQUEST);
+    },
+
+    // Delete a post
+    delete: async (postId: string) => {
+      return this.delete(`/posts/${postId}`, {}, TIMEOUTS.POSTS_REQUEST);
+    },
+
+    // Like a post
+    like: async (postId: string) => {
+      return this.post(`/posts/${postId}/like`, {}, {}, TIMEOUTS.POSTS_REQUEST);
+    },
+
+    // Unlike a post
+    unlike: async (postId: string) => {
+      return this.delete(`/posts/${postId}/like`, {}, TIMEOUTS.POSTS_REQUEST);
+    },
+
+    // Bookmark a post
+    bookmark: async (postId: string) => {
+      return this.post(`/posts/${postId}/bookmark`, {}, {}, TIMEOUTS.POSTS_REQUEST);
+    },
+
+    // Remove bookmark from a post
+    unbookmark: async (postId: string) => {
+      return this.delete(`/posts/${postId}/bookmark`, {}, TIMEOUTS.POSTS_REQUEST);
+    },
+
+    // Share a post
+    share: async (postId: string) => {
+      return this.post(`/posts/${postId}/share`, {}, {}, TIMEOUTS.POSTS_REQUEST);
+    },
+
+    // Add a comment to a post
+    addComment: async (postId: string, commentData: any) => {
+      return this.post(`/posts/${postId}/comments`, commentData, {}, TIMEOUTS.POSTS_REQUEST);
+    },
+
+    // Get comments for a post
+    getComments: async (postId: string, params?: {
+      limit?: number;
+      page?: number;
+    }) => {
+      const queryParams = new URLSearchParams();
+      
+      if (params) {
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            queryParams.append(key, value.toString());
+          }
+        });
+      }
+      
+      return this.get(`/posts/${postId}/comments?${queryParams}`, {}, TIMEOUTS.POSTS_REQUEST);
     },
   };
 
@@ -1144,7 +1178,7 @@ class ApiService {
 
         xhr.onload = () => {
           const status = xhr.status;
-          let data: { success?: boolean; message?: string; error?: string; details?: string; responseText?: string } | null = null;
+          let data: { success?: boolean; message?: string; error?: string; details?: string; responseText?: string; data?: any } | null = null;
 
           try {
             const responseText = xhr.responseText || '';
@@ -1177,9 +1211,47 @@ class ApiService {
 
           console.log('Upload response:', { status, data });
 
+          // Enhanced validation of returned data
           if (status >= 200 && status < 300) {
-            if (opts?.onProgress) opts.onProgress(100);
-            resolve(data);
+            if (data && data.success) {
+              // Validate that we have the required media fields
+              const mediaData = data.data;
+              if (mediaData) {
+                if (!mediaData.public_id) {
+                  reject(new Error('Upload successful but missing public_id'));
+                  return;
+                }
+                
+                if (!mediaData.secure_url && !mediaData.url) {
+                  reject(new Error('Upload successful but missing URL'));
+                  return;
+                }
+                
+                // Check for known missing file patterns
+                const url = mediaData.secure_url || mediaData.url;
+                const knownMissingPatterns = [
+                  'file_1760168733155_lfhjq4ik7ht',
+                  'file_1760163879851_tt3fdqqim9',
+                  'file_1760263843073_w13593s5t8l',
+                  'file_1760276276250_3pqeekj048s'
+                ];
+                
+                for (const pattern of knownMissingPatterns) {
+                  if (url && url.includes(pattern)) {
+                    reject(new Error('Upload successful but returned a known missing file reference'));
+                    return;
+                  }
+                }
+              }
+              
+              if (opts?.onProgress) opts.onProgress(100);
+              resolve(data);
+            } else {
+              const errorMsg = (data && (data.message || data.error || data.details)) ||
+                `Upload failed with status ${status}`;
+              console.error('Upload failed:', { status, data, errorMsg });
+              reject(new Error(errorMsg));
+            }
           } else {
             const errorMsg = (data && (data.message || data.error || data.details)) ||
               `Upload failed with status ${status}`;

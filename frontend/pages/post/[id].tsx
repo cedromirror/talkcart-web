@@ -21,6 +21,7 @@ import {
   Share2,
   Bookmark,
   MoreVertical,
+  Video,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
@@ -30,6 +31,9 @@ import UserAvatar from '@/components/common/UserAvatar';
 import PostAuthor from '@/components/common/PostAuthor';
 import CommentSection from '@/components/Comments/CommentSection';
 import toast from 'react-hot-toast';
+import { proxyCloudinaryUrl } from '@/utils/cloudinaryProxy';
+import { convertToProxyUrl } from '@/utils/urlConverter';
+import { debugMediaLoading } from '@/utils/mediaDebugUtils';
 
 const PostDetailPage: React.FC = () => {
   const router = useRouter();
@@ -56,8 +60,8 @@ const PostDetailPage: React.FC = () => {
 
   // Update state when post data changes
   React.useEffect(() => {
-    if (postData?.data) {
-      const post = postData.data;
+    if (postData && typeof postData === 'object' && 'data' in postData) {
+      const post = (postData as any).data;
       setLiked(post.isLiked || false);
       setLikesCount(post.likes || post.likeCount || 0);
     }
@@ -127,24 +131,117 @@ const PostDetailPage: React.FC = () => {
 
     const firstMedia = media[0];
 
+    // Check if the URL is a post detail page URL (which is invalid for media)
+    const mediaUrl = firstMedia.secure_url || firstMedia.url;
+    
+    // Check if this is a known missing file pattern
+    const isKnownMissingFile = mediaUrl && typeof mediaUrl === 'string' && (
+      mediaUrl.includes('file_1760168733155_lfhjq4ik7ht') ||
+      mediaUrl.includes('file_1760163879851_tt3fdqqim9') ||
+      mediaUrl.includes('file_1760263843073_w13593s5t8l') ||
+      mediaUrl.includes('file_1760276276250_3pqeekj048s')
+    );
+    
+    const isPostDetailUrl = mediaUrl && typeof mediaUrl === 'string' && mediaUrl.includes('/post/');
+    
     if (firstMedia.resource_type === 'image') {
+      // If it's a post detail URL or known missing file, show placeholder instead
+      if (isPostDetailUrl || isKnownMissingFile) {
+        return (
+          <Box
+            component="img"
+            src="/images/placeholder-image-new.png"
+            alt="Invalid image URL"
+            sx={{
+              width: '100%',
+              maxHeight: 600,
+              objectFit: 'cover',
+              borderRadius: 1,
+              mb: 2,
+              backgroundColor: 'transparent',
+              display: 'block',
+            }}
+          />
+        );
+      }
+      
+      // Convert URL to use proxy if needed
+      const convertedUrl = convertToProxyUrl(mediaUrl);
+      const imageUrl = proxyCloudinaryUrl(convertedUrl);
+      
       return (
         <Box
           component="img"
-          src={firstMedia.secure_url}
-          alt="Post media"
+          src={imageUrl || '/images/placeholder-image-new.png'}
+          alt="Post image"
           sx={{
             width: '100%',
             maxHeight: 600,
-            objectFit: 'contain',
+            objectFit: 'cover',
             borderRadius: 1,
             mb: 2,
+            backgroundColor: 'transparent',
+            display: 'block',
+          }}
+          onError={(e) => {
+            console.error('Image failed to load, showing placeholder:', {
+              originalUrl: mediaUrl,
+              convertedUrl: convertedUrl,
+              proxiedUrl: imageUrl
+            });
+            const target = e.target as HTMLImageElement;
+            target.src = '/images/placeholder-image-new.png';
+            target.style.display = 'block';
+            target.style.backgroundColor = 'transparent';
+          }}
+          onLoad={(e) => {
+            const target = e.target as HTMLImageElement;
+            target.style.display = 'block';
           }}
         />
       );
     }
 
     if (firstMedia.resource_type === 'video') {
+      // Check if video source exists or if it's a post detail URL or known missing file
+      const isKnownMissingFile = mediaUrl && typeof mediaUrl === 'string' && (
+        mediaUrl.includes('file_1760168733155_lfhjq4ik7ht') ||
+        mediaUrl.includes('file_1760163879851_tt3fdqqim9') ||
+        mediaUrl.includes('file_1760263843073_w13593s5t8l') ||
+        mediaUrl.includes('file_1760276276250_3pqeekj048s')
+      );
+      
+      if (!mediaUrl || isPostDetailUrl || isKnownMissingFile) {
+        return (
+          <Box sx={{ 
+            width: '100%',
+            maxHeight: 600,
+            minHeight: 300,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            bgcolor: 'rgba(0, 0, 0, 0.05)',
+            borderRadius: 1,
+            mb: 2,
+          }}>
+            <Box sx={{ mb: 2, color: 'text.secondary' }}>
+              <Video size={48} />
+            </Box>
+            <Typography variant="h6" sx={{ mb: 1, color: 'text.secondary' }}>
+              Video Not Available
+            </Typography>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+              {!mediaUrl ? 'The video source is missing or unavailable' : 'Invalid video URL detected'}
+            </Typography>
+          </Box>
+        );
+      }
+      
+      // Convert URL to use proxy if needed
+      const convertedUrl = convertToProxyUrl(mediaUrl);
+      const proxiedUrl = proxyCloudinaryUrl(convertedUrl);
+      
       return (
         <Box
           component="video"
@@ -155,18 +252,50 @@ const PostDetailPage: React.FC = () => {
             borderRadius: 1,
             mb: 2,
           }}
+          onError={(e) => {
+            // Handle video loading error by showing error message
+            console.error('Video failed to load:', e);
+            const target = e.target as HTMLVideoElement;
+            const parent = target.parentElement;
+            if (parent) {
+              parent.innerHTML = `
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 300px; background: #000; color: white; text-align: center; padding: 20px; border-radius: 8px;">
+                  <div style="font-size: 48px; margin-bottom: 16px;">🎥</div>
+                  <div style="font-size: 18px; margin-bottom: 8px;">Video not available</div>
+                  <div style="font-size: 14px; opacity: 0.8;">The video file could not be found</div>
+                </div>
+              `;
+            }
+          }}
         >
-          <source src={firstMedia.secure_url} type="video/mp4" />
+          <source src={proxiedUrl} type="video/mp4" />
           Your browser does not support the video tag.
         </Box>
       );
     }
 
     if (firstMedia.resource_type === 'audio') {
+      // Check if audio source exists or if it's a post detail URL or known missing file
+      const isKnownMissingFile = mediaUrl && typeof mediaUrl === 'string' && (
+        mediaUrl.includes('file_1760168733155_lfhjq4ik7ht') ||
+        mediaUrl.includes('file_1760163879851_tt3fdqqim9') ||
+        mediaUrl.includes('file_1760263843073_w13593s5t8l') ||
+        mediaUrl.includes('file_1760276276250_3pqeekj048s')
+      );
+      
+      if (!mediaUrl || isPostDetailUrl || isKnownMissingFile) {
+        console.warn('Post detail URL or known missing file detected for audio, hiding element:', mediaUrl);
+        return null; // Don't render anything for known missing files
+      }
+      
+      // Convert URL to use proxy if needed
+      const convertedUrl = convertToProxyUrl(mediaUrl);
+      const proxiedUrl = proxyCloudinaryUrl(convertedUrl);
+      
       return (
         <Box sx={{ p: 2, bgcolor: 'grey.100', borderRadius: 1, mb: 2 }}>
           <audio controls style={{ width: '100%' }}>
-            <source src={firstMedia.secure_url} type={`audio/${firstMedia.format}`} />
+            <source src={proxiedUrl} type={`audio/${firstMedia.format}`} />
             Your browser does not support the audio tag.
           </audio>
         </Box>
@@ -221,7 +350,7 @@ const PostDetailPage: React.FC = () => {
     );
   }
 
-  const post = postData?.data;
+  const post = postData && typeof postData === 'object' && 'data' in postData ? (postData as any).data : null;
   if (!post) {
     return (
       <Container maxWidth="md" sx={{ py: 4 }}>

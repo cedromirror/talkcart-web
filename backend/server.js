@@ -12,6 +12,7 @@ const dotenv = require('dotenv');
 const dotenvResult = dotenv.config({ path: path.resolve(__dirname, '.env') });
 
 const connectDB = require('./config/database');
+const config = require('./config/config');
 const cron = require('node-cron');
 const jwt = require('jsonwebtoken');
 const { User } = require('./models');
@@ -20,9 +21,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: process.env.NODE_ENV === 'production'
-      ? ['https://talkcart.app', 'https://www.talkcart.app']
-      : ['http://localhost:3000', 'http://localhost:4000', 'http://localhost:4100', 'http://localhost:8000'],
+    origin: config.security.cors.origin,
     credentials: true,
   }
 });
@@ -39,44 +38,47 @@ io.use(async (socket, next) => {
     let token = typeof rawToken === 'string' ? rawToken : '';
     if (token.startsWith('Bearer ')) token = token.slice(7).trim();
 
-    console.log('🔍 Socket connection attempt:', {
-      socketId: socket.id,
-      hasToken: !!token,
-      tokenPreview: token ? `${token.substring(0, 20)}...` : 'none'
-    });
+    // Socket connection attempt logged for debugging
 
     if (!token) {
-      console.log('🔓 Anonymous socket connection allowed');
       // Allow anonymous connections for public features like comment updates
       socket.userId = 'anonymous-user';
       socket.user = { username: 'anonymous', isAnonymous: true };
       return next();
     }
 
-    // Verify JWT token using the same fallback secret as auth routes
-    const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
-    console.log('🔐 Verifying JWT token...');
+    // Verify JWT token using configuration
+    const JWT_SECRET = config.jwt.secret;
     const decoded = jwt.verify(token, JWT_SECRET, { ignoreExpiration: true });
-    console.log('✅ JWT token decoded:', { userId: decoded.userId, exp: decoded.exp });
 
     // Check if user exists and is active
     const user = await User.findById(decoded.userId).select('_id username email isActive');
 
     if (!user) {
-      console.log('❌ Socket connection rejected: User not found');
       return next(new Error('Authentication failed: User not found'));
     }
 
     if (!user.isActive) {
-      console.log('❌ Socket connection rejected: User account inactive');
       return next(new Error('Authentication failed: Account inactive'));
     }
 
     // Attach user info to socket
     socket.userId = user._id.toString();
     socket.user = user;
-
-    console.log(`✅ Socket authenticated for user: ${user.username} (${user._id})`);
+    
+    // Register authenticated socket with SocketService
+    const socketService = require('./services/socketService');
+    if (typeof socketService.getInstance === 'function') {
+      socketService.getInstance().registerAuthenticatedSocket(socket);
+    } else {
+      // If it's a class-based service
+      const app = require('./server');
+      const service = app.get('socketService');
+      if (service && typeof service.registerAuthenticatedSocket === 'function') {
+        service.registerAuthenticatedSocket(socket);
+      }
+    }
+    
     next();
   } catch (error) {
     console.error('❌ Socket authentication error:', {
@@ -85,8 +87,7 @@ io.use(async (socket, next) => {
       stack: (error.stack || '').split('\n')[0]
     });
     // Fall back to anonymous connection instead of hard failing in dev
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('🔓 Falling back to anonymous socket in development');
+    if (config.server.isDevelopment) {
       socket.userId = 'anonymous-user';
       socket.user = { username: 'anonymous', isAnonymous: true };
       return next();
@@ -94,45 +95,51 @@ io.use(async (socket, next) => {
     next(new Error('Authentication failed'));
   }
 });
-const PORT = process.env.PORT || 8000;
+const PORT = config.server.port;
 
-// Security middleware
-app.use(helmet());
+// Comprehensive security middleware
+const { 
+  securityHeaders, 
+  corsOptions, 
+  requestSizeLimiter, 
+  ipFilter, 
+  userAgentFilter, 
+  requestTimingProtection, 
+  sqlInjectionProtection, 
+  xssProtection, 
+  apiSecurityHeaders 
+} = require('./middleware/security');
+
+// Apply security headers
+if (config.security.headers.enabled) {
+  app.use(securityHeaders);
+}
+
+// Apply security middleware
+app.use(requestSizeLimiter);
+app.use(ipFilter);
+app.use(userAgentFilter);
+app.use(requestTimingProtection);
+app.use(sqlInjectionProtection);
+app.use(xssProtection);
+app.use(apiSecurityHeaders);
+
+// Anonymous access control
+const { anonymousAccessControl, logAnonymousAccess } = require('./middleware/anonymousAccess');
+app.use(anonymousAccessControl);
+app.use(logAnonymousAccess);
 app.use(compression());
 
 // Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'production' ? 1000 : 10000, // Higher limit for development
-  message: 'Too many requests from this IP, please try again later.',
-  skip: (req) => {
-    // Skip rate limiting for development environment
-    return process.env.NODE_ENV !== 'production';
-  }
-});
-app.use('/api/', limiter);
+const { generalLimiter, speedLimiter } = require('./middleware/rateLimiting');
+app.use('/api/', generalLimiter);
+app.use('/api/', speedLimiter);
 
 // CORS configuration
-app.use(cors({
-  origin: process.env.NODE_ENV === 'production'
-    ? ['https://talkcart.app', 'https://www.talkcart.app']
-    : ['http://localhost:3000', 'http://localhost:4000', 'http://localhost:4100', 'http://localhost:8000'],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
-  allowedHeaders: [
-    'Content-Type',
-    'Authorization',
-    'X-Requested-With',
-    'Cache-Control',
-    'Pragma',
-    'Expires'
-  ],
-  exposedHeaders: ['Content-Length', 'X-Request-ID'],
-  maxAge: 86400 // 24 hours
-}));
+app.use(cors(corsOptions));
 
 // Body parsing middleware (increase limits for large metadata forms)
-const BODY_LIMIT = process.env.BODY_MAX_SIZE || '50mb';
+const BODY_LIMIT = `${config.upload.maxFieldSize}mb`;
 
 // Use body-parser directly for better control
 const bodyParser = require('body-parser');
@@ -144,7 +151,6 @@ app.use((req, res, next) => {
 
   // Skip all body parsing for media upload endpoints
   if (url.startsWith('/api/media/upload') || contentType.startsWith('multipart/form-data')) {
-    console.log('Skipping body parsing for media upload:', url);
     return next();
   }
 
@@ -205,15 +211,12 @@ app.use((req, res, next) => {
   const rawBody = req.body;
 
   // Check for "iammirror" pattern (behind env flag to avoid false positives in dev)
-  const shouldBlockExtensionPattern = process.env.BLOCK_EXTENSION_INTERFERENCE === 'true';
-  const isDevelopment = process.env.NODE_ENV === 'development';
+  const shouldBlockExtensionPattern = config.development.blockExtensionInterference;
+  const isDevelopment = config.server.isDevelopment;
 
   if (shouldBlockExtensionPattern && rawBody.includes('iammirror')) {
-    console.log('Detected "iammirror" in request body - this appears to be from a browser extension');
-
     // In development, try to clean the request instead of blocking it
     if (isDevelopment) {
-      console.log('Development mode: Attempting to clean browser extension interference...');
 
       try {
         // Try to extract valid JSON by removing the extension interference
@@ -230,12 +233,9 @@ app.use((req, res, next) => {
           cleanedBody = jsonMatch[0];
         }
 
-        console.log('Cleaned body:', cleanedBody);
-
         // Try to parse the cleaned body
         const parsedBody = JSON.parse(cleanedBody);
         req.body = parsedBody;
-        console.log('Successfully cleaned and parsed request body:', parsedBody);
         return next();
       } catch (cleanError) {
         console.error('Failed to clean browser extension interference:', cleanError.message);
@@ -244,7 +244,6 @@ app.use((req, res, next) => {
     }
 
     const email = rawBody.replace(/"/g, '').trim();
-    console.log('Extracted email from raw body:', email);
 
     // Block all requests with iammirror pattern (or provide helpful error in dev)
     return res.status(400).json({
@@ -267,7 +266,7 @@ app.use((req, res, next) => {
 
 
 // Logging with custom format
-if (process.env.NODE_ENV !== 'production') {
+if (config.logging.enableRequestLogging) {
   // Custom morgan format to reduce noise
   app.use(morgan(':method :url :status :res[content-length] - :response-time ms', {
     skip: (req, res) => {
@@ -279,28 +278,119 @@ if (process.env.NODE_ENV !== 'production') {
   }));
 }
 
-// Static files
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// Image proxy endpoint with proper CORS - accessed from frontend
+app.get('/api/image-proxy', cors({
+  origin: config.security.cors.origin,
+  credentials: true,
+  methods: ['GET', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}), (req, res) => {
+  const { path: imagePath } = req.query;
+  
+  if (!imagePath || typeof imagePath !== 'string') {
+    return res.status(400).json({ error: 'Image path parameter is required' });
+  }
+
+  // Extract the uploads path from the full URL if provided
+  let relPath = imagePath;
+  if (imagePath.includes('/uploads/')) {
+    relPath = imagePath.split('/uploads/')[1];
+  }
+  
+  const fullPath = path.join(__dirname, 'uploads', relPath);
+  
+  // Check if file exists
+  const fs = require('fs');
+  if (!fs.existsSync(fullPath)) {
+    return res.status(404).json({ error: 'Image not found' });
+  }
+  
+  // Set CORS and cache headers
+  res.set({
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Cache-Control': 'public, max-age=3600',
+    'Content-Type': 'image/jpeg', // Default, will be overridden by sendFile
+  });
+  
+  // Send the file
+  res.sendFile(fullPath, (err) => {
+    if (err) {
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to send image' });
+      }
+    }
+  });
+});
 
 // Handle favicon requests
 app.get('/favicon.ico', (req, res) => {
   res.status(204).end();
 });
 
-// Make Socket.IO instance available to routes
+// Static files with CORS headers and proper MIME types
+app.use('/uploads', cors({
+  origin: config.security.cors.origin,
+  credentials: true,
+  methods: ['GET', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}), express.static(path.join(__dirname, 'uploads'), {
+  setHeaders: (res, filePath) => {
+    // Set proper MIME types for common image formats
+    const ext = path.extname(filePath).toLowerCase();
+    const mimeTypes = {
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.svg': 'image/svg+xml',
+      '.bmp': 'image/bmp',
+      '.ico': 'image/x-icon',
+      '.tiff': 'image/tiff',
+      '.tif': 'image/tiff',
+      '.mp4': 'video/mp4',
+      '.webm': 'video/webm',
+      '.ogg': 'video/ogg',
+      '.mov': 'video/quicktime'
+    };
+    
+    // If file has a known extension, use it
+    if (mimeTypes[ext]) {
+      res.setHeader('Content-Type', mimeTypes[ext]);
+    } else if (!ext || ext === '') {
+      // For files without extension, try to detect from content or default to svg+xml
+      // (since we're creating SVG placeholders)
+      res.setHeader('Content-Type', 'image/svg+xml');
+    }
+    
+    // Set cache headers
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    
+    // Override restrictive CSP for static files to allow cross-origin loading
+    res.removeHeader('Content-Security-Policy');
+    res.setHeader('Content-Security-Policy', "default-src 'self'; img-src * data: blob:; connect-src *");
+  }
+}));
+
+// Initialize SocketService
+const SocketService = require('./services/socketService');
+const socketService = new SocketService(io);
+
+// Make Socket.IO instance and SocketService available to routes
 app.set('io', io);
+app.set('socketService', socketService);
 
 // Set up global broadcast function for routes
 global.broadcastToAll = (event, data) => {
   io.emit(event, data);
-  console.log(`📡 Broadcasting ${event}:`, data);
 };
 
 // Set up targeted broadcast function for post-specific events
 // NOTE: Use the same room naming as join-post (post:${postId})
 global.broadcastToPost = (postId, event, data) => {
   io.to(`post:${postId}`).emit(event, data);
-  console.log(`📡 Broadcasting ${event} to post ${postId}:`, data);
 };
 
 // API Routes
@@ -314,7 +404,6 @@ app.use('/api/marketplace', require('./routes/marketplace'));
 app.use('/api/orders', require('./routes/orders'));
 app.use('/api/messages', require('./routes/messages'));
 app.use('/api/calls', require('./routes/calls'));
-// Streams feature completely removed
 app.use('/api/dao', require('./routes/dao'));
 app.use('/api/analytics', require('./routes/analytics'));
 app.use('/api/media', require('./routes/media'));
@@ -333,14 +422,46 @@ app.use('/api/admin/signup', adminSignupRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/webhooks', require('./routes/webhooks'));
 
-// Periodic cleanup: run every 10 minutes
-cron.schedule('*/10 * * * *', async () => {
+// Error tracking and rate limiting endpoints
+const { getErrorStats, clearErrorStats } = require('./middleware/errorTracking');
+const { getRateLimitStatus, clearRateLimit } = require('./middleware/rateLimiting');
+app.get('/api/error-stats', getErrorStats);
+app.delete('/api/error-stats', clearErrorStats);
+app.get('/api/rate-limit-status', getRateLimitStatus);
+app.post('/api/rate-limit/clear', clearRateLimit);
+
+// Cache management endpoints
+app.get('/api/cache/stats', async (req, res) => {
   try {
-    // Streams feature removed: moderation cleanup disabled
-  } catch (err) {
-    console.error('[Cron] Moderation cleanup failed:', err);
+    const cacheService = require('./services/cacheService');
+    const stats = cacheService.getStats();
+    res.json({ success: true, data: stats });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Failed to get cache stats' });
   }
 });
+
+app.delete('/api/cache/clear', async (req, res) => {
+  try {
+    const cacheService = require('./services/cacheService');
+    await cacheService.clear();
+    res.json({ success: true, message: 'Cache cleared successfully' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Failed to clear cache' });
+  }
+});
+
+app.get('/api/cache/health', async (req, res) => {
+  try {
+    const redisConfig = require('./config/redis');
+    const health = await redisConfig.healthCheck();
+    res.json({ success: true, data: health });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Failed to check cache health' });
+  }
+});
+
+
 
 // Function to update and emit trending hashtags
 const updateAndEmitTrendingHashtags = async () => {
@@ -385,7 +506,7 @@ const updateAndEmitTrendingHashtags = async () => {
       {
         $addFields: {
           ageHours: { $divide: [ { $subtract: [ new Date(), '$createdAt' ] }, 3600000 ] },
-          decayWeight: { $divide: [ 1, { $add: [ 1, { $divide: [ { $divide: [ { $subtract: [ new Date(), '$createdAt' ] }, 3600000 ] }, 24 ] } ] } ] } // 1 / (1 + ageHours/24)
+          decayWeight: { $divide: [ 1, { $add: [ 1, { $divide: [ { $divide: [ { $subtract: [ new Date(), '$createdAt' ] }, 3600000 ] }, 24 ] } ] } ] }
         }
       },
       // Per-post score with weights
@@ -435,7 +556,6 @@ const updateAndEmitTrendingHashtags = async () => {
 
     // Emit trending update to all connected clients
     io.emit('trending:update', trendingHashtags);
-    console.log(`📊 Emitted trending hashtags update with ${trendingHashtags.length} hashtags`);
   } catch (error) {
     console.error('Error updating trending hashtags:', error);
   }
@@ -566,42 +686,34 @@ app.use('*', (req, res) => {
   });
 });
 
-// Global error handler middleware
+// Error tracking and handling middleware
+const { errorTrackingMiddleware } = require('./middleware/errorTracking');
 const { errorHandler } = require('./middleware/errorHandler');
+app.use(errorTrackingMiddleware);
 app.use(errorHandler);
 
 // Initialize MongoDB and start server
 const initializeApp = async () => {
   try {
-    console.log('🔧 Initializing TalkCart Backend...');
-    console.log('📊 Environment:', process.env.NODE_ENV || 'development');
+    // Log environment summary
+    const envSummary = config.getSummary();
+    console.log('🔧 Environment Configuration:', JSON.stringify(envSummary, null, 2));
 
     // Connect to MongoDB (required)
-    console.log('🔧 Connecting to MongoDB...');
     await connectDB();
 
-    console.log('✅ MongoDB connection established');
-    console.log('💾 Using MongoDB for all data storage');
+    // Initialize cache service
+    const cacheService = require('./services/cacheService');
+    await cacheService.initialize();
 
     // Start vendor payout job
     const vendorPayoutJob = require('./jobs/vendorPayoutJob');
     vendorPayoutJob.start();
-    console.log('💰 Vendor payout job started');
 
     // Start server
     server.listen(PORT, () => {
-      console.log('');
-      console.log('🚀 TalkCart Backend Started Successfully!');
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`🌐 Server: http://localhost:${PORT}`);
-      console.log(`🔗 API Base: http://localhost:${PORT}/api`);
-      console.log(`🔌 WebSocket: ws://localhost:${PORT}`);
-      console.log(`💾 Database: MongoDB (Required)`);
-      console.log(`📡 Real-time: Socket.IO Ready`);
-      console.log(`💰 Vendor Payouts: Enabled`);
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('');
+      console.log(`🚀 TalkCart Backend Started on port ${PORT}`);
+      console.log(`📊 Environment: ${config.server.env}`);
     });
   } catch (error) {
     console.error('❌ Failed to initialize application:', error);

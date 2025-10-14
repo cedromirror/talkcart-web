@@ -21,7 +21,8 @@ import {
 import { Camera, Upload, X, Trash2, ZoomIn, ZoomOut, RefreshCw, Image as ImageIcon } from 'lucide-react';
 import { api, handleUploadError } from '@/lib/api';
 import toast from 'react-hot-toast';
-import UserAvatar from '../common/UserAvatar';
+import dynamic from 'next/dynamic';
+const UserAvatar = dynamic(() => import('../common/UserAvatar'), { ssr: false });
 import ReactCrop, { type Crop } from 'react-image-crop';
 import { User } from '@/types';
 import { UploadErrorBoundary } from '../common/UploadErrorBoundary';

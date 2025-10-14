@@ -101,6 +101,8 @@ const UserAvatar: React.FC<UserAvatarProps> = ({
           objectPosition: 'center',
         }
       }}
+      role="img"
+      aria-label={alt ? `${alt}'s avatar` : "User avatar"}
     >
       {alt?.charAt(0)?.toUpperCase()}
     </Avatar>

@@ -83,6 +83,7 @@ export async function fetchWithAuth(input: RequestInfo | URL, init: RequestInit 
       const hasAuth = hdrs.has('Authorization');
       const isAbort = err && (err.name === 'AbortError');
 
+      // Enhanced error handling with more specific messages
       if (isAbort) {
         // Timeout or manual abort (actual throw/handling occurs in caller)
         notify({ message: 'Request timed out. Please try again.', severity: 'warning' });
@@ -92,6 +93,12 @@ export async function fetchWithAuth(input: RequestInfo | URL, init: RequestInit 
         notify({
           message: `Request blocked by CORS/preflight. Verify backend allows ${method} and ${headerNote} for ${absoluteUrl.origin}.`,
           severity: 'error',
+        });
+      } else if (err && err.message && err.message.includes('Failed to fetch')) {
+        // Network connectivity issue
+        notify({ 
+          message: `Failed to connect to the server. Please ensure the backend is running at ${absoluteUrl.origin}`, 
+          severity: 'error' 
         });
       } else {
         notify({ message: 'Network error. Please check your connection.', severity: 'error' });

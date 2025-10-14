@@ -101,12 +101,16 @@ export const VideoFeedProvider: React.FC<VideoFeedProviderProps> = ({
 
   const handleVideoError = useCallback((videoId: string, error: string) => {
     // Only log non-format errors to reduce console spam
-    if (!error.includes('format not supported') && !error.includes('Format not supported')) {
+    if (!error.includes('format not supported') && 
+        !error.includes('Format not supported') && 
+        !error.includes('Playback interrupted')) {
       console.warn(`Video ${videoId} error:`, error);
     }
     
-    // Show user-friendly error message
-    if (error !== 'Format not supported' && error !== 'format not supported') {
+    // Show user-friendly error message, but not for expected errors
+    if (error !== 'Format not supported' && 
+        error !== 'format not supported' && 
+        !error.includes('Playback interrupted')) {
       toast.error(`Video playback error: ${error}`);
     }
   }, []);
@@ -147,10 +151,29 @@ export const VideoFeedProvider: React.FC<VideoFeedProviderProps> = ({
 
   // Enhanced video controls with smooth scroll manager
   const playVideo = useCallback(async (videoId: string) => {
-    await Promise.all([
-      playVideoHook(videoId),
-      scrollVideoManager.playVideo(videoId)
-    ]);
+    try {
+      await Promise.all([
+        playVideoHook(videoId),
+        scrollVideoManager.playVideo(videoId)
+      ]);
+    } catch (error: any) {
+      // Handle AbortError specifically
+      if (error.name === 'AbortError') {
+        // This is often expected during rapid video switching, log but don't throw
+        console.warn(`Video play request aborted for ${videoId}, likely due to rapid switching`);
+        // Try to play just with the hook as fallback
+        try {
+          await playVideoHook(videoId);
+        } catch (hookError: any) {
+          if (hookError.name !== 'AbortError') {
+            throw hookError;
+          }
+          // If both failed with AbortError, it's expected behavior during rapid switching
+        }
+      } else {
+        throw error;
+      }
+    }
   }, [playVideoHook, scrollVideoManager]);
 
   const pauseVideo = useCallback(async (videoId: string) => {
@@ -295,6 +318,106 @@ export const VideoFeedProvider: React.FC<VideoFeedProviderProps> = ({
 
   const stats = getVideoStats();
 
+  // Floating Controls Component - Always render but conditionally display
+  const FloatingControls = useMemo(() => (
+    <Box
+      sx={{
+        position: 'fixed',
+        bottom: 20,
+        right: 20,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 1,
+        zIndex: 1000,
+        // Only hide visually when showControls is false, but keep in DOM
+        visibility: showControls ? 'visible' : 'hidden',
+        pointerEvents: showControls ? 'auto' : 'none',
+        // Mobile-specific adjustments
+        '@media (max-width: 768px)': {
+          bottom: 80, // Adjust for mobile bottom navigation
+          right: 10,
+          gap: 0.5,
+        },
+      }}
+    >
+      {/* Network Status */}
+      {!isOnline && (
+        <Fab
+          size="small"
+          color="error"
+          sx={{ opacity: 0.8 }}
+        >
+          <WifiOff size={20} />
+        </Fab>
+      )}
+
+      {/* Stats */}
+      {showStats && stats.totalVideos > 0 && (
+        <Tooltip title={`${stats.playingVideos}/${stats.totalVideos} playing • ${stats.viewedVideos} viewed`}>
+          <Fab
+            size="small"
+            color="info"
+            sx={{ opacity: 0.8 }}
+          >
+            <Badge badgeContent={stats.playingVideos} color="primary">
+              <BarChart3 size={20} />
+            </Badge>
+          </Fab>
+        </Tooltip>
+      )}
+
+      {/* Global Mute Toggle */}
+      <Tooltip title={getVolumeTooltip(globalMuted)}>
+        <Fab
+          size="small"
+          color={globalMuted ? "default" : "primary"}
+          onClick={toggleGlobalMute}
+          sx={{ opacity: 0.8 }}
+        >
+          {getVolumeIcon(globalMuted, undefined, 20)}
+        </Fab>
+      </Tooltip>
+
+      {/* Pause All */}
+      {stats.playingVideos > 0 && (
+        <Tooltip title="Pause all videos">
+          <Fab
+            size="small"
+            color="secondary"
+            onClick={handlePauseAll}
+            sx={{ opacity: 0.8 }}
+          >
+            <Pause size={20} />
+          </Fab>
+        </Tooltip>
+      )}
+
+      {/* Autoplay Toggle */}
+      <Tooltip title={settings.enabled ? 'Disable autoplay' : 'Enable autoplay'}>
+        <Fab
+          size="small"
+          color={settings.enabled ? "primary" : "default"}
+          onClick={toggleAutoplay}
+          sx={{ opacity: 0.8 }}
+        >
+          {settings.enabled ? <Play size={20} /> : <Pause size={20} />}
+        </Fab>
+      </Tooltip>
+    </Box>
+  ), [
+    showControls,
+    showStats,
+    isOnline,
+    stats,
+    globalMuted,
+    settings.enabled,
+    toggleGlobalMute,
+    handlePauseAll,
+    toggleAutoplay,
+    getVolumeTooltip,
+    getVolumeIcon
+  ]);
+
   return (
     <VideoFeedContext.Provider value={contextValue}>
       {children}
@@ -302,84 +425,8 @@ export const VideoFeedProvider: React.FC<VideoFeedProviderProps> = ({
       {/* Video Performance Monitor */}
       <VideoPerformanceMonitor />
       
-      {/* Floating Controls */}
-      {showControls && (
-        <Box
-          sx={{
-            position: 'fixed',
-            bottom: 20,
-            right: 20,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 1,
-            zIndex: 1000,
-          }}
-        >
-          {/* Network Status */}
-          {!isOnline && (
-            <Fab
-              size="small"
-              color="error"
-              sx={{ opacity: 0.8 }}
-            >
-              <WifiOff size={20} />
-            </Fab>
-          )}
-
-          {/* Stats */}
-          {showStats && stats.totalVideos > 0 && (
-            <Tooltip title={`${stats.playingVideos}/${stats.totalVideos} playing • ${stats.viewedVideos} viewed`}>
-              <Fab
-                size="small"
-                color="info"
-                sx={{ opacity: 0.8 }}
-              >
-                <Badge badgeContent={stats.playingVideos} color="primary">
-                  <BarChart3 size={20} />
-                </Badge>
-              </Fab>
-            </Tooltip>
-          )}
-
-          {/* Global Mute Toggle */}
-          <Tooltip title={getVolumeTooltip(globalMuted)}>
-            <Fab
-              size="small"
-              color={globalMuted ? "default" : "primary"}
-              onClick={toggleGlobalMute}
-              sx={{ opacity: 0.8 }}
-            >
-              {getVolumeIcon(globalMuted, undefined, 20)}
-            </Fab>
-          </Tooltip>
-
-          {/* Pause All */}
-          {stats.playingVideos > 0 && (
-            <Tooltip title="Pause all videos">
-              <Fab
-                size="small"
-                color="secondary"
-                onClick={handlePauseAll}
-                sx={{ opacity: 0.8 }}
-              >
-                <Pause size={20} />
-              </Fab>
-            </Tooltip>
-          )}
-
-          {/* Autoplay Toggle */}
-          <Tooltip title={settings.enabled ? 'Disable autoplay' : 'Enable autoplay'}>
-            <Fab
-              size="small"
-              color={settings.enabled ? "primary" : "default"}
-              onClick={toggleAutoplay}
-              sx={{ opacity: 0.8 }}
-            >
-              {settings.enabled ? <Play size={20} /> : <Pause size={20} />}
-            </Fab>
-          </Tooltip>
-        </Box>
-      )}
+      {/* Floating Controls - Always rendered but visually hidden when not needed */}
+      {FloatingControls}
     </VideoFeedContext.Provider>
   );
 };

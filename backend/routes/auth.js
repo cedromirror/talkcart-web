@@ -1,5 +1,6 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const router = express.Router();
 const { User } = require('../models');
 const { validateSettings } = require('../middleware/settingsValidation');
@@ -16,22 +17,20 @@ router.get('/health', (req, res) => {
   });
 });
 
-// JWT Secret
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
-// Refresh Token Secret (different from main JWT secret for security)
-const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || 'refresh-token-secret-change-in-production';
+// Import configuration
+const config = require('../config/config');
 
 // Store for refresh tokens (in production, use Redis or a database)
 const refreshTokens = new Set();
 
 // Generate access token (no expiration)
 const generateAccessToken = (userId) => {
-  return jwt.sign({ userId }, JWT_SECRET);
+  return jwt.sign({ userId }, config.jwt.secret);
 };
 
 // Generate refresh token (no expiration)
 const generateRefreshToken = (userId) => {
-  const refreshToken = jwt.sign({ userId }, REFRESH_TOKEN_SECRET);
+  const refreshToken = jwt.sign({ userId }, config.jwt.refreshSecret);
   refreshTokens.add(refreshToken);
   return refreshToken;
 };
@@ -54,7 +53,7 @@ const authenticateToken = (req, res, next) => {
   }
 
   // For actual JWT tokens, verify them (ignore expiration to remove login expiration)
-  jwt.verify(token, JWT_SECRET, { ignoreExpiration: true }, async (err, user) => {
+  jwt.verify(token, config.jwt.secret, { ignoreExpiration: true }, async (err, user) => {
     if (err) {
       // If JWT verification fails, allow anonymous access instead of blocking
       req.user = { userId: 'anonymous-user', isAnonymous: true };
@@ -137,7 +136,7 @@ const authenticateTokenStrict = (req, res, next) => {
   }
 
   // Verify JWT token strictly (ignore expiration to remove login expiration)
-  jwt.verify(token, JWT_SECRET, { ignoreExpiration: true }, async (err, user) => {
+  jwt.verify(token, config.jwt.secret, { ignoreExpiration: true }, async (err, user) => {
     if (err) {
       return res.status(401).json({
         success: false,
@@ -1379,7 +1378,7 @@ router.post('/refresh', async (req, res) => {
     }
 
     // Verify refresh token (ignore expiration to remove login expiration)
-    jwt.verify(refreshToken, REFRESH_TOKEN_SECRET, { ignoreExpiration: true }, async (err, decoded) => {
+    jwt.verify(refreshToken, config.jwt.refreshSecret, { ignoreExpiration: true }, async (err, decoded) => {
       if (err) {
         // Remove invalid token from store
         refreshTokens.delete(refreshToken);

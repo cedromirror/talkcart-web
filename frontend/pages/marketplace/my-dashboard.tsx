@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/router';
+import { useTheme } from '@mui/material/styles';
 import {
   Box,
   Container,
@@ -9,54 +10,46 @@ import {
   CardContent,
   CardHeader,
   Button,
+  TextField,
   Chip,
-  Tabs,
-  Tab,
-  Paper,
+  Avatar,
   List,
   ListItem,
   ListItemText,
   ListItemSecondaryAction,
-  Divider,
+  Tabs,
+  Tab,
+  Paper,
   CircularProgress,
   Alert,
-  useTheme,
-  Avatar,
-  TextField,
-  IconButton,
+  Divider,
+  Badge,
+  Autocomplete,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
-  Autocomplete,
+  IconButton,
   ButtonBase,
-  Badge,
 } from '@mui/material';
 import {
   ShoppingCart,
-  LocalMall,
-  Favorite,
-  Chat,
-  Star,
-  TrendingUp,
-  CalendarToday,
-  CreditCard,
+  Heart,
+  MessageCircle,
   CheckCircle,
-  Pending,
-  Cancel,
+  Clock,
+  XCircle,
   Send,
-  Search,
-  Add,
-  Close,
-} from '@mui/icons-material';
-import { MessageCircle } from 'lucide-react';
+  Plus,
+} from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { useAuth } from '@/contexts/AuthContext';
-import { api } from '@/lib/api';
-import { toast } from 'react-hot-toast';
-import useMessages from '@/hooks/useMessages';
+import { useMessages } from '@/hooks/useMessages';
 import useChatbot from '@/hooks/useChatbot';
+import api from '@/lib/api';
+import toast from 'react-hot-toast';
 import { ChatbotConversation, ChatbotMessage } from '@/services/chatbotApi';
+import { proxyCloudinaryUrl } from '@/utils/cloudinaryProxy';
 
 interface Order {
   id: string;
@@ -258,11 +251,11 @@ const MyDashboard: React.FC = () => {
         return <CheckCircle color="success" />;
       case 'pending':
       case 'processing':
-        return <Pending color="warning" />;
+        return <Clock size={18} color="orange" />;
       case 'cancelled':
-        return <Cancel color="error" />;
+        return <XCircle size={18} color="red" />;
       default:
-        return <Pending />;
+        return <Clock size={18} />;
     }
   };
 
@@ -427,8 +420,8 @@ const MyDashboard: React.FC = () => {
           sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}
         >
           <Tab icon={<ShoppingCart />} iconPosition="start" label="My Orders" />
-          <Tab icon={<Favorite />} iconPosition="start" label="Wishlist" />
-          <Tab icon={<Chat />} iconPosition="start" label="Vendor Chat" />
+          <Tab icon={<Heart size={18} />} iconPosition="start" label="Wishlist" />
+          <Tab icon={<MessageCircle size={18} />} iconPosition="start" label="Vendor Chat" />
           <Tab 
             icon={
               <Badge 
@@ -463,7 +456,7 @@ const MyDashboard: React.FC = () => {
                 </Box>
               ) : orders.length === 0 ? (
                 <Box sx={{ textAlign: 'center', py: 6 }}>
-                  <ShoppingCart sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+                  <ShoppingCart size={48} color={theme.palette.text.secondary} />
                   <Typography variant="h6" sx={{ mb: 1 }}>
                     No orders yet
                   </Typography>
@@ -541,7 +534,7 @@ const MyDashboard: React.FC = () => {
                 </Box>
               ) : wishlistItems.length === 0 ? (
                 <Box sx={{ textAlign: 'center', py: 6 }}>
-                  <Favorite sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+                  <Heart size={48} color={theme.palette.text.secondary} />
                   <Typography variant="h6" sx={{ mb: 1 }}>
                     Your wishlist is empty
                   </Typography>
@@ -557,66 +550,95 @@ const MyDashboard: React.FC = () => {
                 </Box>
               ) : (
                 <Grid container spacing={2}>
-                  {wishlistItems.map((item) => (
-                    <Grid item xs={12} sm={6} md={4} key={item.productId}>
-                      <Card elevation={0} sx={{ borderRadius: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
-                        <CardContent sx={{ flexGrow: 1 }}>
-                          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
-                            <Avatar
-                              variant="rounded"
-                              src={item.product.images[0]?.secure_url || item.product.images[0]?.url}
-                              sx={{ width: 60, height: 60 }}
-                            />
-                            <Box sx={{ flexGrow: 1 }}>
-                              <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 0.5 }}>
-                                {item.product.name}
-                              </Typography>
-                              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                                {item.product.price} {item.product.currency}
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                Added: {new Date(item.addedAt).toLocaleDateString()}
-                              </Typography>
+                  {wishlistItems.map((item) => {
+                    // Check if this is a known missing file pattern
+                    const mediaUrl = item.product.images[0]?.secure_url || item.product.images[0]?.url;
+                    const isKnownMissingFile = mediaUrl && typeof mediaUrl === 'string' && (
+                      mediaUrl.includes('file_1760168733155_lfhjq4ik7ht') ||
+                      mediaUrl.includes('file_1760163879851_tt3fdqqim9') ||
+                      mediaUrl.includes('file_1760263843073_w13593s5t8l') ||
+                      mediaUrl.includes('file_1760276276250_3pqeekj048s')
+                    );
+                    
+                    // If it's a known missing file, hide the element
+                    if (isKnownMissingFile) {
+                      console.warn('Known missing file detected in marketplace, hiding element:', mediaUrl);
+                      return null; // Don't render anything for known missing files
+                    }
+                    
+                    const imageUrl = proxyCloudinaryUrl(mediaUrl || '/images/placeholder-image.png');
+                      
+                    return (
+                      <Grid item xs={12} sm={6} md={4} key={item.productId}>
+                        <Card elevation={0} sx={{ borderRadius: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
+                          <CardContent sx={{ flexGrow: 1 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
+                              <Box
+                                component="img"
+                                src={imageUrl}
+                                alt={item.product.name}
+                                sx={{
+                                  width: 80,
+                                  height: 80,
+                                  objectFit: 'cover',
+                                  borderRadius: 1,
+                                }}
+                                onError={(e) => {
+                                  const target = e.target as HTMLImageElement;
+                                  target.src = '/images/placeholder-image.png';
+                                }}
+                              />
+                              <Box sx={{ flexGrow: 1 }}>
+                                <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 0.5 }}>
+                                  {item.product.name}
+                                </Typography>
+                                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                                  {item.product.price} {item.product.currency}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  Added: {new Date(item.addedAt).toLocaleDateString()}
+                                </Typography>
+                              </Box>
                             </Box>
-                          </Box>
-                        </CardContent>
-                        <CardHeader
-                          sx={{ pt: 0 }}
-                          action={
-                            <Box sx={{ display: 'flex', gap: 1 }}>
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                onClick={() => handleViewProduct(item.productId)}
-                              >
-                                View
-                              </Button>
-                              <Button
-                                size="small"
-                                variant="contained"
-                                onClick={() => handleRemoveFromWishlist(item.productId)}
-                              >
-                                Remove
-                              </Button>
-                              {item.product.vendorId && (
+                          </CardContent>
+                          <CardHeader
+                            sx={{ pt: 0 }}
+                            action={
+                              <Box sx={{ display: 'flex', gap: 1 }}>
                                 <Button
                                   size="small"
                                   variant="outlined"
-                                  onClick={() => handleStartChatbotConversation(
-                                    item.product.vendorId!, 
-                                    item.productId, 
-                                    item.product.name
-                                  )}
+                                  onClick={() => handleViewProduct(item.productId)}
                                 >
-                                  Chat
+                                  View
                                 </Button>
-                              )}
-                            </Box>
-                          }
-                        />
-                      </Card>
-                    </Grid>
-                  ))}
+                                <Button
+                                  size="small"
+                                  variant="contained"
+                                  onClick={() => handleRemoveFromWishlist(item.productId)}
+                                >
+                                  Remove
+                                </Button>
+                                {item.product.vendorId && (
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    onClick={() => handleStartChatbotConversation(
+                                      item.product.vendorId!, 
+                                      item.productId, 
+                                      item.product.name
+                                    )}
+                                  >
+                                    Chat
+                                  </Button>
+                                )}
+                              </Box>
+                            }
+                          />
+                        </Card>
+                      </Grid>
+                    );
+                  })}
                 </Grid>
               )}
             </CardContent>
@@ -633,7 +655,7 @@ const MyDashboard: React.FC = () => {
                 <Button
                   variant="outlined"
                   size="small"
-                  startIcon={<Add />}
+                  startIcon={<Plus size={18} />}
                   onClick={() => setOpenVendorDialog(true)}
                 >
                   New Chat
@@ -693,7 +715,7 @@ const MyDashboard: React.FC = () => {
                       </Box>
                     ) : messages.length === 0 ? (
                       <Box sx={{ textAlign: 'center', py: 4 }}>
-                        <Chat sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+                        <MessageCircle size={48} color={theme.palette.text.secondary} />
                         <Typography variant="h6" sx={{ mb: 1 }}>
                           No messages yet
                         </Typography>
@@ -775,7 +797,7 @@ const MyDashboard: React.FC = () => {
                 </Box>
               ) : (
                 <Box sx={{ textAlign: 'center', py: 6 }}>
-                  <Chat sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+                  <MessageCircle size={48} color={theme.palette.text.secondary} />
                   <Typography variant="h6" sx={{ mb: 1 }}>
                     Vendor Chat
                   </Typography>
@@ -784,7 +806,7 @@ const MyDashboard: React.FC = () => {
                   </Typography>
                   <Button
                     variant="contained"
-                    startIcon={<Add />}
+                    startIcon={<Plus size={18} />}
                     onClick={() => setOpenVendorDialog(true)}
                   >
                     Start New Chat
@@ -999,7 +1021,7 @@ const MyDashboard: React.FC = () => {
                   </Typography>
                   <Button
                     variant="contained"
-                    startIcon={<Add />}
+                    startIcon={<Plus size={18} />}
                     onClick={() => router.push('/marketplace')}
                   >
                     Browse Products

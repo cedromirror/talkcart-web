@@ -16,6 +16,8 @@ import {
   Volume1,
   AlertCircle,
 } from 'lucide-react';
+import { convertToProxyUrl } from '@/utils/urlConverter';
+import { proxyCloudinaryUrl } from '@/utils/cloudinaryProxy';
 
 // Types for video media item (matching backend structure)
 interface VideoMediaItem {
@@ -112,6 +114,7 @@ export const ModernVideoContainer: React.FC<ModernVideoContainerProps> = ({
 
   // Get video URL with fallback
   const videoUrl = videoItem.secure_url || videoItem.url;
+  const proxiedVideoUrl = videoUrl ? proxyCloudinaryUrl(convertToProxyUrl(videoUrl)) : undefined;
   const mimeType = React.useMemo(() => {
     if (!videoUrl) return undefined;
     const ext = videoItem?.format || videoUrl.split('?')[0].split('.').pop()?.toLowerCase();
@@ -533,12 +536,15 @@ export const ModernVideoContainer: React.FC<ModernVideoContainerProps> = ({
         },
         ...style,
       }}
+      role="region"
+      aria-label="Video player"
+      tabIndex={0}
     >
       {/* Video Element */}
       <video
         ref={videoRef}
         id={`video-${videoId}`}
-        src={mimeType && mimeType.startsWith('video/') ? videoUrl : undefined}
+        src={mimeType && mimeType.startsWith('video/') ? proxiedVideoUrl : undefined}
         poster={videoItem.thumbnail}
         preload="metadata"
         muted={videoState.isMuted}
@@ -552,10 +558,13 @@ export const ModernVideoContainer: React.FC<ModernVideoContainerProps> = ({
           display: 'block',
         }}
         onClick={togglePlay}
+        aria-label="Video content"
+        role="video"
       >
-        {mimeType && (
-          <source src={videoUrl} type={mimeType} />
+        {mimeType && proxiedVideoUrl && (
+          <source src={proxiedVideoUrl} type={mimeType} />
         )}
+        Your browser does not support the video tag.
       </video>
 
       {/* Loading Indicator */}

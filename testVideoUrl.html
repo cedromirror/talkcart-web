@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Video URL Test</title>
+</head>
+<body>
+    <h1>Video URL Test</h1>
+    
+    <h2>Test 1: Normal URL</h2>
+    <video controls width="400" height="300">
+        <source src="http://localhost:8000/uploads/talkcart/file_1760459532573_hmjwxi463j" type="video/mp4">
+        Your browser does not support the video tag.
+    </video>
+    
+    <h2>Test 2: Fixed Duplicate Path URL</h2>
+    <video controls width="400" height="300">
+        <source src="http://localhost:8000/uploads/talkcart/file_1760459532573_hmjwxi463j" type="video/mp4">
+        Your browser does not support the video tag.
+    </video>
+    
+    <h2>Test 3: Cloudinary URL</h2>
+    <video controls width="400" height="300">
+        <source src="https://res.cloudinary.com/dqhawepog/video/upload/v1234567890/sample.mp4" type="video/mp4">
+        Your browser does not support the video tag.
+    </video>
+    
+    <p>If videos don't load, check:</p>
+    <ul>
+        <li>Is the backend server running on port 8000?</li>
+        <li>Do the files actually exist in the uploads directory?</li>
+        <li>Are there any CORS issues?</li>
+        <li>Are there any network errors in the browser console?</li>
+    </ul>
+</body>
+</html>

@@ -394,12 +394,9 @@ userSchema.pre('save', async function(next) {
 // Instance method to check password
 userSchema.methods.comparePassword = async function(candidatePassword) {
   if (!this.password) {
-    console.log(`Password comparison failed for user ${this.email}: No password stored.`);
     return false;
   }
-  console.log(`Comparing password for user: ${this.email}`);
   const isMatch = await bcrypt.compare(candidatePassword, this.password);
-  console.log(`Password for ${this.email} is a match: ${isMatch}`);
   return isMatch;
 };
 

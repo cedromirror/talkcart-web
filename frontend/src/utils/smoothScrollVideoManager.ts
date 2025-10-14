@@ -167,7 +167,37 @@ class SmoothScrollVideoManager {
     return videos[0];
   }
 
+  private switchToVideoTimeout: NodeJS.Timeout | null = null;
+  private lastSwitchVideoId: string | null = null;
+
   private async switchToVideo(videoData: VideoIntersectionData) {
+    const { videoId, element } = videoData;
+    
+    // Debounce rapid video switches to prevent AbortError
+    // Clear any existing switch timeout
+    if (this.switchToVideoTimeout) {
+      clearTimeout(this.switchToVideoTimeout);
+    }
+    
+    // If this is the same video as the last switch request, and it's very recent, debounce
+    if (this.lastSwitchVideoId === videoId) {
+      // Create a new timeout to delay this switch
+      this.switchToVideoTimeout = setTimeout(async () => {
+        await this.performSwitchToVideo(videoData);
+        this.switchToVideoTimeout = null;
+      }, 50); // 50ms debounce delay
+      
+      return;
+    }
+    
+    // Update last switch video ID
+    this.lastSwitchVideoId = videoId;
+    
+    // Perform immediate switch for different videos
+    await this.performSwitchToVideo(videoData);
+  }
+
+  private async performSwitchToVideo(videoData: VideoIntersectionData) {
     const { videoId, element } = videoData;
     
     // Update transition state
@@ -191,8 +221,14 @@ class SmoothScrollVideoManager {
       this.onVideoPlay?.(videoId);
 
     } catch (error) {
-      console.warn(`Failed to switch to video ${videoId}:`, error);
-      this.updatePlaybackState(videoId, { transitionState: 'idle' });
+      // Handle AbortError specifically - this is often expected during rapid switching
+      if (error.name === 'AbortError') {
+        console.warn(`Video switch to ${videoId} aborted, likely due to rapid switching`);
+        // Don't treat this as a critical error
+      } else {
+        console.warn(`Failed to switch to video ${videoId}:`, error);
+        this.updatePlaybackState(videoId, { transitionState: 'idle' });
+      }
     }
   }
 
@@ -236,13 +272,14 @@ class SmoothScrollVideoManager {
     if (element.readyState < 2) {
       element.load();
       
-      // Wait for metadata to load
+      // Wait for metadata to load with improved error handling
       await new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
           element.removeEventListener('loadedmetadata', onLoaded);
           element.removeEventListener('error', onError);
-          reject(new Error('Timeout loading video metadata'));
-        }, 3000);
+          // Instead of rejecting, resolve to continue with playback attempt
+          resolve(null);
+        }, 5000); // Increased timeout to 5 seconds
         
         const onLoaded = () => {
           clearTimeout(timeout);
@@ -253,7 +290,8 @@ class SmoothScrollVideoManager {
         const onError = () => {
           clearTimeout(timeout);
           element.removeEventListener('loadedmetadata', onLoaded);
-          reject(new Error('Failed to load video metadata'));
+          // Instead of rejecting, resolve to continue with playback attempt
+          resolve(null);
         };
         
         element.addEventListener('loadedmetadata', onLoaded);
@@ -261,7 +299,26 @@ class SmoothScrollVideoManager {
       });
     }
 
-    // Create play promise
+    // Debounce rapid play requests to prevent AbortError
+    // Check if there's a recent play request for this video
+    const lastPlayTime = state?.lastPlayTime || 0;
+    const timeSinceLastPlay = Date.now() - lastPlayTime;
+    
+    // If less than 100ms since last play request, debounce
+    if (timeSinceLastPlay < 100) {
+      // Wait a bit to see if another request comes in
+      await new Promise(resolve => setTimeout(resolve, 100 - timeSinceLastPlay));
+      
+      // Check if there's a newer play request
+      const currentState = this.playbackStates.get(videoId);
+      if (currentState && currentState.lastPlayTime > lastPlayTime) {
+        // A newer request has come in, abort this one
+        console.warn(`Video play for ${videoId} debounced due to rapid switching`);
+        return;
+      }
+    }
+
+    // Create play promise with better error handling
     const playPromise = element.play();
     
     this.updatePlaybackState(videoId, {
@@ -284,7 +341,13 @@ class SmoothScrollVideoManager {
         transitionState: 'idle',
         playPromise: null 
       });
-      throw error;
+      
+      // Re-throw error unless it's an AbortError (which is often expected)
+      if (error.name !== 'AbortError') {
+        throw error;
+      }
+      // For AbortError, we just log it but don't treat it as a critical failure
+      console.warn(`Video play for ${videoId} was aborted, likely due to rapid switching`);
     }
   }
 
@@ -407,7 +470,18 @@ class SmoothScrollVideoManager {
           const videoData = this.intersectionOptimizer.getCurrentVideoData();
           const targetVideo = videoData.find(v => v.videoId === videoId);
           if (targetVideo) {
-            this.switchToVideo(targetVideo);
+            // Add a small delay to debounce rapid switches from intersection changes
+            setTimeout(() => {
+              // Check if video is still the best choice
+              const currentVideoData = this.intersectionOptimizer.getCurrentVideoData();
+              const currentVisibleVideos = currentVideoData.filter(v => v.isVisible);
+              if (currentVisibleVideos.length > 0) {
+                const bestVideo = currentVisibleVideos[0]; // Already sorted by priority
+                if (bestVideo.videoId === videoId) {
+                  this.switchToVideo(targetVideo);
+                }
+              }
+            }, 100); // 100ms delay to debounce
           }
         }
       }
@@ -569,6 +643,11 @@ class SmoothScrollVideoManager {
     
     if (this.rafId) {
       cancelAnimationFrame(this.rafId);
+    }
+    
+    // Clear switch video timeout
+    if (this.switchToVideoTimeout) {
+      clearTimeout(this.switchToVideoTimeout);
     }
 
     // Pause all videos

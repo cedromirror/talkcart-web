@@ -1,6 +1,5 @@
 // Video Components
 export { ModernVideoContainer } from './ModernVideoContainer';
-export { VideoPostCard } from './VideoPostCard';
 export { VideoFeedProvider, useVideoFeed } from './VideoFeedManager';
 export { VideoSettings } from './VideoSettings';
 export { VideoAnalytics } from './VideoAnalytics';
@@ -32,7 +31,6 @@ export type {
   VideoMediaItem,
   VideoPost,
   VideoContainerProps,
-  VideoPostCardProps,
   UseVideoPostOptions,
   VideoPostState,
   VideoPostActions,

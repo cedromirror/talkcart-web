@@ -28,7 +28,8 @@ import {
 } from 'lucide-react';
 import LiveChat from '../LiveChat';
 import ModerationPanel from '../ModerationPanel';
-import StreamAnalytics from '../StreamAnalytics';
+import dynamic from 'next/dynamic';
+const StreamAnalytics = dynamic(() => import('../StreamAnalytics'), { ssr: false, loading: () => null });
 import GiftPanel from '../GiftPanel';
 import SubscriptionPanel from '../SubscriptionPanel';
 import { useMutation, useQueryClient } from '@tanstack/react-query';

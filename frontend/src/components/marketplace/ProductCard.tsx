@@ -14,10 +14,11 @@ import {
   AlertCircle,
   MessageCircle,
 } from 'lucide-react';
-import Image from 'next/image';
+import OptimizedImage from '@/components/media/OptimizedImage';
 import { convertUsdToCurrency, convertCurrencyToUsd, formatCurrencyAmount } from '@/utils/currencyConverter';
 import { getUserCurrency } from '@/utils/userCurrencyDetector';
-import ChatbotButton from './ChatbotButton';
+import dynamic from 'next/dynamic';
+const ChatbotButton = dynamic(() => import('./ChatbotButton'), { ssr: false });
 
 interface Product {
   id: string;
@@ -273,16 +274,14 @@ const ProductCard: React.FC<ProductCardProps> = ({
         overflow: 'hidden'
       }}>
         {!imageError ? (
-          <Image
+          <OptimizedImage
             src={getImageSrc()}
             alt={product.name}
             fill
-            style={{ 
-              objectFit: 'cover',
-              width: '100%',
-              height: '100%',
-            }}
+            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+            style={{ objectFit: 'cover', width: '100%', height: '100%' }}
             onError={() => setImageError(true)}
+            quality={80}
           />
         ) : (
           <Box

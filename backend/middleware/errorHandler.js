@@ -1,4 +1,5 @@
 const Joi = require('joi');
+const config = require('../config/config');
 
 // Response formatter for consistent API responses
 const formatResponse = (success, data = null, message = '', error = null, statusCode = 200) => {
@@ -76,15 +77,30 @@ const errorHandler = (err, req, res, next) => {
   error.message = err.message;
 
   // Log error for debugging
-  console.error('🚨 Error Handler:', {
+  const errorLog = {
     name: err.name,
     message: err.message,
-    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
     url: req.originalUrl,
     method: req.method,
     ip: req.ip,
-    userAgent: req.get('User-Agent')
-  });
+    userAgent: req.get('User-Agent'),
+    timestamp: new Date().toISOString(),
+    userId: req.user?.userId || 'anonymous'
+  };
+
+  // Add stack trace in development
+  if (config.server.isDevelopment) {
+    errorLog.stack = err.stack;
+  }
+
+  // Log error based on severity
+  if (err.statusCode >= 500) {
+    console.error('🚨 Server Error:', errorLog);
+  } else if (err.statusCode >= 400) {
+    console.warn('⚠️ Client Error:', errorLog);
+  } else {
+    console.log('ℹ️ Info:', errorLog);
+  }
 
   // Mongoose bad ObjectId
   if (err.name === 'CastError') {
@@ -146,7 +162,7 @@ const errorHandler = (err, req, res, next) => {
     {
       type: error.name || 'Error',
       ...(error.details && { details: error.details }),
-      ...(process.env.NODE_ENV === 'development' && { 
+      ...(config.server.isDevelopment && { 
         stack: err.stack,
         originalError: err.message 
       })
@@ -180,7 +196,7 @@ const requestLogger = (req, res, next) => {
     '/static'
   ].some(path => req.url.includes(path));
 
-  if (!skipLogging && process.env.NODE_ENV !== 'production') {
+  if (!skipLogging && config.logging.enableRequestLogging) {
     console.log(`📥 ${req.method} ${req.originalUrl}`, {
       ip: req.ip,
       userAgent: req.get('User-Agent')?.substring(0, 50) + '...',
@@ -191,7 +207,7 @@ const requestLogger = (req, res, next) => {
   // Add response time logging
   res.on('finish', () => {
     const duration = Date.now() - start;
-    if (!skipLogging && process.env.NODE_ENV !== 'production') {
+    if (!skipLogging && config.logging.enableRequestLogging) {
       console.log(`📤 ${req.method} ${req.originalUrl} - ${res.statusCode} (${duration}ms)`);
     }
   });

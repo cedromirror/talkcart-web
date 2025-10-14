@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const multer = require('multer');
 const { authenticateToken, authenticateTokenStrict } = require('./auth');
 const { Product, User, Order, ProductReview, VendorPaymentPreferences, VendorStore } = require('../models');
-const { uploadToCloudinary } = require('../config/cloudinary');
+const { uploadToCloudinary, deleteMultipleFiles } = require('../config/cloudinary');
 const Joi = require('joi');
 const { ethers } = require('ethers');
 const { validate } = require('../middleware/validation');
@@ -445,7 +445,28 @@ router.post('/products', authenticateTokenStrict, async (req, res) => {
     res.status(201).json({ success: true, data: responseData, message: 'Product created successfully' });
   } catch (error) {
     console.error('Create product error:', error);
-    res.status(500).json({ success: false, error: 'Failed to create product', message: error.message });
+    
+    // If we have uploaded images, clean them up
+    if (req.body.images && Array.isArray(req.body.images) && req.body.images.length > 0) {
+      try {
+        const publicIds = req.body.images
+          .map(image => image.public_id)
+          .filter(Boolean);
+        
+        if (publicIds.length > 0) {
+          await deleteMultipleFiles(publicIds);
+          console.log(`Cleaned up ${publicIds.length} product images after product creation failure`);
+        }
+      } catch (cleanupError) {
+        console.error('Failed to cleanup product images:', cleanupError);
+      }
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create product',
+      message: error.message,
+    });
   }
 });
 

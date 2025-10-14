@@ -59,6 +59,8 @@ import EnhancedMessageBubbleV2 from '@/components/messaging/EnhancedMessageBubbl
 import VoiceMessageBubble from '@/components/messaging/VoiceMessageBubble';
 import ForwardMessageDialog from '@/components/messaging/ForwardMessageDialog';
 
+import { validateMediaFile, formatFileSize } from '@/utils/mediaValidation';
+
 const MessagesPage: React.FC = () => {
   const theme = useTheme();
   const { user, isAuthenticated, loading: authLoading } = useAuth();
@@ -314,19 +316,32 @@ const MessagesPage: React.FC = () => {
   const AUDIO_TYPES = ['audio/mp3', 'audio/mpeg', 'audio/wav', 'audio/aac', 'audio/ogg', 'audio/webm'];
 
   const validateFile = (file: File, kind: 'image' | 'video' | 'audio') => {
-    const sizeMB = file.size / (1024 * 1024);
-    const mime = file.type;
-    if (kind === 'image') {
-      if (!IMAGE_TYPES.includes(mime)) throw new Error('Unsupported image type. Use JPG, PNG, GIF, or WebP.');
-      if (sizeMB > MAX_IMAGE_MB) throw new Error(`Image exceeds ${MAX_IMAGE_MB}MB.`);
+    let maxSize, allowedTypes;
+    
+    switch (kind) {
+      case 'image':
+        maxSize = 20; // 20MB
+        allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+        break;
+      case 'video':
+        maxSize = 200; // 200MB
+        allowedTypes = ['video/mp4', 'video/quicktime', 'video/mov', 'video/webm', 'video/avi', 'video/x-msvideo', 'video/x-matroska', 'video/mpeg'];
+        break;
+      case 'audio':
+        maxSize = 50; // 50MB
+        allowedTypes = ['audio/mp3', 'audio/mpeg', 'audio/wav', 'audio/aac', 'audio/ogg', 'audio/webm'];
+        break;
+      default:
+        throw new Error('Invalid media type');
     }
-    if (kind === 'video') {
-      if (!VIDEO_TYPES.includes(mime)) throw new Error('Unsupported video type. Use MP4, MOV, WEBM, AVI.');
-      if (sizeMB > MAX_VIDEO_MB) throw new Error(`Video exceeds ${MAX_VIDEO_MB}MB.`);
-    }
-    if (kind === 'audio') {
-      if (!AUDIO_TYPES.includes(mime)) throw new Error('Unsupported audio type. Use MP3, WAV, AAC, OGG, or WEBM.');
-      if (sizeMB > MAX_AUDIO_MB) throw new Error(`Audio exceeds ${MAX_AUDIO_MB}MB.`);
+    
+    const validation = validateMediaFile(file, {
+      maxSize,
+      allowedTypes
+    });
+    
+    if (!validation.valid) {
+      throw new Error(`${validation.error}. ${validation.details || ''}`);
     }
   };
 

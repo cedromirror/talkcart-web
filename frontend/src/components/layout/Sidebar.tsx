@@ -574,14 +574,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
         },
       }}
       ModalProps={{
-        keepMounted: true, // Better accessibility
+        keepMounted: true,
         disablePortal: false,
         hideBackdrop: false,
+        // Prevent aria-hidden conflicts when focus is retained
+        disableEnforceFocus: true,
+        disableRestoreFocus: false,
+        slotProps: {
+          backdrop: { inert: true }
+        }
       }}
       PaperProps={{
         // Ensure proper accessibility attributes
         role: "dialog",
         "aria-modal": variant === 'temporary' ? "true" : undefined,
+        // Make drawer content programmatically focusable
+        tabIndex: -1
       }}
     >
       {sidebarContent}

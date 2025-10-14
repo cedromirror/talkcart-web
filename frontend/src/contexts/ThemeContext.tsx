@@ -110,6 +110,10 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
       document.body.setAttribute('data-font-size', fontSize);
       document.body.setAttribute('data-reduced-motion', reducedMotion.toString());
       document.body.setAttribute('data-high-contrast', highContrast.toString());
+      
+      // Apply accessibility attributes for screen readers
+      document.body.setAttribute('data-accessibility-reduced-motion', reducedMotion.toString());
+      document.body.setAttribute('data-accessibility-high-contrast', highContrast.toString());
     }
   }, [actualTheme, fontSize, reducedMotion, highContrast]);
 

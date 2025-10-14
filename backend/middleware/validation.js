@@ -1,236 +1,248 @@
 const Joi = require('joi');
 const { ValidationError } = require('./errorHandler');
+const config = require('../config/config');
+
+/**
+ * Input Validation and Sanitization Middleware
+ * Comprehensive validation system for API endpoints
+ */
 
 // Common validation schemas
 const commonSchemas = {
-  objectId: Joi.string().pattern(/^[0-9a-fA-F]{24}$/).message('Invalid ID format'),
-  email: Joi.string().email().lowercase().trim(),
-  username: Joi.string().min(3).max(30).pattern(/^[a-zA-Z0-9_]+$/).trim(),
-  password: Joi.string().min(6).max(128),
-  url: Joi.string().uri(),
+  // MongoDB ObjectId validation
+  objectId: Joi.string().pattern(/^[0-9a-fA-F]{24}$/).required(),
+  
+  // Optional ObjectId
+  optionalObjectId: Joi.string().pattern(/^[0-9a-fA-F]{24}$/),
+  
+  // Email validation
+  email: Joi.string().email().lowercase().trim().required(),
+  
+  // Username validation
+  username: Joi.string()
+    .alphanum()
+    .min(3)
+    .max(30)
+    .pattern(/^[a-zA-Z0-9_]+$/)
+    .required(),
+  
+  // Password validation
+  password: Joi.string()
+    .min(6)
+    .max(128)
+    .pattern(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/)
+    .required()
+    .messages({
+      'string.pattern.base': 'Password must contain at least one lowercase letter, one uppercase letter, and one number'
+    }),
+  
+  // Display name validation
+  displayName: Joi.string().trim().max(50).allow(''),
+  
+  // Bio validation
+  bio: Joi.string().trim().max(500).allow(''),
+  
+  // URL validation
+  url: Joi.string().uri().allow(''),
+  
+  // Pagination validation
   pagination: {
     page: Joi.number().integer().min(1).default(1),
-    limit: Joi.number().integer().min(1).max(100).default(20)
+    limit: Joi.number().integer().min(1).max(100).default(20),
+    sortBy: Joi.string().valid('createdAt', 'updatedAt', 'name', 'price').default('createdAt'),
+    sortOrder: Joi.string().valid('asc', 'desc').default('desc')
+  },
+  
+  // File upload validation
+  fileUpload: {
+    maxSize: config.upload.maxFileSize * 1024 * 1024, // Convert MB to bytes
+    allowedTypes: config.upload.allowedTypes,
+    allowedExtensions: ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.mp4', '.webm', '.mov']
   }
 };
 
-// Validation schemas for different endpoints
-const schemas = {
-  // Auth schemas
+// User validation schemas
+const userSchemas = {
   register: Joi.object({
-    username: commonSchemas.username.required(),
-    email: commonSchemas.email.required(),
-    password: commonSchemas.password.required(),
-    displayName: Joi.string().max(50).trim().required()
+    username: commonSchemas.username,
+    email: commonSchemas.email,
+    password: commonSchemas.password,
+    displayName: commonSchemas.displayName,
+    bio: commonSchemas.bio,
+    location: Joi.string().trim().max(100).allow(''),
+    website: commonSchemas.url,
+    walletAddress: Joi.string().pattern(/^0x[a-fA-F0-9]{40}$/).allow('')
   }),
-
+  
   login: Joi.object({
-    email: commonSchemas.email.required(),
+    identifier: Joi.string().required(), // Can be email or username
     password: Joi.string().required()
   }),
-
+  
+  updateProfile: Joi.object({
+    displayName: commonSchemas.displayName,
+    bio: commonSchemas.bio,
+    location: Joi.string().trim().max(100).allow(''),
+    website: commonSchemas.url,
+    avatar: Joi.string().uri().allow(''),
+    cover: Joi.string().uri().allow('')
+  }),
+  
   changePassword: Joi.object({
     currentPassword: Joi.string().required(),
-    newPassword: commonSchemas.password.required()
-  }),
+    newPassword: commonSchemas.password
+  })
+};
 
-  updateProfile: Joi.object({
-    displayName: Joi.string().max(50).trim(),
-    bio: Joi.string().max(500).trim().allow(''),
-    location: Joi.string().max(100).trim().allow(''),
-    website: commonSchemas.url.allow(''),
-    socialLinks: Joi.object({
-      twitter: Joi.string().allow(''),
-      discord: Joi.string().allow(''),
-      telegram: Joi.string().allow(''),
-      instagram: Joi.string().allow(''),
-      linkedin: Joi.string().allow('')
-    })
-  }),
-
-  // User schemas
-  followUser: Joi.object({
-    userId: commonSchemas.objectId.required()
-  }),
-
-  // Post schemas
-  createPost: Joi.object({
-    content: Joi.string().max(2000).required(),
-    type: Joi.string().valid('text', 'image', 'video', 'poll').default('text'),
-    privacy: Joi.string().valid('public', 'followers', 'private').default('public'),
-    hashtags: Joi.array().items(Joi.string().max(50)).max(10),
-    media: Joi.array().items(Joi.object({
-      url: Joi.string().required(),
-      type: Joi.string().valid('image', 'video').required(),
-      thumbnail: Joi.string()
-    })).max(10),
+// Post validation schemas
+const postSchemas = {
+  create: Joi.object({
+    content: Joi.string().trim().min(1).max(2000).required(),
+    type: Joi.string().valid('text', 'image', 'video').default('text'),
+    hashtags: Joi.array().items(
+      Joi.string().trim().lowercase().max(50).pattern(/^[a-zA-Z0-9_]+$/)
+    ).max(10),
+    mentions: Joi.array().items(commonSchemas.objectId).max(10),
     location: Joi.object({
-      name: Joi.string().max(100),
+      name: Joi.string().trim().max(100),
       coordinates: Joi.array().items(Joi.number()).length(2)
-    }),
-    pollOptions: Joi.array().items(Joi.string().max(100)).when('type', {
-      is: 'poll',
-      then: Joi.array().min(2).max(6),
-      otherwise: Joi.forbidden()
-    })
+    }).allow(null),
+    privacy: Joi.string().valid('public', 'followers', 'private').default('public')
   }),
-
-  updatePost: Joi.object({
-    content: Joi.string().max(2000),
-    privacy: Joi.string().valid('public', 'followers', 'private'),
-    hashtags: Joi.array().items(Joi.string().max(50)).max(10)
+  
+  update: Joi.object({
+    content: Joi.string().trim().min(1).max(2000),
+    hashtags: Joi.array().items(
+      Joi.string().trim().lowercase().max(50).pattern(/^[a-zA-Z0-9_]+$/)
+    ).max(10),
+    privacy: Joi.string().valid('public', 'followers', 'private')
   }),
+  
+  query: Joi.object({
+    ...commonSchemas.pagination,
+    feedType: Joi.string().valid('for-you', 'following', 'recent', 'trending').default('for-you'),
+    contentType: Joi.string().valid('all', 'text', 'image', 'video').default('all'),
+    authorId: commonSchemas.optionalObjectId,
+    hashtag: Joi.string().trim().lowercase().max(50),
+    search: Joi.string().trim().max(100)
+  })
+};
 
-  // Comment schemas
-  createComment: Joi.object({
-    postId: commonSchemas.objectId.required(),
-    content: Joi.string().max(1000).required(),
-    parentId: commonSchemas.objectId
-  }),
-
-  updateComment: Joi.object({
-    content: Joi.string().max(1000).required()
-  }),
-
-  // Product schemas
-  createProduct: Joi.object({
-    name: Joi.string().max(200).required(),
-    description: Joi.string().max(2000).required(),
-    price: Joi.number().min(0).required(),
+// Product validation schemas
+const productSchemas = {
+  create: Joi.object({
+    name: Joi.string().trim().min(1).max(200).required(),
+    description: Joi.string().trim().min(1).max(2000).required(),
+    price: Joi.number().positive().precision(2).required(),
     currency: Joi.string().valid('ETH', 'BTC', 'USD', 'USDC', 'USDT').default('ETH'),
     category: Joi.string().valid(
       'Digital Art', 'Electronics', 'Fashion', 'Gaming', 'Music', 
       'Books', 'Collectibles', 'Education', 'Accessories', 
       'Food & Beverages', 'Fitness', 'Other'
     ).required(),
-    tags: Joi.array().items(Joi.string().max(50)).max(20),
+    tags: Joi.array().items(Joi.string().trim().max(50)).max(10),
     stock: Joi.number().integer().min(0).default(1),
     isNFT: Joi.boolean().default(false),
-    contractAddress: Joi.string().when('isNFT', {
-      is: true,
-      then: Joi.string().required(),
-      otherwise: Joi.optional()
-    }),
-    tokenId: Joi.string().when('isNFT', {
-      is: true,
-      then: Joi.string().required(),
-      otherwise: Joi.optional()
-    })
+    contractAddress: Joi.string().pattern(/^0x[a-fA-F0-9]{40}$/).allow(''),
+    tokenId: Joi.string().allow('')
   }),
-
-  updateProduct: Joi.object({
-    name: Joi.string().max(200),
-    description: Joi.string().max(2000),
-    price: Joi.number().min(0),
-    currency: Joi.string().valid('ETH', 'BTC', 'USD', 'USDC', 'USDT'),
+  
+  update: Joi.object({
+    name: Joi.string().trim().min(1).max(200),
+    description: Joi.string().trim().min(1).max(2000),
+    price: Joi.number().positive().precision(2),
     category: Joi.string().valid(
       'Digital Art', 'Electronics', 'Fashion', 'Gaming', 'Music', 
       'Books', 'Collectibles', 'Education', 'Accessories', 
       'Food & Beverages', 'Fitness', 'Other'
     ),
-    tags: Joi.array().items(Joi.string().max(50)).max(20),
+    tags: Joi.array().items(Joi.string().trim().max(50)).max(10),
     stock: Joi.number().integer().min(0),
-    isActive: Joi.boolean()
+    isActive: Joi.boolean(),
+    featured: Joi.boolean()
   }),
-
-  // Order schemas
-  createOrder: Joi.object({
-    items: Joi.array().items(Joi.object({
-      productId: commonSchemas.objectId.required(),
-      quantity: Joi.number().integer().min(1).required(),
-      price: Joi.number().min(0).required()
-    })).min(1).required(),
-    shippingAddress: Joi.object({
-      street: Joi.string().required(),
-      city: Joi.string().required(),
-      state: Joi.string().required(),
-      zipCode: Joi.string().required(),
-      country: Joi.string().required()
-    }).required(),
-    paymentMethod: Joi.string().valid('crypto', 'stripe', 'flutterwave').required()
-  }),
-
-  // Message schemas
-  createMessage: Joi.object({
-    conversationId: commonSchemas.objectId.required(),
-    content: Joi.string().max(5000).required(),
-    type: Joi.string().valid('text', 'image', 'video', 'audio', 'file').default('text'),
-    media: Joi.object({
-      url: Joi.string().required(),
-      type: Joi.string().required(),
-      size: Joi.number(),
-      filename: Joi.string()
-    }).when('type', {
-      is: Joi.not('text'),
-      then: Joi.object().required(),
-      otherwise: Joi.forbidden()
-    })
-  }),
-
-  // Search schemas
-  search: Joi.object({
-    q: Joi.string().min(2).max(100).required(),
-    type: Joi.string().valid('all', 'users', 'posts', 'products', 'hashtags').default('all'),
-    filters: Joi.string(),
-    page: commonSchemas.pagination.page,
-    limit: commonSchemas.pagination.limit
-  }),
-
-  // Notification schemas
-  createNotification: Joi.object({
-    recipient: commonSchemas.objectId.required(),
-    type: Joi.string().valid(
-      'follow', 'unfollow', 'like', 'comment', 'mention', 'share',
-      'message', 'order', 'payment', 'product_approved', 'product_rejected',
-      'system', 'admin'
-    ).required(),
-    title: Joi.string().max(100).required(),
-    message: Joi.string().max(500).required(),
-    data: Joi.object().default({}),
-    relatedId: commonSchemas.objectId,
-    relatedModel: Joi.string().valid('Post', 'Comment', 'Product', 'Order', 'Message', 'User'),
-    priority: Joi.string().valid('low', 'normal', 'high', 'urgent').default('normal'),
-    actionUrl: Joi.string()
-  }),
-
-  markNotificationsRead: Joi.object({
-    notificationIds: Joi.array().items(commonSchemas.objectId).min(1).required()
-  }),
-
-  // Admin schemas
-  updateUserRole: Joi.object({
-    role: Joi.string().valid('user', 'moderator', 'admin').required()
-  }),
-
-  suspendUser: Joi.object({
-    reason: Joi.string().max(500).required(),
-    duration: Joi.number().integer().min(1) // days
-  }),
-
-  // Media upload schemas
-  uploadMedia: Joi.object({
-    type: Joi.string().valid('avatar', 'cover', 'post', 'product', 'message').required()
-  }),
-
-  // Review schemas
-  createReview: Joi.object({
-    rating: Joi.number().integer().min(1).max(5).required(),
-    title: Joi.string().max(100).trim(),
-    comment: Joi.string().max(1000).trim().required()
+  
+  query: Joi.object({
+    ...commonSchemas.pagination,
+    category: Joi.string().valid(
+      'Digital Art', 'Electronics', 'Fashion', 'Gaming', 'Music', 
+      'Books', 'Collectibles', 'Education', 'Accessories', 
+      'Food & Beverages', 'Fitness', 'Other'
+    ),
+    minPrice: Joi.number().min(0),
+    maxPrice: Joi.number().min(0),
+    currency: Joi.string().valid('ETH', 'BTC', 'USD', 'USDC', 'USDT'),
+    search: Joi.string().trim().max(100),
+    featured: Joi.boolean(),
+    isNFT: Joi.boolean()
   })
 };
 
-// Validation middleware factory
-const validate = (schemaName, source = 'body') => {
-  return (req, res, next) => {
-    const schema = schemas[schemaName];
-    
-    if (!schema) {
-      return next(new ValidationError(`Validation schema '${schemaName}' not found`));
-    }
+// Comment validation schemas
+const commentSchemas = {
+  create: Joi.object({
+    content: Joi.string().trim().min(1).max(1000).required(),
+    postId: commonSchemas.objectId,
+    parentId: commonSchemas.optionalObjectId
+  }),
+  
+  update: Joi.object({
+    content: Joi.string().trim().min(1).max(1000).required()
+  })
+};
 
-    const dataToValidate = req[source];
-    const { error, value } = schema.validate(dataToValidate, {
+// Order validation schemas
+const orderSchemas = {
+  create: Joi.object({
+    items: Joi.array().items(
+      Joi.object({
+        productId: commonSchemas.objectId,
+        quantity: Joi.number().integer().min(1).required()
+      })
+    ).min(1).required(),
+    paymentMethod: Joi.string().valid('stripe', 'flutterwave', 'crypto', 'nft').required(),
+    shippingAddress: Joi.object({
+      name: Joi.string().trim().min(1).max(100).required(),
+      email: commonSchemas.email,
+      address: Joi.string().trim().min(1).max(200).required(),
+      city: Joi.string().trim().min(1).max(100).required(),
+      state: Joi.string().trim().min(1).max(100).required(),
+      country: Joi.string().trim().min(1).max(100).required(),
+      zipCode: Joi.string().trim().min(1).max(20).required()
+    }).required()
+  }),
+  
+  update: Joi.object({
+    status: Joi.string().valid(
+      'pending', 'processing', 'shipped', 'delivered', 
+      'completed', 'cancelled', 'refunded'
+    ),
+    trackingNumber: Joi.string().trim().max(100),
+    carrier: Joi.string().trim().max(100),
+    notes: Joi.string().trim().max(500)
+  })
+};
+
+// Message validation schemas
+const messageSchemas = {
+  send: Joi.object({
+    content: Joi.string().trim().min(1).max(2000).required(),
+    recipientId: commonSchemas.objectId,
+    conversationId: commonSchemas.optionalObjectId,
+    type: Joi.string().valid('text', 'image', 'video', 'audio').default('text')
+  }),
+  
+  update: Joi.object({
+    content: Joi.string().trim().min(1).max(2000).required()
+  })
+};
+
+/**
+ * Validation middleware factory
+ */
+const validate = (schema, property = 'body') => {
+  return (req, res, next) => {
+    const { error, value } = schema.validate(req[property], {
       abortEarly: false,
       stripUnknown: true,
       convert: true
@@ -242,102 +254,124 @@ const validate = (schemaName, source = 'body') => {
         message: detail.message,
         value: detail.context?.value
       }));
-      
+
       return next(new ValidationError('Validation failed', details));
     }
 
-    // Replace the original data with validated and sanitized data
-    req[source] = value;
+    // Replace the original data with sanitized data
+    req[property] = value;
     next();
   };
 };
 
-// Validate query parameters
-const validateQuery = (schemaName) => validate(schemaName, 'query');
-
-// Validate request parameters
-const validateParams = (schemaName) => validate(schemaName, 'params');
-
-// Custom validation for file uploads
-const validateFileUpload = (options = {}) => {
-  const {
-    allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
-    maxSize = 10 * 1024 * 1024, // 10MB
-    required = false
-  } = options;
-
-  return (req, res, next) => {
-    const file = req.file;
-    const files = req.files;
-
-    if (!file && !files && required) {
-      return next(new ValidationError('File is required'));
+/**
+ * Sanitize input data
+ */
+const sanitizeInput = (data) => {
+  if (typeof data === 'string') {
+    return data
+      .trim()
+      .replace(/[<>]/g, '') // Remove potential HTML tags
+      .replace(/javascript:/gi, '') // Remove javascript: protocol
+      .replace(/on\w+=/gi, ''); // Remove event handlers
+  }
+  
+  if (Array.isArray(data)) {
+    return data.map(sanitizeInput);
+  }
+  
+  if (typeof data === 'object' && data !== null) {
+    const sanitized = {};
+    for (const [key, value] of Object.entries(data)) {
+      sanitized[key] = sanitizeInput(value);
     }
-
-    if (!file && !files) {
-      return next();
-    }
-
-    const filesToCheck = files || [file];
-
-    for (const fileToCheck of filesToCheck) {
-      if (!allowedTypes.includes(fileToCheck.mimetype)) {
-        return next(new ValidationError(
-          `Invalid file type. Allowed types: ${allowedTypes.join(', ')}`
-        ));
-      }
-
-      if (fileToCheck.size > maxSize) {
-        return next(new ValidationError(
-          `File too large. Maximum size: ${maxSize / (1024 * 1024)}MB`
-        ));
-      }
-    }
-
-    next();
-  };
+    return sanitized;
+  }
+  
+  return data;
 };
 
-// Validate pagination parameters
-const validatePagination = (req, res, next) => {
-  const schema = Joi.object({
-    page: commonSchemas.pagination.page,
-    limit: commonSchemas.pagination.limit,
-    sortBy: Joi.string().valid('createdAt', 'updatedAt', 'name', 'price', 'rating', 'sales').default('createdAt'),
-    sortOrder: Joi.string().valid('asc', 'desc', '1', '-1').default('desc')
-  });
+/**
+ * Sanitization middleware
+ */
+const sanitize = (req, res, next) => {
+  if (req.body) {
+    req.body = sanitizeInput(req.body);
+  }
+  if (req.query) {
+    req.query = sanitizeInput(req.query);
+  }
+  if (req.params) {
+    req.params = sanitizeInput(req.params);
+  }
+  next();
+};
 
-  const { error, value } = schema.validate(req.query, {
-    stripUnknown: false,
-    convert: true
-  });
-
-  if (error) {
-    const details = error.details.map(detail => ({
-      field: detail.path.join('.'),
-      message: detail.message
-    }));
-    
-    return next(new ValidationError('Invalid pagination parameters', details));
+/**
+ * File upload validation
+ */
+const validateFileUpload = (req, res, next) => {
+  if (!req.file && !req.files) {
+    return next();
   }
 
-  // Normalize sort order
-  if (value.sortOrder === '1' || value.sortOrder === 'asc') {
-    value.sortOrder = 1;
-  } else {
-    value.sortOrder = -1;
+  const files = req.files || [req.file];
+  const errors = [];
+
+  files.forEach((file, index) => {
+    // Check file size
+    if (file.size > commonSchemas.fileUpload.maxSize) {
+      errors.push({
+        field: `file_${index}`,
+        message: `File size exceeds maximum allowed size of ${config.upload.maxFileSize}MB`,
+        value: file.originalname
+      });
+    }
+
+    // Check file type
+    if (!commonSchemas.fileUpload.allowedTypes.includes(file.mimetype)) {
+      errors.push({
+        field: `file_${index}`,
+        message: `File type ${file.mimetype} is not allowed`,
+        value: file.originalname
+      });
+    }
+
+    // Check file extension
+    const ext = require('path').extname(file.originalname).toLowerCase();
+    if (!commonSchemas.fileUpload.allowedExtensions.includes(ext)) {
+      errors.push({
+        field: `file_${index}`,
+        message: `File extension ${ext} is not allowed`,
+        value: file.originalname
+      });
+    }
+  });
+
+  if (errors.length > 0) {
+    return next(new ValidationError('File validation failed', errors));
   }
 
-  req.pagination = value;
   next();
 };
 
 module.exports = {
-  schemas,
+  // Validation schemas
+  schemas: {
+    common: commonSchemas,
+    user: userSchemas,
+    post: postSchemas,
+    product: productSchemas,
+    comment: commentSchemas,
+    order: orderSchemas,
+    message: messageSchemas
+  },
+  
+  // Middleware functions
   validate,
-  validateQuery,
-  validateParams,
+  sanitize,
   validateFileUpload,
-  validatePagination,
-  commonSchemas
+  
+  // Helper functions
+  sanitizeInput
 };

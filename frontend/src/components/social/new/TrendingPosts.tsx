@@ -20,8 +20,9 @@ import {
   Users,
   Clock,
 } from 'lucide-react';
-import { usePosts } from '@/hooks/usePosts';
+import { api } from '@/lib/api';
 import UserAvatar from '@/components/common/UserAvatar';
+import { Post } from '@/types/social';
 
 interface TrendingPost {
   id: string;
@@ -45,7 +46,7 @@ export const TrendingPosts: React.FC = () => {
   const theme = useTheme();
   const [trendingPosts, setTrendingPosts] = useState<TrendingPost[]>([]);
   const [loading, setLoading] = useState(true);
-  const { posts, loading: postsLoading, error } = usePosts();
+  const [error, setError] = useState<string | null>(null);
 
   // Format large numbers (e.g., 1.2K, 3.4M)
   const formatNumber = (num: number): string => {
@@ -75,40 +76,59 @@ export const TrendingPosts: React.FC = () => {
     return postTime.toLocaleDateString();
   };
 
-  // Generate mock trending posts from real posts
-  useEffect(() => {
-    if (!postsLoading && posts.length > 0) {
-      // Create trending posts from real data
-      const trending = posts
-        .slice(0, 5)
-        .map((post, index) => ({
-          id: post.id,
-          title: post.content.substring(0, 60) + (post.content.length > 60 ? '...' : ''),
-          author: {
-            username: post.author?.username || 'Unknown',
-            avatar: post.author?.avatar,
-            isVerified: post.author?.isVerified,
-          },
-          engagement: {
-            likes: post.likeCount || post.likes || 0,
-            comments: post.commentCount || post.comments || 0,
-            views: post.views || 0,
-          },
-          thumbnail: post.media && post.media.length > 0 
-            ? post.media[0].thumbnail_url || post.media[0].secure_url 
-            : undefined,
-          timestamp: post.createdAt,
-          isLive: index === 0, // First post is "live"
-        }))
-        .sort((a, b) => 
-          (b.engagement.likes + b.engagement.comments + b.engagement.views) - 
-          (a.engagement.likes + a.engagement.comments + a.engagement.views)
-        );
+  // Fetch trending posts from the API
+  const fetchTrendingPosts = async () => {
+    try {
+      setLoading(true);
+      setError(null);
       
-      setTrendingPosts(trending);
-      setLoading(false);
-    } else if (!postsLoading) {
-      // Mock data if no posts
+      // Use the dedicated trending endpoint
+      const response: any = await api.posts.getTrending({
+        limit: 5,
+        timeRange: 'week' // Get trending posts from the past week
+      });
+      
+      if (response?.success && response?.data?.posts) {
+        // Transform the posts data to match our TrendingPost interface
+        const trending = response.data.posts
+          .map((post: Post) => ({
+            id: post.id,
+            title: post.content.substring(0, 60) + (post.content.length > 60 ? '...' : ''),
+            author: {
+              username: post.author?.username || 'Unknown',
+              avatar: post.author?.avatar,
+              isVerified: post.author?.isVerified,
+            },
+            engagement: {
+              likes: post.likeCount || post.likes || 0,
+              comments: post.commentCount || post.comments || 0,
+              views: post.views || 0,
+            },
+            thumbnail: post.media && post.media.length > 0 
+              ? post.media[0].thumbnail_url || post.media[0].secure_url 
+              : undefined,
+            timestamp: post.createdAt,
+            isLive: false, // We'll set the first post as live for demonstration
+          }))
+          .sort((a: TrendingPost, b: TrendingPost) => 
+            (b.engagement.likes + b.engagement.comments + b.engagement.views) - 
+            (a.engagement.likes + a.engagement.comments + a.engagement.views)
+          );
+        
+        // Mark the first post as live
+        if (trending.length > 0) {
+          trending[0].isLive = true;
+        }
+        
+        setTrendingPosts(trending);
+      } else {
+        throw new Error('Failed to fetch trending posts');
+      }
+    } catch (err: any) {
+      console.error('Error fetching trending posts:', err);
+      setError(err.message || 'Failed to load trending posts');
+      
+      // Fallback to mock data if API fails
       const mockTrending: TrendingPost[] = [
         {
           id: '1',
@@ -161,15 +181,45 @@ export const TrendingPosts: React.FC = () => {
         },
       ];
       setTrendingPosts(mockTrending);
+    } finally {
       setLoading(false);
     }
-  }, [posts, postsLoading]);
+  };
+
+  useEffect(() => {
+    fetchTrendingPosts();
+  }, []);
 
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
         <CircularProgress size={24} />
       </Box>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card 
+        variant="outlined" 
+        sx={{ 
+          borderRadius: 3, 
+          boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+          bgcolor: 'background.paper'
+        }}
+      >
+        <CardContent>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+            <TrendingUp size={20} color={theme.palette.primary.main} />
+            <Typography variant="h6" fontWeight={700}>
+              Trending Posts
+            </Typography>
+          </Box>
+          <Typography color="error" variant="body2">
+            {error}
+          </Typography>
+        </CardContent>
+      </Card>
     );
   }
 

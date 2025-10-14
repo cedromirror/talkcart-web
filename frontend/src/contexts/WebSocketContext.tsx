@@ -6,6 +6,29 @@ import toast from 'react-hot-toast';
 import { normalizeAuthError } from '@/lib/authErrors';
 import { api } from '@/lib/api'; // API client for token refresh
 
+// Add the helper function directly to avoid TypeScript import issues
+const getWebSocketUrlLocal = (): string => {
+  let url = SOCKET_URL;
+  
+  // If it's a relative URL, convert to absolute
+  if (url.startsWith('/')) {
+    if (typeof window !== 'undefined') {
+      url = `${window.location.protocol}//${window.location.host}${url}`;
+    } else {
+      url = 'http://localhost:8000';
+    }
+  }
+  
+  // Ensure it has proper protocol for WebSocket
+  if (url.startsWith('http://')) {
+    return url.replace('http://', 'ws://');
+  } else if (url.startsWith('https://')) {
+    return url.replace('https://', 'wss://');
+  }
+  
+  return url;
+};
+
 interface WebSocketContextType {
   socket: Socket | null;
   isConnected: boolean;
@@ -230,7 +253,7 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
     }
 
     // Validate and normalize the socket URL
-    let socketUrl = SOCKET_URL;
+    let socketUrl = getWebSocketUrlLocal();
     
     // If SOCKET_URL is not provided or is empty, default to a reasonable value
     if (!socketUrl || socketUrl.trim() === '') {
@@ -240,11 +263,11 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
         'http://localhost:8000';
     }
     
-    // Ensure the URL has a proper protocol
-    if (!socketUrl.startsWith('http://') && !socketUrl.startsWith('https://')) {
-      const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'https://' : 'http://';
-      socketUrl = `${protocol}${socketUrl}`;
-      console.warn('SOCKET_URL missing protocol, prepending default:', socketUrl);
+    // Ensure the URL has a proper protocol for WebSocket
+    if (!socketUrl.startsWith('ws://') && !socketUrl.startsWith('wss://')) {
+      const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+      socketUrl = `${protocol}${socketUrl.replace(/^https?:\/\//, '').replace(/^http?:\/\//, '')}`;
+      console.warn('SOCKET_URL missing WebSocket protocol, prepending default:', socketUrl);
     }
 
     // Validate URL format
@@ -270,7 +293,7 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
       auth: {
         token: authToken,  // Send token without Bearer prefix
       },
-      transports: ['websocket', 'polling'],
+      transports: ['websocket', 'polling'], // Try websocket first, fallback to polling
       timeout: 20000,
       forceNew: true,
       reconnection: true,
@@ -281,6 +304,8 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
       upgrade: true,
       rememberUpgrade: false, // Keep as false to allow fallback
       rejectUnauthorized: false, // For development environments
+      // Add explicit CORS configuration
+      withCredentials: true,
     });
 
     socketRef.current = newSocket;

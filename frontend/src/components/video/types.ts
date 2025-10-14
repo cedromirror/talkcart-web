@@ -67,19 +67,6 @@ export interface VideoContainerProps {
   pauseOthersOnPlay?: boolean;
 }
 
-// Video post card props
-export interface VideoPostCardProps {
-  post: VideoPost;
-  onComment?: (postId: string) => void;
-  onUserClick?: (userId: string) => void;
-  onHashtagClick?: (hashtag: string) => void;
-  autoPlay?: boolean;
-  showFullControls?: boolean;
-  maxHeight?: number;
-  className?: string;
-  style?: React.CSSProperties;
-}
-
 // Video post hook options
 export interface UseVideoPostOptions {
   autoPlay?: boolean;

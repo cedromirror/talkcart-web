@@ -85,6 +85,7 @@ export const useVideoAutoscroll = (options: UseVideoAutoscrollOptions = {}) => {
   const evaluateVideoPlaybackRef = useRef<(() => Promise<void>) | null>(null);
   const updateVideoQueueRef = useRef<((updates: Map<string, Partial<VideoState>>) => void) | null>(null);
   const videosRef = useRef<Map<string, VideoState>>(new Map());
+  const playPromises = useRef<Map<string, Promise<void>>>(new Map()); // Track ongoing play promises
 
   // Check for reduced motion preference
   const prefersReducedMotion = useCallback(() => {
@@ -223,6 +224,9 @@ export const useVideoAutoscroll = (options: UseVideoAutoscrollOptions = {}) => {
         setCurrentPlayingVideo(null);
       }
       
+      // Clear any pending play promise for this video
+      playPromises.current.delete(videoId);
+      
       return prev; // Don't modify state, just access it
     });
   }, [currentPlayingVideo, onVideoPause, stopViewTracking]);
@@ -295,10 +299,59 @@ export const useVideoAutoscroll = (options: UseVideoAutoscrollOptions = {}) => {
             video.element.load();
           }
           
-          // Attempt to play with error handling
+          // Check if there's already a play promise for this video
+          if (playPromises.current.has(bestVideo.id)) {
+            // Wait for the existing play promise to complete
+            try {
+              await playPromises.current.get(bestVideo.id);
+            } catch (error) {
+              // Clear the promise on error and continue
+              playPromises.current.delete(bestVideo.id);
+            }
+          }
+          
+          // If video is already playing, no need to play again
+          if (!video.element.paused) {
+            return;
+          }
+          
+          // Create a new play promise with better error handling
           const playPromise = video.element.play();
-          if (playPromise !== undefined) {
-            await playPromise;
+          playPromises.current.set(bestVideo.id, playPromise);
+          
+          try {
+            if (playPromise !== undefined) {
+              await playPromise;
+            }
+            
+            // Remove the promise after successful completion
+            playPromises.current.delete(bestVideo.id);
+          } catch (error) {
+            // Remove the promise on error
+            playPromises.current.delete(bestVideo.id);
+            
+            // Check if this is an AbortError caused by a new play request
+            if (error.name === 'AbortError') {
+              // Check if there's a new play promise for this video (indicating interruption by new request)
+              if (playPromises.current.has(bestVideo.id)) {
+                // Wait for the new play promise to complete instead
+                try {
+                  await playPromises.current.get(bestVideo.id);
+                } catch (newError) {
+                  playPromises.current.delete(bestVideo.id);
+                  throw newError;
+                }
+                playPromises.current.delete(bestVideo.id);
+                // Successfully played with the new request, continue normally
+              } else {
+                // This is likely a genuine AbortError, not caused by a new request
+                // We'll treat it as a non-critical error during autoplay
+                console.warn(`Autoplay for video ${bestVideo.id} was aborted`);
+                return;
+              }
+            } else {
+              throw error;
+            }
           }
           
           setCurrentPlayingVideo(bestVideo.id);
@@ -321,9 +374,58 @@ export const useVideoAutoscroll = (options: UseVideoAutoscrollOptions = {}) => {
             const video = bestVideo.video;
             if (video.element) {
               video.element.muted = true;
+              // Check if there's already a play promise for this video
+              if (playPromises.current.has(bestVideo.id)) {
+                // Wait for the existing play promise to complete
+                try {
+                  await playPromises.current.get(bestVideo.id);
+                } catch (error) {
+                  // Clear the promise on error and continue
+                  playPromises.current.delete(bestVideo.id);
+                }
+              }
+              
+              // If video is already playing, no need to play again
+              if (!video.element.paused) {
+                return;
+              }
+              
+              // Create a new play promise with better error handling
               const playPromise = video.element.play();
-              if (playPromise !== undefined) {
-                await playPromise;
+              playPromises.current.set(bestVideo.id, playPromise);
+              
+              try {
+                if (playPromise !== undefined) {
+                  await playPromise;
+                }
+                
+                // Remove the promise after successful completion
+                playPromises.current.delete(bestVideo.id);
+              } catch (fallbackError) {
+                // Remove the promise on error
+                playPromises.current.delete(bestVideo.id);
+                
+                // Check if this is an AbortError caused by a new play request
+                if (fallbackError.name === 'AbortError') {
+                  // Check if there's a new play promise for this video (indicating interruption by new request)
+                  if (playPromises.current.has(bestVideo.id)) {
+                    // Wait for the new play promise to complete instead
+                    try {
+                      await playPromises.current.get(bestVideo.id);
+                    } catch (newError) {
+                      playPromises.current.delete(bestVideo.id);
+                      throw newError;
+                    }
+                    playPromises.current.delete(bestVideo.id);
+                    // Successfully played with the new request, continue normally
+                  } else {
+                    // This is likely a genuine AbortError, not caused by a new request
+                    console.warn(`Autoplay fallback for video ${bestVideo.id} was aborted`);
+                    return;
+                  }
+                } else {
+                  throw fallbackError;
+                }
               }
               setCurrentPlayingVideo(bestVideo.id);
               onVideoPlay?.(bestVideo.id);
@@ -547,7 +649,7 @@ export const useVideoAutoscroll = (options: UseVideoAutoscrollOptions = {}) => {
     }
   }, [currentPlayingVideo, onVideoPause, stopViewTracking]);
 
-  // Play a specific video
+  // Play a specific video with improved error handling
   const playVideo = useCallback(async (videoId: string) => {
     const videoState = videosRef.current.get(videoId);
     if (!videoState || !videoState.element) return;
@@ -559,15 +661,71 @@ export const useVideoAutoscroll = (options: UseVideoAutoscrollOptions = {}) => {
       // Set mute state
       videoState.element.muted = settings.muteByDefault;
       
-      // Attempt to play
-      await videoState.element.play();
+      // Check if there's already a play promise for this video
+      if (playPromises.current.has(videoId)) {
+        // Wait for the existing play promise to complete
+        try {
+          await playPromises.current.get(videoId);
+        } catch (error) {
+          // Clear the promise on error and continue
+          playPromises.current.delete(videoId);
+        }
+      }
+      
+      // If video is already playing, no need to play again
+      if (!videoState.element.paused) {
+        return;
+      }
+      
+      // Create a new play promise with better error handling
+      const playPromise = videoState.element.play();
+      playPromises.current.set(videoId, playPromise);
+      
+      try {
+        if (playPromise !== undefined) {
+          await playPromise;
+        }
+        
+        // Remove the promise after successful completion
+        playPromises.current.delete(videoId);
+      } catch (error) {
+        // Remove the promise on error
+        playPromises.current.delete(videoId);
+        
+        // Check if this is an AbortError caused by a new play request
+        if (error.name === 'AbortError') {
+          // Check if there's a new play promise for this video (indicating interruption by new request)
+          if (playPromises.current.has(videoId)) {
+            // Wait for the new play promise to complete instead
+            try {
+              await playPromises.current.get(videoId);
+            } catch (newError) {
+              playPromises.current.delete(videoId);
+              throw newError;
+            }
+            playPromises.current.delete(videoId);
+            return; // Successfully played with the new request
+          }
+        }
+        
+        throw error;
+      }
+      
       setCurrentPlayingVideo(videoId);
       onVideoPlay?.(videoId);
       startViewTracking(videoId);
       
-    } catch (error) {
+    } catch (error: any) {
       console.warn(`Failed to play video ${videoId}:`, error);
-      onVideoError?.(videoId, `Play failed: ${error}`);
+      
+      // Handle AbortError specifically
+      if (error.name === 'AbortError') {
+        onVideoError?.(videoId, 'Playback interrupted. Please try again.');
+      } else {
+        onVideoError?.(videoId, `Play failed: ${error}`);
+      }
+      
+      throw error;
     }
   }, [settings.muteByDefault, pauseOtherVideos, onVideoPlay, onVideoError, startViewTracking]);
 
@@ -666,6 +824,9 @@ export const useVideoAutoscroll = (options: UseVideoAutoscrollOptions = {}) => {
       
       stopViewTracking(videoId);
       
+      // Clear any pending play promise for this video
+      playPromises.current.delete(videoId);
+      
       setVideos(prev => {
         const updated = new Map(prev);
         updated.delete(videoId);
@@ -683,6 +844,9 @@ export const useVideoAutoscroll = (options: UseVideoAutoscrollOptions = {}) => {
           observerRef.current.unobserve(videoState.container);
         }
         stopViewTracking(videoId);
+        
+        // Clear any pending play promise for this video
+        playPromises.current.delete(videoId);
       }
       
       const updated = new Map(prev);
@@ -701,6 +865,9 @@ export const useVideoAutoscroll = (options: UseVideoAutoscrollOptions = {}) => {
       }
     });
     setCurrentPlayingVideo(null);
+    
+    // Clear all pending play promises
+    playPromises.current.clear();
   }, [onVideoPause, stopViewTracking]);
 
   // Get video statistics
@@ -741,6 +908,9 @@ export const useVideoAutoscroll = (options: UseVideoAutoscrollOptions = {}) => {
       if (observerRef.current) {
         observerRef.current.disconnect();
       }
+      
+      // Clear all pending play promises
+      playPromises.current.clear();
     };
   }, []);
 

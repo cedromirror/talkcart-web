@@ -42,13 +42,47 @@ export const SimpleVideoUpload: React.FC<SimpleVideoUploadProps> = ({
 
   const createVideoPostMutation = useMutation({
     mutationFn: async (videoData: any) => {
-      const response = await api.posts.create({
+      // Validate video data before creating post
+      if (!videoData.public_id) {
+        throw new Error('Video upload missing public_id');
+      }
+      
+      if (!videoData.secure_url && !videoData.url) {
+        throw new Error('Video upload missing URL');
+      }
+      
+      // Check for known missing file patterns
+      const url = videoData.secure_url || videoData.url;
+      const knownMissingPatterns = [
+        'file_1760168733155_lfhjq4ik7ht',
+        'file_1760163879851_tt3fdqqim9',
+        'file_1760263843073_w13593s5t8l',
+        'file_1760276276250_3pqeekj048s'
+      ];
+      
+      for (const pattern of knownMissingPatterns) {
+        if (url && typeof url === 'string' && url.includes(pattern)) {
+          throw new Error('Video upload returned a known missing file reference');
+        }
+      }
+
+      const response: any = await api.posts.create({
         content: videoDescription || videoTitle || 'Video post',
         type: 'video',
         media: [videoData],
         privacy: privacy,
       });
-      return response.data;
+      
+      // Handle different response structures
+      if (response && typeof response === 'object' && response.data) {
+        if (response.data.post) {
+          return response.data.post;
+        } else {
+          return response.data;
+        }
+      } else {
+        return response;
+      }
     },
     onSuccess: (data) => {
       toast.success('Video uploaded successfully!');
@@ -59,7 +93,7 @@ export const SimpleVideoUpload: React.FC<SimpleVideoUploadProps> = ({
     },
     onError: (error: any) => {
       console.error('Video post creation error:', error);
-      toast.error('Failed to create video post');
+      toast.error(error.message || 'Failed to create video post');
     },
   });
 
@@ -69,7 +103,8 @@ export const SimpleVideoUpload: React.FC<SimpleVideoUploadProps> = ({
 
     const validation = validateVideoFile(file);
     if (!validation.valid) {
-      toast.error(validation.error);
+      const errorMessage = validation.error || 'Invalid video file';
+      toast.error(errorMessage);
       return;
     }
 
@@ -105,6 +140,21 @@ export const SimpleVideoUpload: React.FC<SimpleVideoUploadProps> = ({
       }
 
       const videoData = uploadResponse.data.data;
+      
+      // Additional validation of video data
+      if (!videoData.public_id) {
+        throw new Error('Upload successful but missing public_id');
+      }
+      
+      const videoUrl = videoData.secure_url || videoData.url;
+      if (!videoUrl) {
+        throw new Error('Upload successful but missing video URL');
+      }
+      
+      // Validate resource type for videos
+      if (videoData.resource_type !== 'video') {
+        console.warn('Uploaded file is not marked as video type:', videoData.resource_type);
+      }
       
       // Create video post
       await createVideoPostMutation.mutateAsync(videoData);

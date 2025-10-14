@@ -17,7 +17,7 @@ export { default as StreamCard } from './StreamCard';
 export { default as LiveChat } from './LiveChat';
 export { default as EnhancedStreamPlayer } from './EnhancedStreamPlayer';
 export { default as StreamManager } from './StreamManager';
-export { default as StreamAnalytics } from './StreamAnalytics';
+// export { default as StreamAnalytics } from './StreamAnalytics';
 export { default as ModerationPanel } from './ModerationPanel';
 export { default as GiftPanel } from './GiftPanel';
 export { default as SubscriptionPanel } from './SubscriptionPanel';

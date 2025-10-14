@@ -15,7 +15,7 @@ export function useAdminGuard() {
       try {
         const token = getToken();
         if (!token) {
-          if (mounted) { setAllowed(false); setError('Missing token'); }
+          if (mounted) { setAllowed(false); setError('Missing authentication token'); }
           return;
         }
         const res = await AdminApi.me();
@@ -29,7 +29,15 @@ export function useAdminGuard() {
           }
         }
       } catch (e: any) {
-        if (mounted) { setAllowed(false); setError('Unauthorized'); }
+        if (mounted) { 
+          setAllowed(false); 
+          // Provide more specific error messages
+          if (e && e.message && e.message.includes('Failed to fetch')) {
+            setError('Unable to connect to the server. Please ensure the backend is running.');
+          } else {
+            setError('Unauthorized access');
+          }
+        }
       } finally {
         if (mounted) setLoading(false);
       }
