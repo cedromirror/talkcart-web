@@ -397,6 +397,7 @@ global.broadcastToPost = (postId, event, data) => {
 app.use('/api/auth', require('./routes/auth').router);
 app.use('/api/users', require('./routes/users'));
 app.use('/api/posts', require('./routes/posts'));
+app.use("/api/test", require("./routes/test"));
 app.use('/api/comments', require('./routes/comments'));
 app.use('/api/chatbot', require('./routes/chatbot'));
 app.use('/api/marketplace', require('./routes/marketplace'));
