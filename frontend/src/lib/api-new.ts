@@ -125,11 +125,13 @@ class ApiService {
       }
 
       // Merge/refresh Authorization header and retry
+      // Preserve original headers and content type for multipart requests
       const headers = new Headers(init.headers || {});
-      const token = localStorage.getItem('token');
+      const token = (typeof window !== 'undefined') ? localStorage.getItem('token') : null;
       if (token) headers.set('Authorization', `Bearer ${token}`);
 
-      const retryResponse = await this.fetchWithTimeout(url, { ...init, headers }, timeout);
+      const retryInit: RequestInit = { ...init, headers };
+      const retryResponse = await this.fetchWithTimeout(url, retryInit, timeout);
       const retryData = await this.safeJsonParse(retryResponse);
       if (!retryResponse.ok) {
         // Ensure status is always a valid number
@@ -1093,10 +1095,21 @@ class ApiService {
         if (!publicId) {
           throw new Error('Public ID is required for video optimization');
         }
-        
-        // Add the rest of the implementation here
-        // This seems to be a partial implementation
-        throw new Error('Not implemented');
+        const body = {
+          publicId,
+          format: params?.format || 'mp4',
+          quality: params?.quality || 'auto',
+          ...(params?.width ? { width: params.width } : {}),
+          ...(params?.height ? { height: params.height } : {}),
+        } as any;
+
+        const response = await this.request(`${API_URL}/media/video/optimized`, {
+          method: 'POST',
+          headers: this.getAuthHeaders(),
+          body: JSON.stringify(body),
+        }, TIMEOUTS.UPLOAD);
+
+        return response;
       } catch (error) {
         // Handle the error appropriately
         console.error('Video optimization error:', error);

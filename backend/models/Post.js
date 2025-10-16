@@ -319,7 +319,6 @@ postSchema.statics.getTrending = async function(options = {}) {
     isActive: true,
     createdAt: { $gte: startDate },
     views: { $gte: minViews },
-    likes: { $size: { $gte: minLikes } }
   })
   .populate('author', 'username displayName avatar isVerified')
   .sort({ 
@@ -328,8 +327,13 @@ postSchema.statics.getTrending = async function(options = {}) {
   })
   .limit(limit)
   .lean();
-  
-  return trendingPosts;
+
+  // Filter by minimum likes in-memory since $size with $gte is invalid
+  const filtered = Array.isArray(trendingPosts)
+    ? trendingPosts.filter(p => Array.isArray(p.likes) ? p.likes.length >= minLikes : minLikes === 0)
+    : [];
+
+  return filtered;
 };
 
 // Static method to get posts by feed type
