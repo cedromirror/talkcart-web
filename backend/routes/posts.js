@@ -1255,6 +1255,318 @@ router.post('/:postId/share', authenticateToken, async (req, res) => {
   }
 });
 
+// @route   POST /api/posts/:postId/share/followers
+// @desc    Share a post with followers (increments share count)
+// @access  Private
+router.post('/:postId/share/followers', authenticateToken, async (req, res) => {
+  try {
+    const { postId } = req.params;
+    const userId = req.user.id || req.user.userId;
+
+    const post = await Post.findById(postId);
+    if (!post || !post.isActive) {
+      return res.status(404).json({ success: false, error: 'Post not found' });
+    }
+
+    post.shares.push({ user: userId, createdAt: new Date() });
+    await post.save();
+
+    return res.json({ success: true, data: { shareCount: post.shares.length }, message: 'Post shared with followers' });
+  } catch (error) {
+    console.error('Share with followers error:', error);
+    return res.status(500).json({ success: false, error: 'Failed to share post', message: error.message });
+  }
+});
+
+// @route   POST /api/posts/:postId/share/users
+// @desc    Share a post with specific users (increments share count)
+// @access  Private
+router.post('/:postId/share/users', authenticateToken, async (req, res) => {
+  try {
+    const { postId } = req.params;
+    const userId = req.user.id || req.user.userId;
+    // const { userIds = [], message = '' } = req.body; // Reserved for future use
+
+    const post = await Post.findById(postId);
+    if (!post || !post.isActive) {
+      return res.status(404).json({ success: false, error: 'Post not found' });
+    }
+
+    post.shares.push({ user: userId, createdAt: new Date() });
+    await post.save();
+
+    return res.json({ success: true, data: { shareCount: post.shares.length }, message: 'Post shared with selected users' });
+  } catch (error) {
+    console.error('Share with users error:', error);
+    return res.status(500).json({ success: false, error: 'Failed to share post', message: error.message });
+  }
+});
+
+// @route   POST /api/posts/:postId/unlike
+// @desc    Explicit unlike endpoint (alias of like toggle that ensures removal)
+// @access  Private
+router.post('/:postId/unlike', authenticateToken, async (req, res) => {
+  try {
+    const { postId } = req.params;
+    const userId = req.user.id || req.user.userId;
+
+    const post = await Post.findById(postId);
+    if (!post || !post.isActive) {
+      return res.status(404).json({ success: false, error: 'Post not found' });
+    }
+
+    const existingLikeIndex = post.likes.findIndex(like => like.user && like.user.toString() === userId.toString());
+    if (existingLikeIndex >= 0) {
+      post.likes.splice(existingLikeIndex, 1);
+      await post.save();
+    }
+
+    return res.json({ success: true, data: { action: 'unlike', likeCount: post.likes.length }, message: 'Post unliked successfully' });
+  } catch (error) {
+    console.error('Explicit unlike post error:', error);
+    return res.status(500).json({ success: false, error: 'Failed to unlike post', message: error.message });
+  }
+});
+
+// @route   GET /api/posts/liked
+// @desc    Get posts liked by the current user
+// @access  Private
+router.get('/liked', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id || req.user.userId;
+    const { limit = 20, page = 1 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const posts = await Post.find({ 'likes.user': userId, isActive: true })
+      .populate('author', 'username displayName avatar isVerified bio role followerCount location')
+      .sort({ 'likes.createdAt': -1, createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip(skip)
+      .lean();
+
+    const total = await Post.countDocuments({ 'likes.user': userId, isActive: true });
+
+    const mapped = await Promise.all(posts.map(async post => {
+      const commentCount = await Comment.countDocuments({ post: post._id, isActive: true });
+      return {
+        ...post,
+        id: post._id,
+        authorId: post.author._id,
+        author: { ...post.author, id: post.author._id, name: post.author.displayName || post.author.username },
+        likeCount: Array.isArray(post.likes) ? post.likes.length : 0,
+        commentCount,
+        shareCount: Array.isArray(post.shares) ? post.shares.length : 0,
+        bookmarkCount: Array.isArray(post.bookmarks) ? post.bookmarks.length : 0,
+        likes: Array.isArray(post.likes) ? post.likes.length : 0,
+        shares: Array.isArray(post.shares) ? post.shares.length : 0,
+        bookmarks: Array.isArray(post.bookmarks) ? post.bookmarks.length : 0,
+        comments: commentCount,
+        isLiked: true,
+        isBookmarked: Array.isArray(post.bookmarks) ? post.bookmarks.some(b => b.user && b.user.toString() === userId.toString()) : false,
+        media: Array.isArray(post.media) ? post.media.map(media => ({
+          ...media,
+          id: media._id || media.public_id,
+          secure_url: media.secure_url || media.url,
+          resource_type: media.resource_type || 'image',
+          thumbnail_url: media.thumbnail_url || (media.resource_type === 'video' && media.public_id ? getVideoThumbnail(media.public_id) : undefined),
+        })) : []
+      };
+    }));
+
+    return res.json({
+      success: true,
+      data: {
+        posts: mapped,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / parseInt(limit)),
+        },
+      }
+    });
+  } catch (error) {
+    console.error('Get liked posts error:', error);
+    return res.status(500).json({ success: false, error: 'Failed to get liked posts', message: error.message });
+  }
+});
+
+// @route   GET /api/posts/user/:userId/liked
+// @desc    Get posts liked by a specific user (self-only)
+// @access  Private
+router.get('/user/:userId/liked', authenticateToken, async (req, res) => {
+  try {
+    const requestedUserId = req.params.userId;
+    const currentUserId = req.user.id || req.user.userId;
+    const { limit = 20, page = 1 } = req.query;
+
+    // Only allow users to view their own liked posts (privacy)
+    if (String(requestedUserId) !== String(currentUserId)) {
+      return res.status(403).json({ success: false, error: 'Forbidden', message: 'You can only view your own liked posts' });
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const posts = await Post.find({ 'likes.user': requestedUserId, isActive: true })
+      .populate('author', 'username displayName avatar isVerified bio role followerCount location')
+      .sort({ 'likes.createdAt': -1, createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip(skip)
+      .lean();
+
+    const total = await Post.countDocuments({ 'likes.user': requestedUserId, isActive: true });
+
+    const mapped = await Promise.all(posts.map(async post => {
+      const commentCount = await Comment.countDocuments({ post: post._id, isActive: true });
+      return {
+        ...post,
+        id: post._id,
+        authorId: post.author._id,
+        author: { ...post.author, id: post.author._id, name: post.author.displayName || post.author.username },
+        likeCount: Array.isArray(post.likes) ? post.likes.length : 0,
+        commentCount,
+        shareCount: Array.isArray(post.shares) ? post.shares.length : 0,
+        bookmarkCount: Array.isArray(post.bookmarks) ? post.bookmarks.length : 0,
+        likes: Array.isArray(post.likes) ? post.likes.length : 0,
+        shares: Array.isArray(post.shares) ? post.shares.length : 0,
+        bookmarks: Array.isArray(post.bookmarks) ? post.bookmarks.length : 0,
+        comments: commentCount,
+        isLiked: true,
+        isBookmarked: Array.isArray(post.bookmarks) ? post.bookmarks.some(b => b.user && b.user.toString() === currentUserId.toString()) : false,
+        media: Array.isArray(post.media) ? post.media.map(media => ({
+          ...media,
+          id: media._id || media.public_id,
+          secure_url: media.secure_url || media.url,
+          resource_type: media.resource_type || 'image',
+          thumbnail_url: media.thumbnail_url || (media.resource_type === 'video' && media.public_id ? getVideoThumbnail(media.public_id) : undefined),
+        })) : []
+      };
+    }));
+
+    return res.json({ success: true, data: { posts: mapped, pagination: { page: parseInt(page), limit: parseInt(limit), total, pages: Math.ceil(total / parseInt(limit)) } } });
+  } catch (error) {
+    console.error('Get user liked posts error:', error);
+    return res.status(500).json({ success: false, error: 'Failed to get liked posts', message: error.message });
+  }
+});
+
+// @route   GET /api/posts/saved
+// @desc    Get bookmarked posts for current user (alias of bookmarks)
+// @access  Private
+router.get('/saved', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id || req.user.userId;
+    const { limit = 20, page = 1 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const posts = await Post.find({ 'bookmarks.user': userId, isActive: true })
+      .populate('author', 'username displayName avatar isVerified bio role followerCount location')
+      .sort({ 'bookmarks.createdAt': -1 })
+      .limit(parseInt(limit))
+      .skip(skip)
+      .lean();
+
+    const total = await Post.countDocuments({ 'bookmarks.user': userId, isActive: true });
+
+    const mapped = await Promise.all(posts.map(async post => {
+      const commentCount = await Comment.countDocuments({ post: post._id, isActive: true });
+      return {
+        ...post,
+        id: post._id,
+        authorId: post.author._id,
+        author: { ...post.author, id: post.author._id, name: post.author.displayName || post.author.username },
+        likeCount: Array.isArray(post.likes) ? post.likes.length : 0,
+        commentCount,
+        shareCount: Array.isArray(post.shares) ? post.shares.length : 0,
+        bookmarkCount: Array.isArray(post.bookmarks) ? post.bookmarks.length : 0,
+        likes: Array.isArray(post.likes) ? post.likes.length : 0,
+        shares: Array.isArray(post.shares) ? post.shares.length : 0,
+        bookmarks: Array.isArray(post.bookmarks) ? post.bookmarks.length : 0,
+        comments: commentCount,
+        isBookmarked: true,
+        isLiked: Array.isArray(post.likes) ? post.likes.some(l => l.user && l.user.toString() === userId.toString()) : false,
+        media: Array.isArray(post.media) ? post.media.map(media => ({
+          ...media,
+          id: media._id || media.public_id,
+          secure_url: media.secure_url || media.url,
+          resource_type: media.resource_type || 'image',
+          thumbnail_url: media.thumbnail_url || (media.resource_type === 'video' && media.public_id ? getVideoThumbnail(media.public_id) : undefined),
+        })) : []
+      };
+    }));
+
+    return res.json({
+      success: true,
+      data: {
+        posts: mapped,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / parseInt(limit)),
+        },
+      }
+    });
+  } catch (error) {
+    console.error('Get saved posts error:', error);
+    return res.status(500).json({ success: false, error: 'Failed to get saved posts', message: error.message });
+  }
+});
+
+// @route   GET /api/posts/user/:userId/bookmarks
+// @desc    Alias for user bookmarks list
+// @access  Private (self only)
+router.get('/user/:userId/bookmarks', authenticateToken, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { limit = 20, page = 1 } = req.query;
+
+    if (userId !== (req.user.id || req.user.userId)) {
+      return res.status(403).json({ success: false, error: 'Forbidden', message: 'You can only view your own bookmarks' });
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const posts = await Post.find({ 'bookmarks.user': userId, isActive: true })
+      .populate('author', 'username displayName avatar isVerified bio role followerCount location')
+      .sort({ 'bookmarks.createdAt': -1 })
+      .limit(parseInt(limit))
+      .skip(skip)
+      .lean();
+
+    const total = await Post.countDocuments({ 'bookmarks.user': userId, isActive: true });
+
+    const mapped = await Promise.all(posts.map(async post => {
+      const commentCount = await Comment.countDocuments({ post: post._id, isActive: true });
+      return {
+        ...post,
+        id: post._id,
+        authorId: post.author._id,
+        author: { ...post.author, id: post.author._id, name: post.author.displayName || post.author.username },
+        likeCount: Array.isArray(post.likes) ? post.likes.length : 0,
+        commentCount,
+        shareCount: Array.isArray(post.shares) ? post.shares.length : 0,
+        bookmarkCount: Array.isArray(post.bookmarks) ? post.bookmarks.length : 0,
+        likes: Array.isArray(post.likes) ? post.likes.length : 0,
+        shares: Array.isArray(post.shares) ? post.shares.length : 0,
+        bookmarks: Array.isArray(post.bookmarks) ? post.bookmarks.length : 0,
+        comments: commentCount,
+        isBookmarked: true,
+        media: Array.isArray(post.media) ? post.media.map(media => ({
+          ...media,
+          id: media._id || media.public_id,
+          secure_url: media.secure_url || media.url,
+          resource_type: media.resource_type || 'image',
+          thumbnail_url: media.thumbnail_url || (media.resource_type === 'video' && media.public_id ? getVideoThumbnail(media.public_id) : undefined),
+        })) : []
+      };
+    }));
+
+    return res.json({ success: true, data: { posts: mapped, pagination: { page: parseInt(page), limit: parseInt(limit), total, pages: Math.ceil(total / parseInt(limit)) } } });
+  } catch (error) {
+    console.error('Get user bookmarks error:', error);
+    return res.status(500).json({ success: false, error: 'Failed to get bookmarks', message: error.message });
+  }
+});
+
 // @route   POST /api/posts/:postId/comments
 // @desc    Add a comment to a post
 // @access  Private
@@ -1284,11 +1596,11 @@ router.post('/:postId/comments', authenticateToken, async (req, res) => {
 
     // Create comment using Comment model
     const newComment = new Comment({
-      post: postId,
-      author: userId,
-      content: content.trim(),
-      parentId: parentId || null,
-    });
+    post: postId,
+    author: userId,
+    content: content.trim(),
+      parent: parentId || null,
+  });
 
     // Save comment
     await newComment.save();
@@ -1369,7 +1681,7 @@ router.get('/:postId/comments', async (req, res) => {
     const comments = await Comment.find({ 
       post: postId, 
       isActive: true,
-      parentId: null // Only top-level comments
+      parent: null // Only top-level comments
     })
     .populate('author', 'username displayName avatar isVerified')
     .sort(sortCriteria)
@@ -1381,7 +1693,7 @@ router.get('/:postId/comments', async (req, res) => {
     const total = await Comment.countDocuments({ 
       post: postId, 
       isActive: true,
-      parentId: null
+      parent: null
     });
 
     // Add like counts and user interaction flags
@@ -1405,7 +1717,7 @@ router.get('/:postId/comments', async (req, res) => {
         isLiked,
         likes: likeCount,
         replies: await Comment.countDocuments({ 
-          parentId: comment._id, 
+          parent: comment._id, 
           isActive: true 
         }),
       };

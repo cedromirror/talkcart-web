@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken } = require('./auth');
+const multer = require('multer');
 const {
   uploadSingle,
   uploadMultiple,
