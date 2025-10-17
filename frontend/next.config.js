@@ -32,12 +32,12 @@ const nextConfig = {
         // Note: image-proxy.ts is a Next.js API route, not proxied
         {
           source: '/api/:path((?!image-proxy).*)',
-          destination: 'http://localhost:8000/api/:path*',
+          destination: 'http://localhost:3002/api/:path*',
         },
         // Proxy HLS video segments to backend in development
         {
           source: '/hls/:path*',
-          destination: 'http://localhost:8000/hls/:path*',
+          destination: 'http://localhost:3002/hls/:path*',
         },
         // Proxy Cloudinary images to avoid CORS issues
         {
@@ -47,12 +47,12 @@ const nextConfig = {
         // Proxy local uploads to avoid CORS issues - frontend on port 4000, backend on port 8000
         {
           source: '/uploads/:path*',
-          destination: 'http://localhost:8000/uploads/:path*',
+          destination: 'http://localhost:3002/uploads/:path*',
         },
         // Optional: proxy socket.io path if any component uses relative path
         {
           source: '/socket.io/:path*',
-          destination: 'http://localhost:8000/socket.io/:path*',
+          destination: 'http://localhost:3002/socket.io/:path*',
         },
       ],
     };
