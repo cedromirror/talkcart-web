@@ -145,7 +145,7 @@ const VideoMedia: React.FC<{
         src={normalizedSrc}
         controls
         style={{ width: '100%', display: 'block', maxHeight }}
-        poster={poster}
+        poster={poster || '/images/placeholder-video-new.png'}
         onError={(e) => {
           // Enhanced error logging in development mode
           if (process.env.NODE_ENV === 'development') {
@@ -169,7 +169,15 @@ const VideoMedia: React.FC<{
               containsTalkcart: normalizedSrc?.includes('talkcart')
             });
           }
-          setError(true);
+          const videoEl = e.currentTarget as HTMLVideoElement;
+          // Avoid infinite loop by only applying fallback once
+          if (!(videoEl as any)._fallbackApplied) {
+            (videoEl as any)._fallbackApplied = true;
+            videoEl.src = '/videos/placeholder-video.mp4';
+            videoEl.poster = '/images/placeholder-video-new.png';
+          } else {
+            setError(true);
+          }
         }}
         onLoadedData={() => {
           setLoaded(true);
@@ -325,7 +333,7 @@ const GridMedia: React.FC<{
           src={normalizedMediaUrl || ''} 
           controls 
           style={{ width: '100%', display: 'block', height: '150px' }} 
-          poster={mediaItem.thumbnail || mediaItem.thumbnail_url}
+          poster={mediaItem.thumbnail || mediaItem.thumbnail_url || '/images/placeholder-video-new.png'}
           onError={(e) => {
             // Enhanced error logging in development mode
             if (process.env.NODE_ENV === 'development') {
@@ -350,15 +358,21 @@ const GridMedia: React.FC<{
                 }
               });
             }
-            // Replace with fallback UI
-            const target = e.target as HTMLVideoElement;
+            const target = e.currentTarget as HTMLVideoElement;
+            if (!(target as any)._fallbackApplied) {
+              (target as any)._fallbackApplied = true;
+              target.src = '/videos/placeholder-video.mp4';
+              target.poster = '/images/placeholder-video-new.png';
+              return;
+            }
+            // If fallback also fails, replace with simple UI
             const parent = target.parentElement;
             if (parent) {
               parent.innerHTML = `
                 <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; background: rgba(0,0,0,0.05); color: #666; text-align: center; padding: 10px;">
                   <div style="font-size: 24px; margin-bottom: 8px;">🎥</div>
                   <div style="font-size: 12px;">Video not available</div>
-                  ${process.env.NODE_ENV === 'development' ? `<div style="font-size: 10px; margin-top: 4px;">Check console</div>` : ''}
+                  ${process.env.NODE_ENV === 'development' ? `<div style=\"font-size: 10px; margin-top: 4px;\">Check console</div>` : ''}
                 </div>
               `;
             }

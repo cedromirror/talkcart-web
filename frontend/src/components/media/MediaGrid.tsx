@@ -384,17 +384,18 @@ const MediaGrid: React.FC<MediaGridProps> = ({
                             {/* Media content */}
                             {selectedMedia.type === 'video' ? (
                                 <video
-                                    // Check if this is a known missing file pattern
+                                    // Use MP4 placeholder for missing/known-bad files and show PNG as poster
                                     src={
                                       selectedMedia.url && typeof selectedMedia.url === 'string' && (
                                         selectedMedia.url.includes('file_1760168733155_lfhjq4ik7ht') ||
                                         selectedMedia.url.includes('file_1760163879851_tt3fdqqim9') ||
                                         selectedMedia.url.includes('file_1760263843073_w13593s5t8l') ||
                                         selectedMedia.url.includes('file_1760276276250_3pqeekj048s')
-                                      ) 
-                                        ? '/images/placeholder-video-new.png' 
+                                      )
+                                        ? '/videos/placeholder-video.mp4'
                                         : convertToProxyUrl(proxyCloudinaryUrl(selectedMedia.url))
                                     }
+                                    poster="/images/placeholder-video-new.png"
                                     controls
                                     autoPlay
                                     style={{
@@ -404,18 +405,10 @@ const MediaGrid: React.FC<MediaGridProps> = ({
                                         objectFit: 'contain',
                                     }}
                                     onError={(e) => {
-                                      // Handle video loading error by showing error message
                                       const target = e.target as HTMLVideoElement;
-                                      const parent = target.parentElement;
-                                      if (parent) {
-                                        parent.innerHTML = `
-                                          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; background: #000; color: white; text-align: center; padding: 20px;">
-                                            <div style="font-size: 48px; margin-bottom: 16px;">🎥</div>
-                                            <div style="font-size: 16px; margin-bottom: 8px;">Video not available</div>
-                                            <div style="font-size: 14px; opacity: 0.8;">The video file could not be found</div>
-                                          </div>
-                                        `;
-                                      }
+                                      // Final fallback to local placeholder assets
+                                      target.src = '/videos/placeholder-video.mp4';
+                                      target.poster = '/images/placeholder-video-new.png';
                                     }}
                                 />
                             ) : (
