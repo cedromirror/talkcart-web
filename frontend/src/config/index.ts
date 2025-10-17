@@ -1,6 +1,6 @@
 // API Configuration
 // Use proxy in browser for same-origin requests, direct URL for server-side
-export const API_URL = typeof window !== 'undefined' ? '/api' : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api');
+export const API_URL = typeof window !== 'undefined' ? '/api' : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002/api');
 
 // Authentication Configuration
 export const AUTH_TOKEN_KEY = 'token';
@@ -11,7 +11,7 @@ export const AUTH_USER_KEY = 'user';
 export const DEFAULT_AVATAR_URL = '/images/default-avatar.png';
 
 // Socket Configuration
-export const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:8000';
+export const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3002';
 
 // Add a helper to ensure proper WebSocket URL format
 export const getWebSocketUrl = (): string => {
@@ -22,7 +22,7 @@ export const getWebSocketUrl = (): string => {
     if (typeof window !== 'undefined') {
       url = `${window.location.protocol}//${window.location.host}${url}`;
     } else {
-      url = 'http://localhost:8000';
+      url = 'http://localhost:3002';
     }
   }
   
