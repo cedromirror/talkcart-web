@@ -15,13 +15,13 @@ export const convertToProxyUrl = (url: string): string => {
   // If it's already a proxied URL, return as is
   if (!url || typeof url !== 'string') {
     // Invalid URL, returning placeholder
-    return '/images/placeholder-image-new.png';
+    return '/images/placeholder-image-new.svg';
   }
   
   // Handle app-relative post detail URLs only (avoid matching Cloudinary folder names)
   if (url.startsWith('/post/')) {
     console.log('App post detail URL detected, returning placeholder:', url);
-    return '/images/placeholder-image-new.png';
+    return '/images/placeholder-image-new.svg';
   }
   
   // Handle known missing files
@@ -36,7 +36,7 @@ export const convertToProxyUrl = (url: string): string => {
     // (url.includes('file_') && url.length < 100 && !url.includes('.'))
   ) {
     console.log('Known missing file detected, returning placeholder:', url);
-    return '/images/placeholder-image-new.png';
+    return '/images/placeholder-image-new.svg';
   }
   
   // If it's already a proxied URL, return as is

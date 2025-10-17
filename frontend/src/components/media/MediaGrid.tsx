@@ -392,7 +392,7 @@ const MediaGrid: React.FC<MediaGridProps> = ({
                                         selectedMedia.url.includes('file_1760263843073_w13593s5t8l') ||
                                         selectedMedia.url.includes('file_1760276276250_3pqeekj048s')
                                       ) 
-                                        ? '/images/placeholder-video-new.png' 
+                                        ? '/images/placeholder-video-new.svg' 
                                         : convertToProxyUrl(proxyCloudinaryUrl(selectedMedia.url))
                                     }
                                     controls
@@ -428,7 +428,7 @@ const MediaGrid: React.FC<MediaGridProps> = ({
                                         selectedMedia.url.includes('file_1760263843073_w13593s5t8l') ||
                                         selectedMedia.url.includes('file_1760276276250_3pqeekj048s')
                                       ) 
-                                        ? '/images/placeholder-image-new.png' 
+                                        ? '/images/placeholder-image-new.svg' 
                                         : convertToProxyUrl(proxyCloudinaryUrl(selectedMedia.url))
                                     }
                                     alt="Media"

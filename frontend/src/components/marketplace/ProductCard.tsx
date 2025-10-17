@@ -216,14 +216,14 @@ const ProductCard: React.FC<ProductCardProps> = ({
 
   const getImageSrc = () => {
     if (!product.images || product.images.length === 0) {
-      return '/images/placeholder-image.png';
+      return '/images/placeholder-image.svg';
     }
     
     const firstImage = product.images[0];
     if (typeof firstImage === 'string') {
       return firstImage;
     }
-    return firstImage.secure_url || firstImage.url || '/images/placeholder-image.png';
+    return firstImage.secure_url || firstImage.url || '/images/placeholder-image.svg';
   };
 
   // Handle navigation to product detail page

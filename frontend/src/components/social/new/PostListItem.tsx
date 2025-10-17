@@ -3,74 +3,14 @@ import { Box, Card, CardContent, Typography, IconButton, Button } from '@mui/mat
 import { Heart, MessageSquare, Share, Bookmark, Video, Image as ImageIcon } from 'lucide-react';
 import UserAvatar from '@/components/common/UserAvatar';
 import { formatDistanceToNow, parseISO } from 'date-fns';
+import { isClient, normalizeUrl, isValidUrl } from '@/utils/crossPlatformUtils';
 
-// Helper function to validate URLs with enhanced Cloudinary support
-const isValidUrl = (urlString: string): boolean => {
-  try {
-    if (!urlString) return false;
-    
-    // Handle Cloudinary URLs with special characters
-    if (urlString.includes('cloudinary.com')) {
-      // Cloudinary URLs are generally valid even with special characters
-      return urlString.startsWith('http://') || urlString.startsWith('https://');
-    }
-    
-    const url = new URL(urlString);
-    return url.protocol === 'http:' || url.protocol === 'https:';
-  } catch (e) {
-    return false;
-  }
-};
+// Use the cross-platform utility for URL validation
 
-// Helper function to validate and normalize URLs with better Cloudinary handling
-const normalizeMediaUrl = (urlString: string): string | null => {
-  try {
-    if (!urlString) return null;
-    
-    // Handle already valid absolute URLs
-    if (urlString.startsWith('http://') || urlString.startsWith('https://')) {
-      // Fix duplicate talkcart path issue
-      if (urlString.includes('/uploads/talkcart/talkcart/')) {
-        console.log('🔧 Fixing duplicate talkcart path in URL:', urlString);
-        const fixedUrl = urlString.replace('/uploads/talkcart/talkcart/', '/uploads/talkcart/');
-        console.log('✅ Fixed URL:', fixedUrl);
-        return fixedUrl;
-      }
-      return urlString;
-    }
-    
-    // Handle relative URLs by converting to absolute
-    if (urlString.startsWith('/')) {
-      // Check for malformed URLs with duplicate path segments
-      if (urlString.includes('/uploads/talkcart/talkcart/')) {
-        console.log('🔧 Fixing duplicate talkcart path in relative URL:', urlString);
-        urlString = urlString.replace('/uploads/talkcart/talkcart/', '/uploads/talkcart/');
-        console.log('✅ Fixed relative URL:', urlString);
-      }
-      
-      // For development, use localhost:8000 as the base
-      // For production, this should be handled by the backend
-      const isDev = process.env.NODE_ENV === 'development';
-      const baseUrl = isDev ? 'http://localhost:8000' : '';
-      
-      if (baseUrl) {
-        return `${baseUrl}${urlString}`;
-      }
-      return urlString;
-    }
-    
-    return null;
-  } catch (e) {
-    console.error('❌ Error in normalizeMediaUrl:', e);
-    // Try one more time with basic validation for edge cases
-    if (urlString && (urlString.startsWith('http://') || urlString.startsWith('https://'))) {
-      return urlString;
-    }
-    return null;
-  }
-};
+// Use the cross-platform utility for URL normalization
+const normalizeMediaUrl = normalizeUrl;
 
-// Separate component for video rendering with enhanced error handling
+// Separate component for video rendering with enhanced cross-platform error handling
 const VideoMedia: React.FC<{ 
   src: string; 
   poster?: string; 
@@ -79,9 +19,15 @@ const VideoMedia: React.FC<{
 }> = ({ src, poster, alt = 'Video', maxHeight = '500px' }) => {
   const [error, setError] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [isClientSide, setIsClientSide] = useState(false);
   
   // Normalize the source URL
   const normalizedSrc = normalizeMediaUrl(src) || src;
+
+  // Client-side hydration check
+  useEffect(() => {
+    setIsClientSide(isClient());
+  }, []);
 
   // Validate URL format
   useEffect(() => {
@@ -96,6 +42,30 @@ const VideoMedia: React.FC<{
       console.log('✅ Valid video URL detected:', normalizedSrc);
     }
   }, [normalizedSrc, src]);
+
+  // Don't render video on server-side to prevent hydration issues
+  if (!isClientSide) {
+    return (
+      <Box 
+        sx={{ 
+          width: '100%', 
+          height: 200, 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          bgcolor: 'rgba(0, 0, 0, 0.05)',
+          borderRadius: 1
+        }}
+      >
+        <Box sx={{ textAlign: 'center', color: 'text.secondary' }}>
+          <Video size={32} />
+          <Typography variant="body2" sx={{ mt: 1 }}>
+            Loading video...
+          </Typography>
+        </Box>
+      </Box>
+    );
+  }
 
   if (error || !normalizedSrc) {
     // Log more information for debugging
@@ -127,7 +97,7 @@ const VideoMedia: React.FC<{
         <Box sx={{ textAlign: 'center', color: 'text.secondary' }}>
           <Video size={32} />
           <Typography variant="body2" sx={{ mt: 1 }}>
-            Video not available (DEBUG: Our fix should prevent this!)
+            Video not available
           </Typography>
           {process.env.NODE_ENV === 'development' && (
             <Typography variant="caption" sx={{ mt: 1, display: 'block' }}>
@@ -144,6 +114,7 @@ const VideoMedia: React.FC<{
       <video
         src={normalizedSrc}
         controls
+        preload="metadata"
         style={{ width: '100%', display: 'block', maxHeight }}
         poster={poster}
         onError={(e) => {
@@ -177,12 +148,17 @@ const VideoMedia: React.FC<{
             console.log('✅ Video loaded successfully:', normalizedSrc);
           }
         }}
+        onLoadStart={() => {
+          if (process.env.NODE_ENV === 'development') {
+            console.log('🔄 Video loading started:', normalizedSrc);
+          }
+        }}
       />
     </Box>
   );
 };
 
-// Separate component for image rendering with enhanced error handling
+// Separate component for image rendering with enhanced cross-platform error handling
 const ImageMedia: React.FC<{ 
   src: string; 
   alt?: string;
@@ -190,9 +166,15 @@ const ImageMedia: React.FC<{
 }> = ({ src, alt = 'Image', maxHeight = '500px' }) => {
   const [error, setError] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [isClientSide, setIsClientSide] = useState(false);
   
   // Normalize the source URL
   const normalizedSrc = normalizeMediaUrl(src) || src;
+
+  // Client-side hydration check
+  useEffect(() => {
+    setIsClientSide(isClient());
+  }, []);
 
   // Validate URL format
   useEffect(() => {
@@ -207,6 +189,30 @@ const ImageMedia: React.FC<{
       console.log('✅ Valid image URL detected:', normalizedSrc);
     }
   }, [normalizedSrc, src]);
+
+  // Don't render image on server-side to prevent hydration issues
+  if (!isClientSide) {
+    return (
+      <Box 
+        sx={{ 
+          width: '100%', 
+          height: 200, 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          bgcolor: 'rgba(0, 0, 0, 0.05)',
+          borderRadius: 1
+        }}
+      >
+        <Box sx={{ textAlign: 'center', color: 'text.secondary' }}>
+          <ImageIcon size={32} />
+          <Typography variant="body2" sx={{ mt: 1 }}>
+            Loading image...
+          </Typography>
+        </Box>
+      </Box>
+    );
+  }
 
   if (error || !normalizedSrc) {
     return (
@@ -224,7 +230,7 @@ const ImageMedia: React.FC<{
         <Box sx={{ textAlign: 'center', color: 'text.secondary' }}>
           <ImageIcon size={32} />
           <Typography variant="body2" sx={{ mt: 1 }}>
-            Image not available (DEBUG: Our fix should prevent this!)
+            Image not available
           </Typography>
           {process.env.NODE_ENV === 'development' && (
             <Typography variant="caption" sx={{ mt: 1, display: 'block' }}>
@@ -272,6 +278,11 @@ const ImageMedia: React.FC<{
             console.log('✅ Image loaded successfully:', normalizedSrc);
           }
         }}
+        onLoadStart={() => {
+          if (process.env.NODE_ENV === 'development') {
+            console.log('🔄 Image loading started:', normalizedSrc);
+          }
+        }}
       />
     </Box>
   );
@@ -284,10 +295,10 @@ const GridMedia: React.FC<{
 }> = ({ mediaItem, content }) => {
   // Normalize the media URL with better error handling
   const mediaUrl = mediaItem.secure_url || mediaItem.url;
-  const normalizedMediaUrl = (mediaUrl && normalizeMediaUrl(mediaUrl)) || mediaUrl;
+  const normalizedMediaUrl = normalizeUrl(mediaUrl);
   
-  // Validate URL before rendering
-  const isValidMedia = normalizedMediaUrl && (normalizedMediaUrl.startsWith('http://') || normalizedMediaUrl.startsWith('https://'));
+  // Validate URL before rendering using cross-platform utilities
+  const isValidMedia = normalizedMediaUrl && isValidUrl(normalizedMediaUrl);
   
   if (!isValidMedia) {
     // Show placeholder for invalid media
@@ -325,7 +336,7 @@ const GridMedia: React.FC<{
           src={normalizedMediaUrl || ''} 
           controls 
           style={{ width: '100%', display: 'block', height: '150px' }} 
-          poster={mediaItem.thumbnail || mediaItem.thumbnail_url}
+          poster={mediaItem.thumbnail || mediaItem.thumbnail_url || '/images/placeholder-video-new.svg'}
           onError={(e) => {
             // Enhanced error logging in development mode
             if (process.env.NODE_ENV === 'development') {
@@ -456,18 +467,18 @@ interface PostListItemProps {
 
 const PostListItem: React.FC<PostListItemProps> = ({ post, onBookmark, onLike, onShare, onComment }) => {
   const createdLabel = post.createdAt ? formatDistanceToNow(parseISO(post.createdAt), { addSuffix: true }) : '';
-  const [isClient, setIsClient] = useState(false);
+  const [isClientSide, setIsClientSide] = useState(false);
 
   useEffect(() => {
-    // Set isClient to true only on the client side to prevent hydration errors
-    setIsClient(true);
+    // Set isClientSide to true only on the client side to prevent hydration errors
+    setIsClientSide(isClient());
   }, []);
 
   const isValidMediaUrl = (url?: string) => {
     if (!url) return false;
-    const normalizedUrl = normalizeMediaUrl(url);
-    // Additional check for valid URL format
-    return normalizedUrl !== null && (normalizedUrl.startsWith('http://') || normalizedUrl.startsWith('https://'));
+    
+    // Use the cross-platform utility for URL validation
+    return isValidUrl(url);
   };
 
   const getValidMediaUrl = (mediaItem: MediaItem) => {
@@ -478,19 +489,31 @@ const PostListItem: React.FC<PostListItemProps> = ({ post, onBookmark, onLike, o
     if (process.env.NODE_ENV === 'development') {
       console.log('🔧 Processing media URL:', {
         originalUrl: url,
-        mediaItem
+        mediaItem,
+        resourceType: mediaItem.resource_type
       });
     }
     
-    return normalizeMediaUrl(url);
+    // Use cross-platform URL normalization
+    const normalizedUrl = normalizeUrl(url);
+    
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🔧 Normalized URL:', {
+        original: url,
+        normalized: normalizedUrl,
+        isValid: isValidUrl(normalizedUrl || '')
+      });
+    }
+    
+    return normalizedUrl;
   };
 
   // Function to render media content
   const renderMediaContent = (mediaItem: MediaItem) => {
     const mediaUrl = getValidMediaUrl(mediaItem);
     
-    // Enhanced validation
-    const isMediaUrlValid = mediaUrl && (mediaUrl.startsWith('http://') || mediaUrl.startsWith('https://'));
+    // Enhanced validation using cross-platform utilities
+    const isMediaUrlValid = mediaUrl && isValidUrl(mediaUrl);
     
     if (!isMediaUrlValid) {
       // Log for debugging in development
@@ -533,7 +556,7 @@ const PostListItem: React.FC<PostListItemProps> = ({ post, onBookmark, onLike, o
 
     if (mediaItem.resource_type === 'video') {
       // Only render video element on client side to prevent hydration errors
-      if (!isClient) {
+      if (!isClientSide) {
         return (
           <Box sx={{ 
             width: '100%', 
@@ -552,7 +575,7 @@ const PostListItem: React.FC<PostListItemProps> = ({ post, onBookmark, onLike, o
       return <VideoMedia src={mediaUrl} poster={mediaItem.thumbnail || mediaItem.thumbnail_url} alt={post.content || 'Video'} />;
     } else {
       // Only render image element on client side to prevent hydration errors
-      if (!isClient) {
+      if (!isClientSide) {
         return (
           <Box sx={{ 
             width: '100%', 
@@ -603,7 +626,7 @@ const PostListItem: React.FC<PostListItemProps> = ({ post, onBookmark, onLike, o
                   <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
                     {validMedia.slice(0, 4).map((m, idx) => (
                       <Box key={m.id || idx} sx={{ position: 'relative' }}>
-                        {!isClient ? (
+                        {!isClientSide ? (
                           // Render placeholder on server side to prevent hydration errors
                           <Box sx={{ 
                             width: '100%', 
