@@ -251,14 +251,23 @@ router.get('/', async (req, res) => {
             shares: Array.isArray(post.shares) ? post.shares.length : 0,
             bookmarks: Array.isArray(post.bookmarks) ? post.bookmarks.length : 0,
             comments: commentCount,
-            // Ensure media array is properly structured
+            // Ensure media array is properly structured with cross-platform compatibility
             media: Array.isArray(post.media) ? post.media.map(media => ({
               ...media,
               id: media._id || media.public_id,
               secure_url: media.secure_url || media.url,
+              url: media.secure_url || media.url, // Add url field for compatibility
               resource_type: media.resource_type || 'image',
               thumbnail_url: media.thumbnail_url || (media.resource_type === 'video' && media.public_id ? getVideoThumbnail(media.public_id) : undefined),
-            })) : []
+            })) : [],
+            // Ensure consistent type field
+            type: post.type || (post.media && post.media.length > 0 ? 
+              (post.media[0]?.resource_type === 'video' ? 'video' : 
+               post.media[0]?.resource_type === 'image' ? 'image' : 'text') : 'text'),
+            // Ensure views field
+            views: post.views || 0,
+            // Ensure boolean fields
+            isActive: post.isActive !== false,
           };
         })),
         pagination: {

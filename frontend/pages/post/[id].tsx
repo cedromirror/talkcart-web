@@ -144,9 +144,15 @@ const PostDetailPage: React.FC = () => {
     
     const isPostDetailUrl = mediaUrl && typeof mediaUrl === 'string' && mediaUrl.includes('/post/');
     
+    // Cross-platform URL validation
+    const isValidMediaUrl = (url: string) => {
+      if (!url || typeof url !== 'string') return false;
+      return url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/') || url.startsWith('data:') || url.startsWith('blob:');
+    };
+    
     if (firstMedia.resource_type === 'image') {
       // If it's a post detail URL or known missing file, show placeholder instead
-      if (isPostDetailUrl || isKnownMissingFile) {
+      if (isPostDetailUrl || isKnownMissingFile || !isValidMediaUrl(mediaUrl)) {
         return (
           <Box
             component="img"
@@ -174,6 +180,7 @@ const PostDetailPage: React.FC = () => {
           component="img"
           src={imageUrl || '/images/placeholder-image-new.png'}
           alt="Post image"
+          loading="lazy"
           sx={{
             width: '100%',
             maxHeight: 600,
@@ -211,7 +218,7 @@ const PostDetailPage: React.FC = () => {
         mediaUrl.includes('file_1760276276250_3pqeekj048s')
       );
       
-      if (!mediaUrl || isPostDetailUrl || isKnownMissingFile) {
+      if (!mediaUrl || isPostDetailUrl || isKnownMissingFile || !isValidMediaUrl(mediaUrl)) {
         return (
           <Box sx={{ 
             width: '100%',
@@ -246,6 +253,7 @@ const PostDetailPage: React.FC = () => {
         <Box
           component="video"
           controls
+          preload="metadata"
           sx={{
             width: '100%',
             maxHeight: 600,
@@ -266,6 +274,12 @@ const PostDetailPage: React.FC = () => {
                 </div>
               `;
             }
+          }}
+          onLoadStart={() => {
+            console.log('🔄 Video loading started:', proxiedUrl);
+          }}
+          onLoadedData={() => {
+            console.log('✅ Video loaded successfully:', proxiedUrl);
           }}
         >
           <source src={proxiedUrl} type="video/mp4" />

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { api } from '@/lib/api';
 import { Post, PostsApiResponse } from '@/types/social';
 import toast from 'react-hot-toast';
+import { normalizePostData } from '@/utils/crossPlatformUtils';
 
 interface UsePostsReturn {
   posts: Post[];
@@ -84,20 +85,8 @@ export const usePosts = (initialFeedType?: string): UsePostsReturn => {
       }
       
       if (response.success) {
-        // Ensure posts have required properties
-        const postsWithDefaults = response.data.posts.map((post: any) => ({
-          ...post,
-          type: post.type || (post.media && post.media.length > 0 ? 
-            (post.media[0]?.resource_type === 'video' ? 'video' : 
-             post.media[0]?.resource_type === 'image' ? 'image' : 'text') : 'text'),
-          views: post.views || 0,
-          // Ensure media array is properly structured
-          media: Array.isArray(post.media) ? post.media.map((media: any) => ({
-            ...media,
-            resource_type: media.resource_type || 'image',
-            secure_url: media.secure_url || media.url || '',
-          })) : []
-        }));
+        // Use cross-platform utility to normalize post data
+        const postsWithDefaults = response.data.posts.map(normalizePostData);
         console.log('Fetched posts with defaults:', postsWithDefaults);
         const isReset = params?.reset || apiParams.page === 1;
         setPosts(prev => isReset ? postsWithDefaults : [...prev, ...postsWithDefaults]);
