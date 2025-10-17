@@ -19,14 +19,14 @@ const VideoMedia: React.FC<{
 }> = ({ src, poster, alt = 'Video', maxHeight = '500px' }) => {
   const [error, setError] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const [isClient, setIsClient] = useState(false);
+  const [isClientSide, setIsClientSide] = useState(false);
   
   // Normalize the source URL
   const normalizedSrc = normalizeMediaUrl(src) || src;
 
   // Client-side hydration check
   useEffect(() => {
-    setIsClient(true);
+    setIsClientSide(isClient());
   }, []);
 
   // Validate URL format
@@ -166,14 +166,14 @@ const ImageMedia: React.FC<{
 }> = ({ src, alt = 'Image', maxHeight = '500px' }) => {
   const [error, setError] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const [isClient, setIsClient] = useState(false);
+  const [isClientSide, setIsClientSide] = useState(false);
   
   // Normalize the source URL
   const normalizedSrc = normalizeMediaUrl(src) || src;
 
   // Client-side hydration check
   useEffect(() => {
-    setIsClient(true);
+    setIsClientSide(isClient());
   }, []);
 
   // Validate URL format
@@ -295,10 +295,10 @@ const GridMedia: React.FC<{
 }> = ({ mediaItem, content }) => {
   // Normalize the media URL with better error handling
   const mediaUrl = mediaItem.secure_url || mediaItem.url;
-  const normalizedMediaUrl = (mediaUrl && normalizeMediaUrl(mediaUrl)) || mediaUrl;
+  const normalizedMediaUrl = normalizeUrl(mediaUrl);
   
-  // Validate URL before rendering
-  const isValidMedia = normalizedMediaUrl && (normalizedMediaUrl.startsWith('http://') || normalizedMediaUrl.startsWith('https://'));
+  // Validate URL before rendering using cross-platform utilities
+  const isValidMedia = normalizedMediaUrl && isValidUrl(normalizedMediaUrl);
   
   if (!isValidMedia) {
     // Show placeholder for invalid media
@@ -336,7 +336,7 @@ const GridMedia: React.FC<{
           src={normalizedMediaUrl || ''} 
           controls 
           style={{ width: '100%', display: 'block', height: '150px' }} 
-          poster={mediaItem.thumbnail || mediaItem.thumbnail_url}
+          poster={mediaItem.thumbnail || mediaItem.thumbnail_url || '/images/placeholder-video-new.svg'}
           onError={(e) => {
             // Enhanced error logging in development mode
             if (process.env.NODE_ENV === 'development') {
@@ -476,9 +476,9 @@ const PostListItem: React.FC<PostListItemProps> = ({ post, onBookmark, onLike, o
 
   const isValidMediaUrl = (url?: string) => {
     if (!url) return false;
-    const normalizedUrl = normalizeMediaUrl(url);
-    // Additional check for valid URL format
-    return normalizedUrl !== null && (normalizedUrl.startsWith('http://') || normalizedUrl.startsWith('https://'));
+    
+    // Use the cross-platform utility for URL validation
+    return isValidUrl(url);
   };
 
   const getValidMediaUrl = (mediaItem: MediaItem) => {
@@ -489,19 +489,31 @@ const PostListItem: React.FC<PostListItemProps> = ({ post, onBookmark, onLike, o
     if (process.env.NODE_ENV === 'development') {
       console.log('🔧 Processing media URL:', {
         originalUrl: url,
-        mediaItem
+        mediaItem,
+        resourceType: mediaItem.resource_type
       });
     }
     
-    return normalizeMediaUrl(url);
+    // Use cross-platform URL normalization
+    const normalizedUrl = normalizeUrl(url);
+    
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🔧 Normalized URL:', {
+        original: url,
+        normalized: normalizedUrl,
+        isValid: isValidUrl(normalizedUrl || '')
+      });
+    }
+    
+    return normalizedUrl;
   };
 
   // Function to render media content
   const renderMediaContent = (mediaItem: MediaItem) => {
     const mediaUrl = getValidMediaUrl(mediaItem);
     
-    // Enhanced validation
-    const isMediaUrlValid = mediaUrl && (mediaUrl.startsWith('http://') || mediaUrl.startsWith('https://'));
+    // Enhanced validation using cross-platform utilities
+    const isMediaUrlValid = mediaUrl && isValidUrl(mediaUrl);
     
     if (!isMediaUrlValid) {
       // Log for debugging in development

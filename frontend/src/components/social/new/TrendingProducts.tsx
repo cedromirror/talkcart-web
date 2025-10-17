@@ -76,8 +76,8 @@ const TrendingProducts: React.FC = () => {
                   currency: 'USD',
                   images: [{
                     public_id: 'mock1',
-                    secure_url: '/images/placeholder-image-new.png',
-                    url: '/images/placeholder-image-new.png',
+                    secure_url: '/images/placeholder-image-new.svg',
+                    url: '/images/placeholder-image-new.svg',
                     _id: 'img1'
                   }],
                   category: 'Electronics',
@@ -108,8 +108,8 @@ const TrendingProducts: React.FC = () => {
                   currency: 'USD',
                   images: [{
                     public_id: 'mock2',
-                    secure_url: '/images/placeholder-image-new.png',
-                    url: '/images/placeholder-image-new.png',
+                    secure_url: '/images/placeholder-image-new.svg',
+                    url: '/images/placeholder-image-new.svg',
                     _id: 'img2'
                   }],
                   category: 'Fashion',
@@ -148,8 +148,8 @@ const TrendingProducts: React.FC = () => {
                 currency: 'USD',
                 images: [{
                   public_id: 'mock1',
-                  secure_url: '/images/placeholder-image-new.png',
-                  url: '/images/placeholder-image-new.png',
+                  secure_url: '/images/placeholder-image-new.svg',
+                  url: '/images/placeholder-image-new.svg',
                   _id: 'img1'
                 }],
                 category: 'Electronics',
@@ -180,8 +180,8 @@ const TrendingProducts: React.FC = () => {
                 currency: 'USD',
                 images: [{
                   public_id: 'mock2',
-                  secure_url: '/images/placeholder-image-new.png',
-                  url: '/images/placeholder-image-new.png',
+                  secure_url: '/images/placeholder-image-new.svg',
+                  url: '/images/placeholder-image-new.svg',
                   _id: 'img2'
                 }],
                 category: 'Fashion',
@@ -222,8 +222,8 @@ const TrendingProducts: React.FC = () => {
             currency: 'USD',
             images: [{
               public_id: 'mock1',
-              secure_url: '/images/placeholder-image-new.png',
-              url: '/images/placeholder-image-new.png',
+              secure_url: '/images/placeholder-image-new.svg',
+              url: '/images/placeholder-image-new.svg',
               _id: 'img1'
             }],
             category: 'Electronics',
@@ -254,8 +254,8 @@ const TrendingProducts: React.FC = () => {
             currency: 'USD',
             images: [{
               public_id: 'mock2',
-              secure_url: '/images/placeholder-image-new.png',
-              url: '/images/placeholder-image-new.png',
+              secure_url: '/images/placeholder-image-new.svg',
+              url: '/images/placeholder-image-new.svg',
               _id: 'img2'
             }],
             category: 'Fashion',
@@ -302,16 +302,16 @@ const TrendingProducts: React.FC = () => {
   // Get image URL with proper fallbacks
   const getImageUrl = (product: Product) => {
     if (!Array.isArray(product.images) || product.images.length === 0) {
-      return '/images/placeholder-image-new.png';
+      return '/images/placeholder-image-new.svg';
     }
     
     // Always use the first image for simplicity
     const image = product.images[0];
-    const raw = image?.secure_url || image?.url || '/images/placeholder-image-new.png';
+    const raw = image?.secure_url || image?.url || '/images/placeholder-image-new.svg';
     // Proxy Cloudinary or backend uploads similar to post images
     const converted = convertToProxyUrl(raw);
     const proxied = proxyCloudinaryUrl(converted);
-    return proxied || converted || '/images/placeholder-image-new.png';
+    return proxied || converted || '/images/placeholder-image-new.svg';
   };
 
   return (
